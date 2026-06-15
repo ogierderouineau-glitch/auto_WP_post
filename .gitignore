@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+myenv/
+
+# Secrets
+.env
+.env.*
+credentials.json
+*.pem
+*.key
+
+# VS Code
+.vscode/
+
+# Generated files
+output/
+outputs/
+temp/
+tmp/
+downloads/
+generated/
+*.zip
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
