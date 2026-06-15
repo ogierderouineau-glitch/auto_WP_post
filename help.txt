@@ -1,0 +1,175 @@
+
+1) What it does 
+
+OpenAI supports generating or editing images, and for your case the dedicated endpoint is POST /images/edits. It creates an edited image from one or more input images plus a prompt. The edit endpoint supports GPT image models such as gpt-image-1.5, gpt-image-1, gpt-image-1-mini, and chatgpt-image-latest.【turn922970view1†L720-L724】【turn276343view0†L924-L929】
+
+2) Why this is the right tool for “keep the same person”
+
+The edit endpoint lets you send:
+
+the original image,
+a prompt describing what should change,
+optionally a mask to localize changes,
+and an input_fidelity setting (high or low) that controls fidelity to the original input image(s).【turn276343view0†L931-L949】【turn276343view0†L966-L979】
+
+That means your workflow should be:
+
+use the original photo as the base,
+set input_fidelity: "high",
+describe the cleanup precisely,
+and do not include the face in the mask if you use one.
+That gives the model the best chance to preserve identity, although it is still an AI edit, so perfect face preservation is not something I would treat as guaranteed.【turn276343view0†L966-L979】
+3) The key parameters you’d use
+
+For image editing, the main parameters are:
+
+images: input image references; GPT image models can take up to 16 input images.
+prompt: text description of the desired edit.
+input_fidelity: high or low.
+mask: optional; lets you target only certain areas.
+model: e.g. gpt-image-1.5.
+n: number of edited outputs, minimum 1, maximum 10.
+output_format: png, jpeg, or webp.
+quality: low, medium, high, or auto.
+size: 1024x1024, 1536x1024, 1024x1536, or auto.【turn276343view0†L931-L1088】
+4) The simplest mental model
+
+Think of it like this:
+
+Input
+
+original photo
+prompt like:
+“Preserve the person’s exact face and identity. Remove cigarette and smoke. Remove bicycle, ashtray, chair, cables, clutter. Improve lighting and framing. Keep the result realistic.”
+
+Output
+
+one or several edited images, usually returned as base64 image data for GPT image models, which you can save directly as a .png.【turn276343view0†L1093-L1121】
+5) Very practical example with curl
+
+The docs show the edit endpoint as a multipart upload using image[] plus a prompt. Their example posts to /v1/images/edits, includes one or more image files, and decodes the returned base64 into a local image file.【turn378314view0†L1236-L1245】
+
+For your use case, a practical version would look like this:
+
+curl -s \
+  -X POST "https://api.openai.com/v1/images/edits" \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -F "model=gpt-image-1.5" \
+  -F "image[]=@original.jpg" \
+  -F 'prompt=Retouch this photo realistically. Preserve the person’s exact face, identity, facial features, skin tone, and overall pose. Do not make the person appear to be smoking. Remove the cigarette and any smoke. Remove the bicycle, ashtray, chair, cables, papers, clutter, and other unnecessary objects. Improve lighting and framing while keeping a natural photo look.' \
+  -F "input_fidelity=high" \
+  -F "output_format=png" \
+  -F "quality=high" \
+  -F "n=1"
+
+The returned image data for GPT image models is provided in the response payload, typically as base64 (b64_json).【turn276343view0†L1115-L1121】
+
+6) Node.js example that saves a PNG
+
+If your app receives a WhatsApp image and you want a file back for Codex / VS Code, a plain Node workflow is easy:
+
+import fs from "fs";
+import FormData from "form-data";
+import fetch from "node-fetch";
+
+async function editPhoto() {
+  const form = new FormData();
+  form.append("model", "gpt-image-1.5");
+  form.append("image[]", fs.createReadStream("./original.jpg"));
+  form.append(
+    "prompt",
+    "Retouch this photo realistically. Preserve the person's exact face, identity, facial features, and pose. Remove cigarette and smoke. Remove bicycle, ashtray, chair, cables, and clutter. Improve lighting and framing. Keep it realistic."
+  );
+  form.append("input_fidelity", "high");
+  form.append("output_format", "png");
+  form.append("quality", "high");
+  form.append("n", "1");
+
+  const res = await fetch("https://api.openai.com/v1/images/edits", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+    },
+    body: form
+  });
+
+  const json = await res.json();
+
+  const b64 = json.data?.[0]?.b64_json;
+  if (!b64) throw new Error("No image returned");
+
+  fs.writeFileSync("edited.png", Buffer.from(b64, "base64"));
+  console.log("Saved edited.png");
+}
+
+editPhoto().catch(console.error);
+
+That matches the documented shape of the endpoint: image inputs, prompt, optional fidelity/mask/settings, and image data returned in data[].b64_json for GPT image models.【turn276343view0†L931-L949】【turn276343view0†L966-L1088】【turn276343view0†L1115-L1121】
+
+7) When to use a mask
+
+A mask is optional, but for your specific case it is often the best move. The API accepts a mask image as well as the main input image.【turn276343view0†L976-L989】
+
+Use a mask if:
+you want to remove the cigarette,
+remove smoke,
+clean up clutter in the room,
+but avoid touching the face.
+Best practice:
+mask the objects/background only
+do not mask the face
+keep input_fidelity: "high"
+
+That combination is usually the most sensible way to say:
+“change the room, not the person.”【turn276343view0†L966-L979】
+
+8) How to prompt for face preservation
+
+For identity-sensitive edits, be very explicit.
+
+A good prompt pattern is:
+
+Retouch this photo realistically. Preserve the subject’s exact face, identity, facial proportions, skin tone, and expression. Do not alter the face. Remove the cigarette and smoke. Remove the bicycle, ashtray, chair, cables, and clutter. Improve lighting and framing. Keep the image natural and photographic.
+
+Important idea:
+
+“preserve exact face”
+“do not alter the face”
+“realistic / photographic”
+“remove X, keep Y”
+
+The API gives you the control points; the prompt gives the model the editing intent.【turn276343view0†L947-L949】【turn276343view0†L966-L979】
+
+9) If you want multiple options
+
+The edit endpoint supports n up to 10, so you can request multiple versions in one call if you want several clean retouches to choose from.【turn276343view0†L1022-L1029】
+
+For example:
+
+n=4
+same original image
+same prompt
+then pick the best one
+
+If identity preservation is critical, I’d usually start with n=1 or n=2, inspect results, then iterate.
+
+10) Streaming is optional
+
+The API can also stream partial image results if you set stream=true, and the docs show image_edit.partial_image and image_edit.completed events. For a normal backend pipeline, though, you probably don’t need streaming unless you want progressive previews in your UI.【turn276343view0†L1049-L1053】【turn378314view0†L1277-L1290】
+
+11) My recommendation for your exact use case
+
+If your goal is “same real person, cleaner room, better lighting, no smoking appearance”, I’d do this:
+
+send the original photo to /v1/images/edits
+set input_fidelity=high
+set output_format=png
+use one strong retouch prompt
+optionally add a mask for the cigarette / clutter / background
+do not mask the face【turn276343view0†L966-L989】【turn276343view0†L1038-L1074】
+
+If you want, I can next give you one of these 3 things:
+
+a ready-to-use Node.js function for your app,
+a version with WhatsApp webhook → OpenAI edit → save PNG,
+or the best exact prompt for preserving the face in this specific photo.
