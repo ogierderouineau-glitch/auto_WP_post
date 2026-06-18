@@ -7,7 +7,7 @@ from typing import Any
 
 import requests
 
-from config import WP_APP_PASSWORD, WP_BASE_URL, WP_USERNAME
+from config import get_active_client_config
 
 
 def get_auth_header(username: str, app_password: str) -> dict[str, str]:
@@ -17,13 +17,15 @@ def get_auth_header(username: str, app_password: str) -> dict[str, str]:
 
 
 def wp_headers() -> dict[str, str]:
-    headers = get_auth_header(WP_USERNAME, WP_APP_PASSWORD)
+    client = get_active_client_config()
+    headers = get_auth_header(client.wp_username, client.wp_app_password)
     headers["Content-Type"] = "application/json"
     return headers
 
 
 def request_json(method: str, path: str, **kwargs: Any) -> Any:
-    url = f"{WP_BASE_URL.rstrip('/')}{path}"
+    client = get_active_client_config()
+    url = f"{client.wp_base_url.rstrip('/')}{path}"
     response = requests.request(method, url, headers=wp_headers(), timeout=120, **kwargs)
     if not response.ok:
         print(f"WordPress request failed: {method} {path}")
@@ -38,8 +40,8 @@ def preflight_wordpress_permissions(strict: bool) -> dict[str, Any]:
     except requests.HTTPError as exc:
         response = exc.response
         details = {
-            "base_url": WP_BASE_URL,
-            "username": WP_USERNAME,
+            "base_url": get_active_client_config().wp_base_url,
+            "username": get_active_client_config().wp_username,
             "authenticated": False,
             "status_code": response.status_code if response is not None else None,
             "response": response.text if response is not None else str(exc),
@@ -59,7 +61,7 @@ def preflight_wordpress_permissions(strict: bool) -> dict[str, Any]:
         if not capabilities.get(capability)
     ]
     result = {
-        "base_url": WP_BASE_URL,
+        "base_url": get_active_client_config().wp_base_url,
         "user_id": user.get("id"),
         "username": user.get("username") or user.get("slug"),
         "roles": user.get("roles", []),
@@ -180,14 +182,15 @@ def load_existing_media_plan(output_dir: Path) -> list[dict[str, Any]]:
 def upload_media(image_path: str | Path) -> tuple[int, str]:
     path = Path(image_path)
     mime_type, _ = mimetypes.guess_type(path.name)
-    headers = get_auth_header(WP_USERNAME, WP_APP_PASSWORD)
+    client = get_active_client_config()
+    headers = get_auth_header(client.wp_username, client.wp_app_password)
     headers.update({
         "Content-Disposition": f'attachment; filename="{path.name}"',
         "Content-Type": mime_type or "application/octet-stream",
     })
 
     response = requests.post(
-        f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/media",
+        f"{client.wp_base_url.rstrip('/')}/wp-json/wp/v2/media",
         headers=headers,
         data=path.read_bytes(),
         timeout=120,
@@ -420,7 +423,7 @@ def create_wordpress_post(payload: dict[str, Any]) -> dict[str, Any]:
     post = request_json("POST", "/wp-json/wp/v2/posts", json=payload)
     print(f"Created post ID: {post['id']}")
     print(f"Post link: {post.get('link')}")
-    print(f"Edit post: {WP_BASE_URL.rstrip('/')}/wp-admin/post.php?post={post['id']}&action=edit")
+    print(f"Edit post: {get_active_client_config().wp_base_url.rstrip('/')}/wp-admin/post.php?post={post['id']}&action=edit")
     return post
 
 
@@ -448,7 +451,7 @@ def create_or_update_wordpress_post(
         post = request_json("POST", f"/wp-json/wp/v2/posts/{existing_post['id']}", json=payload)
         print(f"Updated existing post ID: {post['id']}")
         print(f"Post link: {post.get('link')}")
-        print(f"Edit post: {WP_BASE_URL.rstrip('/')}/wp-admin/post.php?post={post['id']}&action=edit")
+        print(f"Edit post: {get_active_client_config().wp_base_url.rstrip('/')}/wp-admin/post.php?post={post['id']}&action=edit")
         return post, "updated"
 
     return create_wordpress_post(payload), "created"

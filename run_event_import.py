@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 from typing import Any
 
+from config import set_active_client
 from step_10_event_payload import (
     DEFAULT_DATA_GID,
     DEFAULT_OUTPUT_ROOT,
@@ -85,6 +86,7 @@ def write_outputs(output_dir: Path, result: dict[str, Any]) -> None:
 
 
 def run_import(args: argparse.Namespace) -> Path:
+    set_active_client(getattr(args, "client_id", "flairlab"))
     # 1. Read the helper sheet/CSV and event package, then build the mapped payload.
     result, output_dir = build_import_result(args)
     existing_media_plan = load_existing_media_plan(output_dir)
@@ -282,6 +284,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--event-dir", type=Path)
     parser.add_argument("--input-csv", type=Path)
     parser.add_argument("--event-name")
+    parser.add_argument("--client-id", default="flairlab")
     parser.add_argument("--batch-root", type=Path)
     parser.add_argument("--sync-source", type=Path)
     parser.add_argument("--rclone-source")
