@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field as PydanticField
 
 from action_api_event_import import (
@@ -111,6 +112,178 @@ def validate_extension(file_info: dict[str, Any], allowed: set[str], label: str)
             status_code=400,
             detail=f"Unsupported {label} file extension: {file_info['filename']}",
         )
+
+
+APP_HTML = """
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FLAIRLAB Event Post Generator</title>
+  <style>
+    :root { color-scheme: light; --ink:#1f2933; --muted:#627386; --line:#d8e0e8; --brand:#0f766e; --soft:#f5f7fa; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--ink); background:#ffffff; }
+    main { width:min(920px, 100%); margin:0 auto; padding:22px 16px 56px; }
+    header { padding:12px 0 20px; border-bottom:1px solid var(--line); margin-bottom:20px; }
+    h1 { font-size:clamp(24px, 6vw, 38px); line-height:1.05; margin:0 0 8px; letter-spacing:0; }
+    h2 { font-size:18px; margin:0 0 14px; }
+    p { color:var(--muted); line-height:1.45; margin:0; }
+    section { padding:18px 0; border-bottom:1px solid var(--line); }
+    label { display:block; font-weight:650; font-size:14px; margin:14px 0 7px; }
+    input, select, textarea, button { width:100%; font:inherit; border-radius:8px; }
+    input, select, textarea { border:1px solid var(--line); padding:11px 12px; background:#fff; }
+    textarea { min-height:220px; resize:vertical; line-height:1.45; }
+    button { border:0; padding:12px 14px; background:var(--brand); color:white; font-weight:750; cursor:pointer; margin-top:14px; }
+    button.secondary { background:#314352; }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); }
+    .status { background:var(--soft); border:1px solid var(--line); padding:12px; border-radius:8px; white-space:pre-wrap; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; overflow:auto; }
+    .image-choice { display:flex; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid #eef2f6; }
+    .image-choice input { width:auto; }
+    .image-choice span { overflow-wrap:anywhere; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>FLAIRLAB Event Post Generator</h1>
+    <p>Create a session, upload voice and media, transcribe, then refine the event notes.</p>
+  </header>
+
+  <section>
+    <h2>Access</h2>
+    <label for="apiKey">API key</label>
+    <input id="apiKey" type="password" autocomplete="off" placeholder="X-API-Key">
+    <button class="secondary" onclick="saveKey()">Save key</button>
+  </section>
+
+  <section>
+    <h2>1. Session</h2>
+    <div class="grid">
+      <div>
+        <label for="clientId">Client</label>
+        <input id="clientId" value="flairlab">
+      </div>
+      <div>
+        <label for="postType">Post type</label>
+        <select id="postType">
+          <option>Event</option>
+          <option>Location</option>
+          <option>Cocktail</option>
+        </select>
+      </div>
+    </div>
+    <button onclick="createSession()">Create session</button>
+  </section>
+
+  <section>
+    <h2>2. Upload</h2>
+    <label for="voice">Voice message</label>
+    <input id="voice" type="file" accept="audio/*,video/mp4,video/webm">
+    <label for="images">Pictures</label>
+    <input id="images" type="file" accept="image/*" multiple onchange="renderImageChoices()">
+    <div id="featuredChoices"></div>
+    <label for="videos">Video</label>
+    <input id="videos" type="file" accept="video/*">
+    <button onclick="uploadFiles()">Upload files</button>
+  </section>
+
+  <section>
+    <h2>3. Transcript</h2>
+    <button onclick="transcribe()">Transcribe voice</button>
+    <label for="transcript">Editable transcript</label>
+    <textarea id="transcript" placeholder="The transcript will appear here. You can edit it at any moment."></textarea>
+    <button class="secondary" onclick="saveTranscript()">Save transcript update</button>
+  </section>
+
+  <section>
+    <h2>Status</h2>
+    <div id="status" class="status">Ready.</div>
+  </section>
+</main>
+
+<script>
+let sessionId = sessionStorage.getItem("flairlab_session_id") || "";
+document.getElementById("apiKey").value = sessionStorage.getItem("flairlab_api_key") || "";
+function key(){ return document.getElementById("apiKey").value.trim(); }
+function headers(json=true){ const h = {"X-API-Key": key()}; if(json) h["Content-Type"]="application/json"; return h; }
+function status(obj){ document.getElementById("status").textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2); }
+function saveKey(){ sessionStorage.setItem("flairlab_api_key", key()); status("API key saved in this browser session."); }
+async function api(path, options={}) {
+  const res = await fetch(path, options);
+  const text = await res.text();
+  let data; try { data = JSON.parse(text); } catch { data = text; }
+  if (!res.ok) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
+  return data;
+}
+async function createSession(){
+  saveKey();
+  const data = await api("/app/sessions", {
+    method:"POST",
+    headers:headers(),
+    body:JSON.stringify({client_id:document.getElementById("clientId").value || "flairlab", post_type:document.getElementById("postType").value})
+  });
+  sessionId = data.session_id;
+  sessionStorage.setItem("flairlab_session_id", sessionId);
+  status(data);
+}
+function renderImageChoices(){
+  const wrap = document.getElementById("featuredChoices");
+  wrap.innerHTML = "";
+  [...document.getElementById("images").files].forEach((file, index) => {
+    const row = document.createElement("label");
+    row.className = "image-choice";
+    row.innerHTML = `<input type="radio" name="featured" value="${file.name}" ${index===0 ? "checked" : ""}><span>${file.name}</span>`;
+    wrap.appendChild(row);
+  });
+}
+async function uploadFiles(){
+  if(!sessionId) throw new Error("Create a session first.");
+  const form = new FormData();
+  const voice = document.getElementById("voice").files[0];
+  if(!voice) throw new Error("Select a voice file.");
+  form.append("voice", voice);
+  [...document.getElementById("images").files].forEach(f => form.append("images", f));
+  const video = document.getElementById("videos").files[0];
+  if(video) form.append("videos", video);
+  const featured = document.querySelector("input[name='featured']:checked");
+  if(featured) form.append("featured_image_filename", featured.value);
+  const data = await api(`/app/sessions/${sessionId}/uploads`, {method:"POST", headers:{"X-API-Key":key()}, body:form});
+  status(data);
+}
+async function transcribe(){
+  if(!sessionId) throw new Error("Create a session first.");
+  status("Transcribing...");
+  const data = await api(`/app/sessions/${sessionId}/transcribe`, {method:"POST", headers:headers(false)});
+  document.getElementById("transcript").value = data.transcript?.text || "";
+  status(data);
+}
+async function saveTranscript(){
+  if(!sessionId) throw new Error("Create a session first.");
+  const data = await api(`/app/sessions/${sessionId}/transcript`, {
+    method:"PUT",
+    headers:headers(),
+    body:JSON.stringify({text:document.getElementById("transcript").value})
+  });
+  status(data);
+}
+window.addEventListener("unhandledrejection", e => status("Error: " + e.reason.message));
+</script>
+</body>
+</html>
+"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> str:
+    return APP_HTML
+
+
+@app.get("/app", response_class=HTMLResponse)
+def app_interface() -> str:
+    return APP_HTML
 
 
 @app.get("/health")
