@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
@@ -17,6 +17,7 @@ from config import WP_BASE_URL
 from run_event_import import run_import
 from step_10_event_payload import DEFAULT_DATA_GID, DEFAULT_OUTPUT_ROOT, DEFAULT_SHEET_ID, safe_name
 
+from pydantic import BaseModel, Field
 
 API_UPLOAD_ROOT = Path("data/api_uploads")
 API_LOG_ROOT = Path("data/api_logs")
@@ -30,6 +31,55 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger("flairlab_event_import_api")
+
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class OpenAIFileRef(BaseModel):
+    name: str | None = None
+    id: str | None = None
+    mime_type: str | None = None
+    download_link: str
+
+
+class EventPostParams(BaseModel):
+    openaiFileIdRefs: list[OpenAIFileRef] = Field(
+        ...,
+        min_length=1,
+        max_length=1,
+    )
+    event_name: str | None = None
+    status: str = "publish"
+    row: int = 0
+    required_category: str = "auto event post"
+    existing_post_mode: str = "update"
+
+
+class EventPostActionRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    domain: str | None = None
+    method: str | None = None
+    path: str | None = None
+    operation: str | None = None
+    operation_hash: str | None = None
+    is_consequential: bool | None = None
+    params: EventPostParams
+
+
+class EventPostFromZipRequest(BaseModel):
+    openaiFileIdRefs: list[OpenAIFileRef] = Field(
+        ...,
+        min_length=1,
+        max_length=1,
+    )
+    event_name: str | None = None
+    status: str = "publish"
+    row: int = 0
+    required_category: str = "auto event post"
+    existing_post_mode: str = "update"
+
 
 app = FastAPI(
     title="FLAIRLAB Event Post Import API",
@@ -206,42 +256,51 @@ def last_import_debug(_: None = Depends(verify_api_key)) -> dict[str, Any]:
 
 @app.post("/event-posts/from-zip")
 async def import_event_post_from_zip(
-    request: Request,
+    payload: EventPostActionRequest,
     _: None = Depends(verify_api_key),
 ) -> dict[str, Any]:
-    body = await request.json()
-    file_refs = body.get("openaiFileIdRefs") or []
-    if len(file_refs) != 1:
-        raise HTTPException(status_code=400, detail="Provide exactly one ZIP in openaiFileIdRefs.")
+    params = payload.params
+    file_ref = params.openaiFileIdRefs[0]
 
-    zip_path = save_downloaded_zip(file_refs[0])
-    event_name = body.get("event_name")
-    status = body.get("status", "publish")
-    row = int(body.get("row", 0))
-    required_category = body.get("required_category", "auto event post")
-    existing_post_mode = body.get("existing_post_mode", "update")
-    if status not in {"publish", "draft", "pending", "private"}:
-        raise HTTPException(status_code=400, detail="Invalid status.")
-    if existing_post_mode not in {"update", "create"}:
-        raise HTTPException(status_code=400, detail="Invalid existing_post_mode.")
+    zip_path = save_downloaded_zip(file_ref.model_dump())
 
     args = build_import_args(
         zip_path=zip_path,
-        event_name=event_name,
-        status=status,
-        row=row,
-        required_category=required_category,
-        existing_post_mode=existing_post_mode,
+        event_name=params.event_name,
+        status=params.status,
+        row=params.row,
+        required_category=params.required_category,
+        existing_post_mode=params.existing_post_mode,
     )
 
     try:
-        logger.info("import_start zip=%s event_name=%s status=%s", zip_path, event_name, status)
+        logger.info(
+            "import_start zip=%s event_name=%s status=%s",
+            zip_path,
+            params.event_name,
+            params.status,
+        )
+
         output_dir = await run_in_threadpool(run_import, args)
         response = post_response_from_output(output_dir)
-        logger.info("import_success zip=%s output_dir=%s post_id=%s", zip_path, output_dir, response.get("post_id"))
+
+        logger.info(
+            "import_success zip=%s output_dir=%s post_id=%s",
+            zip_path,
+            output_dir,
+            response.get("post_id"),
+        )
+
         return response
+
     except Exception as exc:
-        logger.error("import_failed zip=%s error=%s\n%s", zip_path, exc, traceback.format_exc())
+        logger.error(
+            "import_failed zip=%s error=%s\n%s",
+            zip_path,
+            exc,
+            traceback.format_exc(),
+        )
+
         raise HTTPException(
             status_code=500,
             detail={
