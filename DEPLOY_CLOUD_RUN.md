@@ -11,10 +11,14 @@ gcloud run services update SERVICE_NAME \
   --set-env-vars OPENAI_API_KEY="YOUR_OPENAI_API_KEY" \
   --set-env-vars WP_BASE_URL="https://staging.flairlab.de" \
   --set-env-vars WP_USERNAME="YOUR_WORDPRESS_USERNAME" \
-  --set-env-vars WP_APP_PASSWORD="YOUR_WORDPRESS_APPLICATION_PASSWORD"
+  --set-env-vars WP_APP_PASSWORD="YOUR_WORDPRESS_APPLICATION_PASSWORD" \
+  --set-env-vars KNOWLEDGE_WORKBOOK_PATH="data/knowledge/FLAIRLAB_EventPost_Master_Knowledge.xlsm" \
+  --set-env-vars KNOWLEDGE_WORKBOOK_SHEET="post type-specific output ACF"
 ```
 
 `IMPORT_API_KEY` is the key the interface/custom action sends as the `X-API-Key` header.
+
+`KNOWLEDGE_WORKBOOK_PATH` points to the bundled workbook used for AI field guidance. Replace the workbook file and redeploy to activate a new durable version. `KNOWLEDGE_WORKBOOK_SHEET` is optional; if omitted, the app picks the sheet containing `User field name`, `ACF field name`, and `AI guidance`, preferring sheet names with `ACF`, `output`, and `post`.
 
 ## Future Client-Specific WordPress Credentials
 
@@ -50,4 +54,6 @@ OPENAI_API_KEY=...
 WP_BASE_URL=https://staging.flairlab.de
 WP_USERNAME=...
 WP_APP_PASSWORD=...
+KNOWLEDGE_WORKBOOK_PATH=data/knowledge/FLAIRLAB_EventPost_Master_Knowledge.xlsm
+KNOWLEDGE_WORKBOOK_SHEET=post type-specific output ACF
 ```

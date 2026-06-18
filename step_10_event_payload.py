@@ -27,6 +27,7 @@ class ColumnSpec:
     marker: str
     acf_name: str
     source_name: str
+    guidance: str = ""
 
 
 def normalize_key(value: str) -> str:
@@ -70,10 +71,12 @@ def parse_sheet_csv(csv_text: str) -> tuple[list[ColumnSpec], list[dict[str, str
         raise ValueError("The helper CSV must contain at least 3 header rows.")
 
     marker_row, acf_row, source_row = rows[:3]
-    specs = parse_helper_rows(marker_row, acf_row, source_row)
+    guidance_row = rows[3] if len(rows) > 3 and is_guidance_row(rows[3]) else []
+    specs = parse_helper_rows(marker_row, acf_row, source_row, guidance_row)
 
     records: list[dict[str, str]] = []
-    for raw_row in rows[3:]:
+    data_start = 4 if guidance_row else 3
+    for raw_row in rows[data_start:]:
         record = parse_data_row(specs, raw_row)
         if record:
             records.append(record)
@@ -86,15 +89,23 @@ def parse_helper_csv(csv_text: str) -> list[ColumnSpec]:
     if len(rows) < 3:
         raise ValueError("The helper CSV must contain 3 header rows.")
 
-    return parse_helper_rows(rows[0], rows[1], rows[2])
+    guidance_row = rows[3] if len(rows) > 3 else []
+    return parse_helper_rows(rows[0], rows[1], rows[2], guidance_row)
+
+
+def is_guidance_row(row: list[str]) -> bool:
+    first_value = row[0].strip().lower() if row else ""
+    return first_value in {"guidance", "agent guidance", "field guidance", "prompt guidance", "ai guidance"}
 
 
 def parse_helper_rows(
     marker_row: list[str],
     acf_row: list[str],
     source_row: list[str],
+    guidance_row: list[str] | None = None,
 ) -> list[ColumnSpec]:
-    width = max(len(marker_row), len(acf_row), len(source_row))
+    guidance_row = guidance_row or []
+    width = max(len(marker_row), len(acf_row), len(source_row), len(guidance_row))
     specs: list[ColumnSpec] = []
 
     for index in range(width):
@@ -104,6 +115,7 @@ def parse_helper_rows(
                 marker=marker_row[index].strip() if index < len(marker_row) else "",
                 acf_name=acf_row[index].strip() if index < len(acf_row) else "",
                 source_name=source_row[index].strip() if index < len(source_row) else "",
+                guidance=guidance_row[index].strip() if index < len(guidance_row) else "",
             )
         )
 
@@ -264,6 +276,27 @@ def parse_tag_names(value: str) -> list[str]:
     return split_multi_value(value)
 
 
+def is_facts_acf_field(acf_name: str) -> bool:
+    normalized = acf_name.strip().lower()
+    return normalized in {"fakten", "facts"} or "fakten" in normalized or "facts" in normalized
+
+
+def fact_type_from_source(source_name: str) -> str:
+    raw = source_name.rsplit("_", 1)[-1] if "_" in source_name else source_name
+    raw = raw.replace("-", " ").strip()
+    return raw[:1].upper() + raw[1:] if raw else "Fakt"
+
+
+def format_fact_item(source_name: str, value: str) -> str:
+    if not value:
+        return ""
+    stripped = value.strip()
+    if "<strong>" in stripped or "<b>" in stripped:
+        return stripped
+    fact_type = html.escape(fact_type_from_source(source_name))
+    return f"<strong>{fact_type}:</strong> {stripped}"
+
+
 def select_featured_image(
     pictures: list[Path],
     record: dict[str, str],
@@ -391,8 +424,11 @@ def build_payload(
             if spec.acf_name not in acf_field_names:
                 acf_field_names.append(spec.acf_name)
             if value:
+                if is_facts_acf_field(spec.acf_name):
+                    value = format_fact_item(source, value)
                 existing = acf_payload.get(spec.acf_name)
-                acf_payload[spec.acf_name] = f"{existing}\n\n{value}" if existing else value
+                separator = "\n" if is_facts_acf_field(spec.acf_name) else "\n\n"
+                acf_payload[spec.acf_name] = f"{existing}{separator}{value}" if existing else value
         elif marker.startswith("image_"):
             technical_log[source] = value
 

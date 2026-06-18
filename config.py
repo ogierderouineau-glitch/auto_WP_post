@@ -60,6 +60,8 @@ def get_active_client_config() -> WordPressClientConfig:
 
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+KNOWLEDGE_WORKBOOK_PATH = os.getenv("KNOWLEDGE_WORKBOOK_PATH", "")
+KNOWLEDGE_WORKBOOK_SHEET = os.getenv("KNOWLEDGE_WORKBOOK_SHEET", "")
 WP_BASE_URL = get_client_config().wp_base_url
 WP_USERNAME = get_client_config().wp_username
 WP_APP_PASSWORD = get_client_config().wp_app_password
