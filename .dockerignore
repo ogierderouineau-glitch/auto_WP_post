@@ -18,3 +18,10 @@ data
 snippets
 help.txt
 *.json
+
+# Keep runtime knowledge assets in the image for Cloud Run startup.
+!data/
+!data/knowledge/
+!data/knowledge/*.xlsm
+!data/knowledge/*.xlsx
+!data/knowledge/*.html

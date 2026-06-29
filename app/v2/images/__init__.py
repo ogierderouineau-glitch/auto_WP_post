@@ -1,0 +1,1 @@
+"""Workbook-driven image processing."""

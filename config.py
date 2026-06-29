@@ -61,7 +61,20 @@ def get_active_client_config() -> WordPressClientConfig:
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 KNOWLEDGE_WORKBOOK_PATH = os.getenv("KNOWLEDGE_WORKBOOK_PATH", "")
+KNOWLEDGE_WORKBOOK_GCS_URI = os.getenv("KNOWLEDGE_WORKBOOK_GCS_URI", "")
+KNOWLEDGE_SOURCE_POLICY = os.getenv("KNOWLEDGE_SOURCE_POLICY", "").strip().lower()
 KNOWLEDGE_WORKBOOK_SHEET = os.getenv("KNOWLEDGE_WORKBOOK_SHEET", "")
+SESSION_STATE_GCS_PREFIX = os.getenv("SESSION_STATE_GCS_PREFIX", "")
+CONTENT_PIPELINE_VERSION = os.getenv("CONTENT_PIPELINE_VERSION", "v1").strip().lower()
+V2_KNOWLEDGE_WORKBOOK_PATH = os.getenv("V2_KNOWLEDGE_WORKBOOK_PATH", "")
+V2_SESSION_ROOT = os.getenv("V2_SESSION_ROOT", "data/v2_sessions")
+V2_SESSION_GCS_PREFIX = os.getenv("V2_SESSION_GCS_PREFIX", "")
+V2_LANGUAGE_MODEL = os.getenv("V2_LANGUAGE_MODEL", "gpt-5.5")
+V2_VISION_MODEL = os.getenv("V2_VISION_MODEL", "gpt-5.5")
+V2_TRANSCRIPTION_MODEL = os.getenv("V2_TRANSCRIPTION_MODEL", "gpt-4o-transcribe")
+V2_IMAGE_EDIT_MODEL = os.getenv("V2_IMAGE_EDIT_MODEL", "gpt-image-1")
+V2_MAX_IMAGE_BYTES = int(os.getenv("V2_MAX_IMAGE_BYTES", str(20 * 1024 * 1024)))
+V2_MAX_AUDIO_BYTES = int(os.getenv("V2_MAX_AUDIO_BYTES", str(50 * 1024 * 1024)))
 WP_BASE_URL = get_client_config().wp_base_url
 WP_USERNAME = get_client_config().wp_username
 WP_APP_PASSWORD = get_client_config().wp_app_password

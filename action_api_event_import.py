@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 
 from config import get_client_config
 from run_event_import import run_import
-from step_10_event_payload import DEFAULT_DATA_GID, DEFAULT_OUTPUT_ROOT, DEFAULT_SHEET_ID, safe_name
+from step_10_event_payload import DEFAULT_OUTPUT_ROOT, safe_name
 from pydantic import BaseModel, ConfigDict, Field
 
 API_UPLOAD_ROOT = Path("data/api_uploads")
@@ -50,6 +50,7 @@ class EventPostParams(BaseModel):
     row: int = 0
     required_category: str = "auto event post"
     existing_post_mode: str = "update"
+    existing_post_id: int | None = None
     client_id: str = "flairlab"
 
 
@@ -76,6 +77,7 @@ class EventPostFromZipRequest(BaseModel):
     row: int = 0
     required_category: str = "auto event post"
     existing_post_mode: str = "update"
+    existing_post_id: int | None = None
     client_id: str = "flairlab"
 
 
@@ -166,6 +168,7 @@ def build_import_args(
     row: int,
     required_category: str,
     existing_post_mode: str,
+    existing_post_id: int | None,
     client_id: str,
 ) -> argparse.Namespace:
     return argparse.Namespace(
@@ -181,14 +184,12 @@ def build_import_args(
         allow_rclone_root=False,
         processed_dir_name="processed",
         move_after_dry_run=False,
-        sheet_id=DEFAULT_SHEET_ID,
-        gid=DEFAULT_DATA_GID,
-        csv_file=None,
         output_root=DEFAULT_OUTPUT_ROOT,
         row=row,
         status=status,
         media_mode="post-attachments",
         existing_post_mode=existing_post_mode,
+        existing_post_id=existing_post_id,
         acf_mode="post-acf",
         acf_placement="both",
         strict_acf=False,
@@ -272,6 +273,7 @@ async def import_event_post_from_zip(
         row=params.row,
         required_category=params.required_category,
         existing_post_mode=params.existing_post_mode,
+        existing_post_id=params.existing_post_id,
         client_id=params.client_id,
     )
 

@@ -2,18 +2,16 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from config import set_active_client
+from app_knowledge_base import guidance_for_field, load_workbook_guidance, normalize_lookup
+from config import KNOWLEDGE_WORKBOOK_PATH, KNOWLEDGE_WORKBOOK_SHEET, set_active_client
 from step_10_event_payload import (
-    DEFAULT_DATA_GID,
     DEFAULT_OUTPUT_ROOT,
-    DEFAULT_SHEET_ID,
+    ColumnSpec,
     build_gallery_html,
     build_payload,
     extract_zip,
     find_event_csv,
-    load_csv_text,
     parse_event_csv,
-    parse_helper_csv,
     safe_name,
     write_json,
 )
@@ -36,9 +34,95 @@ from step_40_wordpress_api import (
 from step_50_batch_workflow import run_batch_import
 
 
+APP_ROOT = Path(__file__).resolve().parent
+DEFAULT_KNOWLEDGE_WORKBOOK_PATH = APP_ROOT / "data/knowledge/FLAIRLAB_EventPost_Master_Knowledge.xlsm"
+
+
+def configured_knowledge_workbook_path() -> Path:
+    if KNOWLEDGE_WORKBOOK_PATH:
+        path = Path(KNOWLEDGE_WORKBOOK_PATH)
+        return path if path.is_absolute() else APP_ROOT / path
+    return DEFAULT_KNOWLEDGE_WORKBOOK_PATH
+
+
+def append_workbook_acf_specs(specs: list[ColumnSpec], post_type: str = "Event") -> list[ColumnSpec]:
+    workbook_path = configured_knowledge_workbook_path()
+    guidance = load_workbook_guidance(workbook_path, post_type=post_type, preferred_sheet=KNOWLEDGE_WORKBOOK_SHEET)
+    if guidance.get("error"):
+        return specs
+
+    known_pairs = {
+        (normalize_lookup(spec.source_name), normalize_lookup(spec.acf_name))
+        for spec in specs
+        if spec.source_name or spec.acf_name
+    }
+
+    # Determine which sheets to include based on post type
+    post_type_sheet = normalize_lookup(f"{post_type.lower()}_acf_mapping")
+
+    for item in guidance.get("items", []):
+        source_name = str(item.get("user_field_name") or "").strip()
+        acf_name = str(item.get("acf_field_name") or "").strip()
+        source_sheet = normalize_lookup(str(item.get("source_sheet") or "").strip())
+        group = normalize_lookup(str(item.get("group") or "").strip())
+        output_target = normalize_lookup(str(item.get("output_target") or "").strip())
+        is_acf_group = group in {"acf", "advancedcustomfields", "advancedcustomfield", "acr"}
+        is_acf_target = output_target in {"acf", "acfpayload"}
+        # Include shared schema and post-type-specific ACF mapping
+        if source_sheet and source_sheet not in ("sharedfieldschema", post_type_sheet):
+            continue
+        if not is_acf_group and not is_acf_target and not acf_name:
+            continue
+        if not acf_name and source_name:
+            acf_name = source_name
+        if not source_name and not acf_name:
+            continue
+
+        pair = (normalize_lookup(source_name), normalize_lookup(acf_name))
+        if pair in known_pairs:
+            continue
+
+        specs.append(
+            ColumnSpec(
+                index=len(specs),
+                marker="ACF",
+                acf_name=acf_name,
+                source_name=source_name,
+                guidance=str(item.get("ai_guidance") or "").strip(),
+                min_words=item.get("min_words"),
+                max_words=item.get("max_words"),
+                display_name=source_name or acf_name,
+            )
+        )
+        known_pairs.add(pair)
+
+    for spec in specs:
+        matched = guidance_for_field(guidance, spec.source_name, spec.acf_name)
+        if matched:
+            combined = [text for text in [spec.guidance, *matched] if text]
+            spec.guidance = "\n".join(dict.fromkeys(combined))
+
+    return specs
+
+
+def build_seo_payload_from_record(record: dict[str, Any]) -> dict[str, str]:
+    seo_keys = (
+        "focus_keyword",
+        "seo_title",
+        "meta_description",
+        "social_title",
+        "social_description",
+    )
+    seo_payload: dict[str, str] = {}
+    for key in seo_keys:
+        value = str(record.get(key, "") or "").strip()
+        if value:
+            seo_payload[key] = value
+    return seo_payload
+
+
 def build_import_result(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
-    helper_csv_text = load_csv_text(args.sheet_id, args.gid, args.csv_file)
-    specs = parse_helper_csv(helper_csv_text)
+    specs = append_workbook_acf_specs([], post_type="Event")
 
     if args.event_dir:
         event_dir = args.event_dir
@@ -67,7 +151,8 @@ def build_import_result(args: argparse.Namespace) -> tuple[dict[str, Any], Path]
         min_width=args.compression_min_width,
     )
     result = build_payload(specs, record, event_dir, args.strict_featured_image)
-    result["technical_log"]["helper_mapping_source"] = str(args.csv_file or f"google-sheet:{args.sheet_id}:{args.gid}")
+    result["seo_payload"] = build_seo_payload_from_record(record)
+    result["technical_log"]["mapping_source"] = "knowledge_workbook"
     result["technical_log"]["event_data_source"] = str(input_csv)
     result["technical_log"]["event_data_row"] = args.row
     result["technical_log"]["image_compression"] = compression_log
@@ -87,7 +172,7 @@ def write_outputs(output_dir: Path, result: dict[str, Any]) -> None:
 
 def run_import(args: argparse.Namespace) -> Path:
     set_active_client(getattr(args, "client_id", "flairlab"))
-    # 1. Read the helper sheet/CSV and event package, then build the mapped payload.
+    # 1. Read the event package and workbook mappings, then build the mapped payload.
     result, output_dir = build_import_result(args)
     existing_media_plan = load_existing_media_plan(output_dir)
     write_outputs(output_dir, result)
@@ -195,12 +280,17 @@ def create_post_then_attach_gallery_images(
         featured_media_id=None,
         status=args.status,
         acf_payload=create_acf_payload,
+        seo_payload=result.get("seo_payload"),
     )
     result["wordpress_create_payload"] = post_payload
     result["technical_log"]["advanced_custom_fields_placement"] = args.acf_placement
     result["technical_log"]["advanced_custom_fields_in_create_payload"] = "acf" in post_payload
 
-    post, post_write_mode = create_or_update_wordpress_post(post_payload, args.existing_post_mode)
+    post, post_write_mode = create_or_update_wordpress_post(
+        post_payload,
+        args.existing_post_mode,
+        getattr(args, "existing_post_id", None),
+    )
     result["technical_log"]["post_write_mode"] = post_write_mode
     result["created_post"] = post
     result["technical_log"]["frontend_render_note"] = frontend_render_note(post)
@@ -250,12 +340,17 @@ def upload_media_then_create_post(
         featured_media_id=featured["media_id"] if featured else None,
         status=args.status,
         acf_payload=result["acf_payload"] if args.acf_placement in {"create", "both"} else None,
+        seo_payload=result.get("seo_payload"),
     )
     result["wordpress_create_payload"] = post_payload
     result["technical_log"]["advanced_custom_fields_placement"] = args.acf_placement
     result["technical_log"]["advanced_custom_fields_in_create_payload"] = "acf" in post_payload
 
-    post, post_write_mode = create_or_update_wordpress_post(post_payload, args.existing_post_mode)
+    post, post_write_mode = create_or_update_wordpress_post(
+        post_payload,
+        args.existing_post_mode,
+        getattr(args, "existing_post_id", None),
+    )
     result["technical_log"]["post_write_mode"] = post_write_mode
     result["created_post"] = post
     result["technical_log"]["frontend_render_note"] = frontend_render_note(post)
@@ -278,7 +373,7 @@ def write_final_import_logs(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Import a FLAIRLAB event package into WordPress using the helper sheet mapping."
+        description="Import a FLAIRLAB event package into WordPress using workbook mappings."
     )
     parser.add_argument("--zip", dest="zip_path", type=Path)
     parser.add_argument("--event-dir", type=Path)
@@ -292,14 +387,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--allow-rclone-root", action="store_true")
     parser.add_argument("--processed-dir-name", default="processed")
     parser.add_argument("--move-after-dry-run", action="store_true")
-    parser.add_argument("--sheet-id", default=DEFAULT_SHEET_ID)
-    parser.add_argument("--gid", default=DEFAULT_DATA_GID)
-    parser.add_argument("--csv-file", type=Path, help="Local helper mapping CSV with 3 header rows.")
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--row", type=int, default=0, help="Data row index in the event package CSV.")
     parser.add_argument("--status", default="draft", choices=["draft", "publish", "pending", "private"])
     parser.add_argument("--media-mode", default="acf-html", choices=["acf-html", "post-attachments"])
     parser.add_argument("--existing-post-mode", default="update", choices=["update", "create"])
+    parser.add_argument("--existing-post-id", type=int, default=None)
     parser.add_argument("--acf-mode", default="auto", choices=["auto", "post-acf", "acf-v3", "meta", "none"])
     parser.add_argument("--acf-placement", default="both", choices=["create", "after-create", "both", "none"])
     parser.add_argument("--strict-acf", action="store_true")

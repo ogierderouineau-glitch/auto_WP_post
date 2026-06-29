@@ -28,6 +28,24 @@ downloads/
 generated/
 *.zip
 
+# Local editor swap/session artifacts
+*.swp
+*.swo
+*.kate-swp
+.*.kate-swp
+
+# Local runtime state and uploaded media
+data/app_sessions/
+data/v2_sessions/
+data/api_logs/
+
+# Local knowledge/workbook inputs and exported site snapshots
+data/knowledge/*.xlsm
+data/knowledge/*.xlsx
+data/knowledge/*.xlsm.bak
+data/knowledge/*.xlsx.bak
+data/knowledge/*.html
+
 # Logs
 *.log
 

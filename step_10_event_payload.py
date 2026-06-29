@@ -12,11 +12,8 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
-import requests
 
 
-DEFAULT_SHEET_ID = "1EAuEc2EOSMfXsxDFIl5hhAzL8zsiTcim_0mgqlZaJKI"
-DEFAULT_DATA_GID = "1497662467"
 DEFAULT_OUTPUT_ROOT = Path("data/imports")
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"}
 
@@ -28,6 +25,9 @@ class ColumnSpec:
     acf_name: str
     source_name: str
     guidance: str = ""
+    min_words: int | None = None
+    max_words: int | None = None
+    display_name: str | None = None
 
 
 def normalize_key(value: str) -> str:
@@ -36,19 +36,6 @@ def normalize_key(value: str) -> str:
 
 def normalize_marker(value: str) -> str:
     return normalize_key(value).lower()
-
-
-def load_csv_text(sheet_id: str, gid: str, csv_file: Path | None) -> str:
-    if csv_file:
-        return csv_file.read_text(encoding="utf-8-sig")
-
-    url = (
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/export"
-        f"?format=csv&gid={gid}"
-    )
-    response = requests.get(url, timeout=60)
-    response.raise_for_status()
-    return response.content.decode("utf-8-sig")
 
 
 def repair_mojibake(value: str) -> str:
@@ -68,11 +55,11 @@ def repair_mojibake(value: str) -> str:
 def parse_sheet_csv(csv_text: str) -> tuple[list[ColumnSpec], list[dict[str, str]]]:
     rows = list(csv.reader(StringIO(csv_text)))
     if len(rows) < 3:
-        raise ValueError("The helper CSV must contain at least 3 header rows.")
+        raise ValueError("The mapping CSV must contain at least 3 header rows.")
 
     marker_row, acf_row, source_row = rows[:3]
     guidance_row = rows[3] if len(rows) > 3 and is_guidance_row(rows[3]) else []
-    specs = parse_helper_rows(marker_row, acf_row, source_row, guidance_row)
+    specs = parse_mapping_rows(marker_row, acf_row, source_row, guidance_row)
 
     records: list[dict[str, str]] = []
     data_start = 4 if guidance_row else 3
@@ -84,13 +71,13 @@ def parse_sheet_csv(csv_text: str) -> tuple[list[ColumnSpec], list[dict[str, str
     return specs, records
 
 
-def parse_helper_csv(csv_text: str) -> list[ColumnSpec]:
+def parse_mapping_csv(csv_text: str) -> list[ColumnSpec]:
     rows = list(csv.reader(StringIO(csv_text)))
     if len(rows) < 3:
-        raise ValueError("The helper CSV must contain 3 header rows.")
+        raise ValueError("The mapping CSV must contain 3 header rows.")
 
     guidance_row = rows[3] if len(rows) > 3 else []
-    return parse_helper_rows(rows[0], rows[1], rows[2], guidance_row)
+    return parse_mapping_rows(rows[0], rows[1], rows[2], guidance_row)
 
 
 def is_guidance_row(row: list[str]) -> bool:
@@ -98,7 +85,7 @@ def is_guidance_row(row: list[str]) -> bool:
     return first_value in {"guidance", "agent guidance", "field guidance", "prompt guidance", "ai guidance"}
 
 
-def parse_helper_rows(
+def parse_mapping_rows(
     marker_row: list[str],
     acf_row: list[str],
     source_row: list[str],
@@ -297,6 +284,97 @@ def format_fact_item(source_name: str, value: str) -> str:
     return f"<strong>{fact_type}:</strong> {stripped}"
 
 
+def normalize_rich_text_for_dedupe(value: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", value or "")
+    text = html.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip().lower()
+    return text
+
+
+def has_bullet_guidance(guidance: str) -> bool:
+    normalized = (guidance or "").lower()
+    markers = (
+        "bullet",
+        "bullets",
+        "list",
+        "stichpunkt",
+        "stichpunkte",
+        "aufzaehlung",
+        "aufzählung",
+        "liste",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def render_acf_items(items: list[str], render_bullets: bool) -> str:
+    if not items:
+        return ""
+    if not render_bullets:
+        return "\n\n".join(items)
+
+    list_items: list[str] = []
+    for item in items:
+        stripped = item.strip()
+        if stripped.lower().startswith("<li"):
+            list_items.append(stripped)
+        else:
+            list_items.append(f"<li>{stripped}</li>")
+    return f"<ul>{''.join(list_items)}</ul>"
+
+
+def split_text_fragments(value: str) -> list[str]:
+    text = (value or "").strip()
+    if not text:
+        return []
+
+    li_matches = re.findall(r"<li\b[^>]*>(.*?)</li>", text, flags=re.IGNORECASE | re.DOTALL)
+    if li_matches:
+        return [fragment.strip() for fragment in li_matches if fragment.strip()]
+
+    parts = [part.strip() for part in re.split(r"\n\n+|\r\n\r\n+|\n|\r\n", text) if part.strip()]
+    return parts or [text]
+
+
+def dedupe_acf_fragments(items: list[str]) -> list[str]:
+    def token_set(value: str) -> set[str]:
+        return set(re.findall(r"\b[\wÄÖÜäöüß-]+\b", normalize_rich_text_for_dedupe(value)))
+
+    def near_duplicate(existing: str, candidate: str) -> bool:
+        existing_norm = normalize_rich_text_for_dedupe(existing)
+        candidate_norm = normalize_rich_text_for_dedupe(candidate)
+        if not existing_norm or not candidate_norm:
+            return False
+
+        # Catch common containment cases where one field repeats the same story with minor additions.
+        if existing_norm in candidate_norm or candidate_norm in existing_norm:
+            shorter = min(len(existing_norm), len(candidate_norm))
+            longer = max(len(existing_norm), len(candidate_norm))
+            if shorter >= 120 or (shorter >= 60 and shorter / max(longer, 1) >= 0.75):
+                return True
+
+        left = token_set(existing)
+        right = token_set(candidate)
+        if not left or not right:
+            return False
+
+        overlap = len(left & right)
+        ratio = overlap / max(min(len(left), len(right)), 1)
+        return ratio >= 0.8
+
+    fragments: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        for fragment in split_text_fragments(item):
+            normalized = normalize_rich_text_for_dedupe(fragment)
+            if not normalized or normalized in seen:
+                continue
+            if any(near_duplicate(existing, fragment) for existing in fragments):
+                continue
+            seen.add(normalized)
+            fragments.append(fragment)
+    return fragments
+
+
 def select_featured_image(
     pictures: list[Path],
     record: dict[str, str],
@@ -384,6 +462,47 @@ def build_gallery_html(gallery_media: list[dict[str, Any]]) -> str:
     )
 
 
+SOURCE_FIELD_ALIAS_LOOKUP = {
+    "bartendertitle": "bartendertile",
+    "bartendertile": "bartendertitle",
+}
+
+
+def normalize_source_field_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+
+def build_record_value_lookup(record: dict[str, str]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for raw_key, raw_value in record.items():
+        normalized = normalize_source_field_key(raw_key)
+        if not normalized:
+            continue
+        lookup.setdefault(normalized, str(raw_value or ""))
+    return lookup
+
+
+def value_for_source_field(source_name: str, record: dict[str, str], normalized_lookup: dict[str, str]) -> str:
+    source = str(source_name or "").strip()
+    if not source:
+        return ""
+    if source in record:
+        return str(record.get(source, "") or "")
+
+    normalized_source = normalize_source_field_key(source)
+    if not normalized_source:
+        return ""
+
+    value = normalized_lookup.get(normalized_source)
+    if value is not None:
+        return value
+
+    alias = SOURCE_FIELD_ALIAS_LOOKUP.get(normalized_source)
+    if alias:
+        return normalized_lookup.get(alias, "")
+    return ""
+
+
 def build_payload(
     specs: list[ColumnSpec],
     record: dict[str, str],
@@ -393,6 +512,8 @@ def build_payload(
     warnings: list[str] = []
     technical_log: dict[str, Any] = {}
     acf_payload: dict[str, str] = {}
+    acf_collected_values: dict[str, list[str]] = {}
+    acf_collected_specs: dict[str, list[ColumnSpec]] = {}
     acf_field_names: list[str] = []
     standard_payload: dict[str, Any] = {"status": "draft"}
 
@@ -401,10 +522,11 @@ def build_payload(
         "post_title": ("title", "post_title"),
         "post_excerpt": ("excerpt", "excerpt"),
     }
+    normalized_record_lookup = build_record_value_lookup(record)
 
     for spec in specs:
         source = spec.source_name
-        value = record.get(source, "") if source else ""
+        value = value_for_source_field(source, record, normalized_record_lookup) if source else ""
         marker = normalize_marker(spec.marker)
 
         if not source:
@@ -426,11 +548,42 @@ def build_payload(
             if value:
                 if is_facts_acf_field(spec.acf_name):
                     value = format_fact_item(source, value)
-                existing = acf_payload.get(spec.acf_name)
-                separator = "\n" if is_facts_acf_field(spec.acf_name) else "\n\n"
-                acf_payload[spec.acf_name] = f"{existing}{separator}{value}" if existing else value
+                acf_collected_values.setdefault(spec.acf_name, []).append(value)
+                acf_collected_specs.setdefault(spec.acf_name, []).append(spec)
         elif marker.startswith("image_"):
             technical_log[source] = value
+
+    # Build final ACF values with de-duplication and optional bullet rendering.
+    for acf_name in acf_field_names:
+        raw_items = acf_collected_values.get(acf_name, [])
+        if not raw_items:
+            continue
+
+        specs_for_acf = acf_collected_specs.get(acf_name, [])
+        repeated_parts = len(specs_for_acf) > 1
+
+        if repeated_parts:
+            deduped_items = dedupe_acf_fragments(raw_items)
+        else:
+            deduped_items = []
+            seen: set[str] = set()
+            for item in raw_items:
+                normalized = normalize_rich_text_for_dedupe(item)
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                deduped_items.append(item.strip())
+
+        render_bullets = is_facts_acf_field(acf_name) or (
+            repeated_parts and any(has_bullet_guidance(spec.guidance) for spec in specs_for_acf)
+        )
+        acf_payload[acf_name] = render_acf_items(deduped_items, render_bullets)
+        technical_log.setdefault("acf_merge_debug", {})[acf_name] = {
+            "source_parts": len(specs_for_acf),
+            "raw_items": len(raw_items),
+            "final_items": len(deduped_items),
+            "render_bullets": render_bullets,
+        }
 
     pictures = find_picture_files(event_dir) if event_dir else []
     if event_dir:
@@ -492,22 +645,20 @@ def write_json(path: Path, data: Any) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build a WordPress/ACF payload preview from helper mapping rows and an event CSV."
+        description="Build a WordPress/ACF payload preview from mapping rows and an event CSV."
     )
     parser.add_argument("--zip", dest="zip_path", type=Path, help="Local event package zip.")
     parser.add_argument("--event-dir", type=Path)
     parser.add_argument("--input-csv", type=Path)
     parser.add_argument("--event-name", help="Event/import folder name.")
-    parser.add_argument("--sheet-id", default=DEFAULT_SHEET_ID)
-    parser.add_argument("--gid", default=DEFAULT_DATA_GID)
-    parser.add_argument("--csv-file", type=Path, help="Use a local helper mapping CSV instead of Google Sheets.")
+    parser.add_argument("--csv-file", type=Path, required=True, help="Local mapping CSV with 3 header rows.")
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--row", type=int, default=0, help="Data row index in the event package CSV.")
     parser.add_argument("--strict-featured-image", action="store_true")
     args = parser.parse_args()
 
-    helper_csv_text = load_csv_text(args.sheet_id, args.gid, args.csv_file)
-    specs = parse_helper_csv(helper_csv_text)
+    mapping_csv_text = args.csv_file.read_text(encoding="utf-8-sig")
+    specs = parse_mapping_csv(mapping_csv_text)
 
     if args.event_dir:
         event_dir = args.event_dir

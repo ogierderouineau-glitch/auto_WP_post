@@ -1,0 +1,35 @@
+{
+  "workbook": "/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V5.xlsm",
+  "sha256": "6db9ba5d8ff8a43d20d8749076e33c9908a69d4a9b046bd95124671d7baac040",
+  "validator": "app.v2.knowledge_base.step_03_validator.WorkbookValidator",
+  "summary": {
+    "definite_errors": 0,
+    "warnings": 0,
+    "unresolved_decisions": 0,
+    "verdict": "implementation_ready"
+  },
+  "inventory": {
+    "post_types": 4,
+    "shared_fields": 12,
+    "acf_fields": 48,
+    "blueprint_rows": 14,
+    "workflow_steps": 19,
+    "validation_list_values": 129
+  },
+  "confirmed_contracts": {
+    "conditional_transcription": true,
+    "conditional_image_metadata": true,
+    "conditional_image_caption": true,
+    "conditional_gallery": true,
+    "event_story_word_range": {
+      "min_words": 80,
+      "max_words": 100,
+      "internally_consistent": true
+    },
+    "exact_blueprint_targets": true,
+    "source_fact_dependencies": true,
+    "pillow_enum_domains": true,
+    "unique_active_internal_link_urls": true,
+    "configured_fields_excluded_from_ai": true
+  }
+}

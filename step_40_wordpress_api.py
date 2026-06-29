@@ -10,6 +10,40 @@ import requests
 from config import get_active_client_config
 
 
+def wordpress_error_summary(response: requests.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+
+    if isinstance(payload, dict):
+        message = str(payload.get("message") or payload.get("code") or "").strip()
+        status = payload.get("data", {}).get("status") if isinstance(payload.get("data"), dict) else None
+        if message and status:
+            return f"{message} (wp status {status})"
+        if message:
+            return message
+
+    text = response.text.strip()
+    return text[:500] if text else "No response body returned by WordPress."
+
+
+def require_wordpress_credentials() -> Any:
+    client = get_active_client_config()
+    missing: list[str] = []
+    if not client.wp_base_url:
+        missing.append("WP_BASE_URL")
+    if not client.wp_username:
+        missing.append("WP_USERNAME")
+    if not client.wp_app_password:
+        missing.append("WP_APP_PASSWORD")
+    if missing:
+        raise RuntimeError(
+            f"WordPress client '{client.client_id}' is missing required configuration: {', '.join(missing)}"
+        )
+    return client
+
+
 def get_auth_header(username: str, app_password: str) -> dict[str, str]:
     credentials = f"{username}:{app_password}".encode("utf-8")
     token = base64.b64encode(credentials).decode("ascii")
@@ -17,40 +51,42 @@ def get_auth_header(username: str, app_password: str) -> dict[str, str]:
 
 
 def wp_headers() -> dict[str, str]:
-    client = get_active_client_config()
+    client = require_wordpress_credentials()
     headers = get_auth_header(client.wp_username, client.wp_app_password)
     headers["Content-Type"] = "application/json"
     return headers
 
 
 def request_json(method: str, path: str, **kwargs: Any) -> Any:
-    client = get_active_client_config()
+    client = require_wordpress_credentials()
     url = f"{client.wp_base_url.rstrip('/')}{path}"
     response = requests.request(method, url, headers=wp_headers(), timeout=120, **kwargs)
     if not response.ok:
         print(f"WordPress request failed: {method} {path}")
         print(response.text)
-        response.raise_for_status()
+        raise RuntimeError(
+            f"WordPress request failed for client '{client.client_id}' "
+            f"({method} {path}, HTTP {response.status_code}, base_url={client.wp_base_url}): "
+            f"{wordpress_error_summary(response)}"
+        )
     return response.json()
 
 
 def preflight_wordpress_permissions(strict: bool) -> dict[str, Any]:
     try:
         user = request_json("GET", "/wp-json/wp/v2/users/me", params={"context": "edit"})
-    except requests.HTTPError as exc:
-        response = exc.response
+    except Exception as exc:
+        client = get_active_client_config()
         details = {
-            "base_url": get_active_client_config().wp_base_url,
-            "username": get_active_client_config().wp_username,
+            "client_id": client.client_id,
+            "base_url": client.wp_base_url,
+            "username": client.wp_username,
             "authenticated": False,
-            "status_code": response.status_code if response is not None else None,
-            "response": response.text if response is not None else str(exc),
+            "error": str(exc),
         }
         if strict:
             raise PermissionError(
-                "WordPress did not accept the configured Application Password. "
-                "Check WP_USERNAME/WP_APP_PASSWORD in config.py and whether the "
-                "server passes Authorization headers to WordPress."
+                f"WordPress authentication preflight failed for client '{client.client_id}': {exc}"
             ) from exc
         return details
 
@@ -61,6 +97,7 @@ def preflight_wordpress_permissions(strict: bool) -> dict[str, Any]:
         if not capabilities.get(capability)
     ]
     result = {
+        "client_id": get_active_client_config().client_id,
         "base_url": get_active_client_config().wp_base_url,
         "user_id": user.get("id"),
         "username": user.get("username") or user.get("slug"),
@@ -441,7 +478,15 @@ def find_post_by_slug(slug: str) -> dict[str, Any] | None:
 def create_or_update_wordpress_post(
     payload: dict[str, Any],
     existing_post_mode: str,
+    existing_post_id: int | None = None,
 ) -> tuple[dict[str, Any], str]:
+    if existing_post_id and existing_post_mode == "update":
+        post = request_json("POST", f"/wp-json/wp/v2/posts/{existing_post_id}", json=payload)
+        print(f"Updated existing post ID: {post['id']}")
+        print(f"Post link: {post.get('link')}")
+        print(f"Edit post: {get_active_client_config().wp_base_url.rstrip('/')}/wp-admin/post.php?post={post['id']}&action=edit")
+        return post, "updated_by_id"
+
     existing_post = (
         find_post_by_slug(payload.get("slug", ""))
         if existing_post_mode == "update"

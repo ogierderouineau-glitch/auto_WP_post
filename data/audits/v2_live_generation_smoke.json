@@ -1,0 +1,127 @@
+{
+  "passed": true,
+  "stage": "generation",
+  "state": "needs_review",
+  "workbook_hash": "6db9ba5d8ff8a43d20d8749076e33c9908a69d4a9b046bd95124671d7baac040",
+  "model": "gpt-5.5",
+  "confirmed_fact_keys": [
+    "bar_type",
+    "city",
+    "client_name",
+    "client_type",
+    "event_date",
+    "event_month",
+    "event_type",
+    "event_year",
+    "guest_count",
+    "service_type",
+    "venue"
+  ],
+  "shared_field_keys": [
+    "category",
+    "excerpt",
+    "focus_keyword",
+    "meta_description",
+    "post_title",
+    "related_links_html",
+    "seo_title",
+    "slug",
+    "social_description",
+    "social_title",
+    "status",
+    "tags"
+  ],
+  "acf_source_field_keys": [
+    "bartender_h3",
+    "bartender_text",
+    "cta_h2",
+    "cta_text",
+    "event_atmosphere",
+    "event_highlight",
+    "event_story",
+    "event_story_h2",
+    "fact_bar",
+    "fact_date",
+    "fact_event",
+    "fact_event_type",
+    "fact_location",
+    "fact_service",
+    "faq_1_answer",
+    "faq_1_question",
+    "faq_2_answer",
+    "faq_2_question",
+    "faq_3_answer",
+    "faq_3_question",
+    "faq_4_answer",
+    "faq_4_question",
+    "faq_5_answer",
+    "faq_5_question",
+    "hero_h1",
+    "hero_h2",
+    "hero_intro",
+    "verlauf_h2"
+  ],
+  "selected_link_ids": [
+    "link_001",
+    "link_003"
+  ],
+  "payload": {
+    "wordpress": {
+      "title": "Cocktailcatering für Firmen-Sommerfest in Berlin",
+      "slug": "cocktailcatering-firmen-sommerfest-berlin",
+      "excerpt": "FLAIRLAB betreute am 24.06.2026 ein Firmen-Sommerfest der Beispielkunde GmbH in der Musterlocation Berlin mit Cocktailcatering und mobiler Cocktailbar für 120 Gäste.",
+      "status": "draft",
+      "categories": [
+        "auto event post"
+      ],
+      "tags": [
+        "Cocktailcatering Berlin",
+        "Firmen-Sommerfest",
+        "mobile Cocktailbar",
+        "mobile Bar Berlin",
+        "Barkeeper-Service",
+        "Musterlocation Berlin",
+        "Beispielkunde GmbH"
+      ]
+    },
+    "meta": {
+      "yoast_wpseo_focuskw": "Cocktailcatering Berlin",
+      "yoast_wpseo_title": "Cocktailcatering Berlin für Firmen-Sommerfest",
+      "yoast_wpseo_metadesc": "Cocktailcatering Berlin für ein Firmen-Sommerfest mit mobiler Cocktailbar: FLAIRLAB betreute 120 Gäste in der Musterlocation Berlin.",
+      "yoast_wpseo_opengraph_title": "Mobile Cocktailbar für ein Firmen-Sommerfest in Berlin",
+      "yoast_wpseo_opengraph_description": "FLAIRLAB war mit Cocktailcatering und mobiler Cocktailbar beim Firmen-Sommerfest der Beispielkunde GmbH in Berlin im Einsatz."
+    },
+    "acf": {
+      "related_links_html": "<div class=\"post-tags\"><span class=\"tag-links\">Mehr entdecken: <a href=\"https://staging.flairlab.de/barcatering/\">Cocktailcatering Berlin</a>, <a href=\"https://staging.flairlab.de/mobile-cocktailbar/\">mobile Cocktailbar</a></span></div>",
+      "hero_h1": "Cocktailcatering für Firmen-Sommerfest in Berlin",
+      "hero_h2": "Mobile Cocktailbar für das Sommerfest der Beispielkunde GmbH",
+      "hero_intro": "Am 24.06.2026 betreute FLAIRLAB das Firmen-Sommerfest der Beispielkunde GmbH in der Musterlocation Berlin. Für rund 120 Gäste wurde Cocktailcatering mit mobiler Cocktailbar umgesetzt, damit die Getränkeausgabe zum entspannten Treffpunkt des Sommerfests wurde.\n\nDie mobile Cocktailbar bot einen klaren Servicepunkt für Empfang, Gespräche und Pausen zwischen den Programmpunkten. Das Team bereitete die Cocktails frisch vor Ort zu und sorgte für einen geordneten, freundlichen Ablauf. So blieb der Barbereich gut erreichbar für alle Gäste.",
+      "event_story_h2": "Cocktailcatering für ein Firmen-Sommerfest mit 120 Gästen",
+      "event_story": "Für das Firmen-Sommerfest der Beispielkunde GmbH war ein Barkonzept gefragt, das zu einer sommerlichen Firmenveranstaltung mit 120 Gästen passt. Die Musterlocation Berlin bot dafür den Rahmen, FLAIRLAB ergänzte den Ablauf mit Cocktailcatering und einer mobilen Cocktailbar.\n\nIm Mittelpunkt stand eine zuverlässige Versorgung der Gäste, ohne den Charakter des Sommerfests zu stören. Die Bar funktionierte als Treffpunkt, an dem Mitarbeitende zusammenkamen, Getränke auswählten und kurze Gespräche führten. Durch die mobile Lösung konnte der Service flexibel in den Eventablauf integriert werden vor Ort.",
+      "verlauf_h2": "Mobile Cocktailbar als Treffpunkt beim Sommerfest",
+      "bartender_h3": "Barkeeper-Service für 120 Gäste",
+      "bartender_text": "Beim Firmen-Sommerfest kam es auf einen ruhigen, gut organisierten Barservice an. Das FLAIRLAB Team bereitete die Cocktails an der mobilen Cocktailbar frisch zu, hielt die Ausgabe übersichtlich und reagierte direkt auf die Nachfrage der rund 120 Gäste. Gerade bei einem Sommerfest ist wichtig, dass Wartezeiten kurz bleiben und die Bar trotzdem freundlich wirkt. Deshalb standen klare Abläufe, saubere Vorbereitung und eine aufmerksame Ansprache im Vordergrund. So wurde die Cocktailbar ein verlässlicher Servicepunkt innerhalb der Musterlocation Berlin für Mitarbeitende und eingeladene Gäste.",
+      "cta_h2": "Sie planen ein Firmen-Sommerfest mit Cocktailcatering?",
+      "cta_text": "Sie planen ein Firmen-Sommerfest in Berlin und möchten Cocktailcatering mit mobiler Cocktailbar anbieten? FLAIRLAB unterstützt Sie bei Baraufbau, Getränkeausgabe und Serviceablauf, damit Ihre Gäste einen klaren Treffpunkt für frische Cocktails haben. Das Konzept wird an Location, Gästezahl und gewünschte Ausgabezeit angepasst. So entsteht ein ruhiger Barbereich, der gut in den Veranstaltungsablauf passt.",
+      "faq_1_question": "Bietet FLAIRLAB Cocktailcatering für Firmen-Sommerfeste in Berlin an?",
+      "faq_1_answer": "Ja, FLAIRLAB bietet Cocktailcatering für Firmen-Sommerfeste in Berlin an. Beim Einsatz für die Beispielkunde GmbH wurden rund 120 Gäste in der Musterlocation Berlin mit einer mobilen Cocktailbar betreut. Umfang, Baraufbau und Serviceablauf werden jeweils an Gästezahl, Location und Anlass angepasst.",
+      "faq_2_question": "Bringt FLAIRLAB eine mobile Cocktailbar zur Firmenfeier mit?",
+      "faq_2_answer": "Ja, wenn es zum Konzept passt, kann FLAIRLAB eine mobile Cocktailbar mitbringen. Sie schafft einen festen Servicepunkt, an dem Cocktails frisch zubereitet und ausgegeben werden. Vorab werden Platzbedarf, Aufbauzeit, Wege in der Location und die erwartete Gästezahl abgestimmt gemeinsam geklärt.",
+      "faq_3_question": "Wie viele Gäste lassen sich mit Cocktailcatering betreuen?",
+      "faq_3_answer": "Die passende Team- und Barplanung hängt von Gästezahl, Dauer, Drinkauswahl und Ablauf ab. Beim Firmen-Sommerfest in Berlin wurden 120 Gäste betreut. Für andere Veranstaltungen kalkuliert FLAIRLAB den Bedarf so, dass Ausgabe, Vorbereitung und Nachschub realistisch zum Eventformat passen vor Ort.",
+      "faq_4_question": "Sind alkoholfreie Cocktails beim Firmen-Sommerfest möglich?",
+      "faq_4_answer": "Ja, alkoholfreie Cocktails können in ein Cocktailcatering integriert werden. Ob sie als eigene Auswahl, Ergänzung zu klassischen Drinks oder als Alternative für einzelne Gäste geplant werden, hängt vom gewünschten Barkonzept ab. FLAIRLAB stimmt die Auswahl vorab mit dem Veranstalter ab.",
+      "faq_5_question": "Was sollte man für eine mobile Cocktailbar vorbereiten?",
+      "faq_5_answer": "Für eine mobile Cocktailbar sollten Stellfläche, Strombedarf, Anlieferung, Aufbauzeit und Laufwege vorab geklärt werden. Wichtig ist außerdem, wie viele Gäste erwartet werden und wann die stärksten Servicezeiten liegen. So kann FLAIRLAB den Baraufbau und den Ablauf passend planen und vorbereiten.",
+      "fakten": "<ul><li><strong>Event:</strong> Firmen-Sommerfest der Beispielkunde GmbH</li><li><strong>Datum:</strong> 24.06.2026</li><li><strong>Ort:</strong> Musterlocation Berlin</li><li><strong>Eventtyp:</strong> Firmen-Sommerfest</li><li><strong>Leistung:</strong> Cocktailcatering</li><li><strong>Bar:</strong> mobile Cocktailbar</li></ul>",
+      "verlauf_text": "<p>Das besondere Highlight war die mobile Cocktailbar als zentraler Servicepunkt für die rund 120 Gäste. Sie machte das Cocktailcatering sichtbar, bündelte die Getränkeausgabe und gab dem Sommerfest der Beispielkunde GmbH einen klaren Treffpunkt innerhalb der Musterlocation Berlin.</p><p>Die Atmosphäre war auf Austausch, kurze Wege und einen entspannten Sommerfest-Charakter ausgerichtet. Die Bar unterstützte diese Stimmung, weil Gäste dort unkompliziert zusammenkamen und ihre Getränke direkt vor Ort erhielten.</p>"
+    },
+    "media": []
+  },
+  "validation_report": {
+    "valid": true,
+    "errors": []
+  },
+  "published": false,
+  "invariant_errors": []
+}

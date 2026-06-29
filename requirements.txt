@@ -5,3 +5,4 @@ requests
 Pillow
 openai
 openpyxl
+google-cloud-storage

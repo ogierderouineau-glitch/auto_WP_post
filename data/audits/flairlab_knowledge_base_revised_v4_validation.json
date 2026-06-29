@@ -1,0 +1,453 @@
+{
+  "report_name": "Final strict validation of FLAIRLAB Knowledge Base Revised V4",
+  "workbook": "/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V4.xlsm",
+  "workbook_sha256": "5c321c08fa14c57ba7a694e5193feacf8afc3215c2eb7dee345cfd91882288f2",
+  "validation_prompt": "/home/ogier-derouineau/Downloads/Prompt validate workbook_V3.docx",
+  "validation_prompt_sha256": "8179f9fa026aa2bde886c41c40f218ae435e1a6ff76f85977b955058b70d3517",
+  "summary": {
+    "total_finding_count": 32,
+    "definite_error_count": 1,
+    "warning_count": 0,
+    "architectural_decision_count": 0,
+    "valid_by_design_count": 31,
+    "true_blockers": [
+      "event_story_length_contract_mismatch"
+    ],
+    "non_blocking_warnings": [],
+    "unresolved_decisions": [],
+    "verdict": "not_implementation_ready"
+  },
+  "findings": [
+    {
+      "classification": "definite_error",
+      "sheet": "ACF_fields_schema",
+      "row": 29,
+      "column": "min_words; max_words; guidance_de",
+      "current_value": {
+        "min_words": 100,
+        "max_words": null,
+        "guidance_de": null
+      },
+      "expected": {
+        "min_words": 60,
+        "max_words": 90,
+        "guidance_de": "Etwa 60 bis 90 Wörter."
+      },
+      "severity": "error",
+      "error_code": "event_story_length_contract_mismatch",
+      "reason": "The V3 validation contract requires the event_story limits and guidance to use the exact internally consistent 60-to-90-word configuration. The workbook still contains the earlier minimum of 100 words and omits both the maximum and guidance.",
+      "recommended_correction": "Set min_words to 60, max_words to 90, and guidance_de to \"Etwa 60 bis 90 Wörter.\""
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "agent_workflow",
+      "row": 5,
+      "column": "required; run_condition",
+      "current_value": {
+        "required": false,
+        "run_condition": "audio_count_gt_0"
+      },
+      "expected": "Optional transcription that successfully skips for manual-text-only sessions",
+      "severity": "info",
+      "error_code": "conditional_transcription_resolved",
+      "reason": "The previously reported transcription blocker is corrected exactly.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "agent_workflow",
+      "row": 16,
+      "column": "required; run_condition",
+      "current_value": {
+        "required": false,
+        "run_condition": "image_count_gt_0"
+      },
+      "expected": "Optional image metadata generation when images exist",
+      "severity": "info",
+      "error_code": "conditional_image_metadata_resolved",
+      "reason": "The previously reported image-metadata blocker is corrected exactly.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "post_blueprint",
+      "row": 6,
+      "column": "required; display_condition",
+      "current_value": {
+        "target_type": "image_metadata_field",
+        "target_key": "image_caption",
+        "required": false,
+        "display_condition": "image_count_gt_0"
+      },
+      "expected": "Optional image caption shown only when images exist",
+      "severity": "info",
+      "error_code": "conditional_image_caption_resolved",
+      "reason": "The image-caption blueprint contract is corrected exactly.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "post_blueprint",
+      "row": 11,
+      "column": "required; display_condition",
+      "current_value": {
+        "target_type": "layout_marker",
+        "target_key": "event_gallery",
+        "required": false,
+        "display_condition": "image_count_gt_0"
+      },
+      "expected": "Optional gallery marker shown only when images exist",
+      "severity": "info",
+      "error_code": "conditional_gallery_resolved",
+      "reason": "The gallery blueprint contract is corrected exactly.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "post_types",
+      "row": 2,
+      "column": "post_type_key",
+      "current_value": "event",
+      "expected": "Unique enabled, template-ready and generation-enabled post type with complete WordPress routing",
+      "severity": "info",
+      "error_code": "enabled_post_type_valid",
+      "reason": "The enabled event post type has valid typed booleans and complete routing fields.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "post_types",
+      "row": 2,
+      "column": "single_template_url",
+      "current_value": "Event post template URL",
+      "expected": "User-reference metadata excluded from runtime validation",
+      "severity": "info",
+      "error_code": "single_template_url_valid_by_design",
+      "reason": "The value is not used for routing, activation, startup validation, template lookup or WordPress API selection.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "post_examples",
+      "row": 2,
+      "column": "example_id; post_type_key",
+      "current_value": "Five unique enabled examples, all assigned to event",
+      "expected": "Unique IDs and valid post-type references",
+      "severity": "info",
+      "error_code": "post_examples_valid",
+      "reason": "All enabled examples, including example 5, resolve to a known post type and use typed enabled/approved booleans.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "post_examples",
+      "row": 1,
+      "column": "post_type",
+      "current_value": null,
+      "expected": "No redundant post_type column",
+      "severity": "info",
+      "error_code": "redundant_post_type_absent",
+      "reason": "post_type_key is the sole authoritative post-type reference.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "shared_fields_schema",
+      "row": 5,
+      "column": "status",
+      "current_value": {
+        "source_mode": "configured",
+        "include_in_ai_schema": false,
+        "format_or_enum": "publish_status"
+      },
+      "expected": "Configured status excluded from the AI schema with a resolved enum domain",
+      "severity": "info",
+      "error_code": "configured_status_valid",
+      "reason": "The status contract resolves exactly through validation_lists.publish_status.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "shared_fields_schema",
+      "row": 13,
+      "column": "related_links_html",
+      "current_value": {
+        "destination_type": "acf",
+        "destination_key": "related_links_html",
+        "validation_rule": "allow_empty_if_no_eligible_links"
+      },
+      "expected": "Required ACF payload field with deterministic empty-result semantics",
+      "severity": "info",
+      "error_code": "related_links_empty_contract_valid",
+      "reason": "An empty value is allowed only when deterministic filtering leaves no eligible links.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "shared_fields_schema",
+      "row": 2,
+      "column": "field_key",
+      "current_value": "Twelve unique enabled shared fields",
+      "expected": "Unique keys with valid destinations, stages, source modes, value types and limit columns",
+      "severity": "info",
+      "error_code": "shared_schema_valid",
+      "reason": "All enabled shared-field contracts and enum references resolve exactly; configured fields are excluded from AI schemas.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "ACF_fields_schema",
+      "row": 15,
+      "column": "hero_h1",
+      "current_value": {
+        "field_role": "direct_acf",
+        "acf_field_name": "hero_h1",
+        "include_in_payload": "TRUE"
+      },
+      "expected": "Direct ACF hero_h1 payload field",
+      "severity": "info",
+      "error_code": "hero_h1_contract_valid",
+      "reason": "hero_h1 matches the approved direct-ACF contract.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "ACF_fields_schema",
+      "row": 30,
+      "column": "verlauf_h2",
+      "current_value": {
+        "field_role": "direct_acf",
+        "acf_field_name": "verlauf_h2",
+        "include_in_payload": "TRUE"
+      },
+      "expected": "Direct ACF verlauf_h2 payload field",
+      "severity": "info",
+      "error_code": "verlauf_h2_contract_valid",
+      "reason": "verlauf_h2 matches the required direct-ACF contract.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "ACF_fields_schema",
+      "row": 2,
+      "column": "field_role",
+      "current_value": "All 48 enabled rows satisfy their role contracts",
+      "expected": "Valid input_fact, direct_acf, aggregation_source, derived_field and generated_field relationships",
+      "severity": "info",
+      "error_code": "acf_role_contracts_valid",
+      "reason": "Input facts have no direct destinations, direct ACF rows have destinations, and aggregation rows have explicit grouping, order and transforms.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "ACF_fields_schema",
+      "row": 18,
+      "column": "source_fact_keys",
+      "current_value": "All declared source_fact_keys resolve to enabled event input facts",
+      "expected": "Exact same-post-type input-fact dependencies",
+      "severity": "info",
+      "error_code": "source_fact_dependencies_valid",
+      "reason": "Required derived rows have explicit dependencies; optional derived rows may remain dependency-free and skippable.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "post_blueprint",
+      "row": 2,
+      "column": "target_type; target_key",
+      "current_value": "All 14 enabled blueprint targets resolve exactly",
+      "expected": "Exact declared-namespace resolution without fuzzy fallback",
+      "severity": "info",
+      "error_code": "blueprint_targets_valid",
+      "reason": "ACF fields, aggregation groups, sections, shared fields, image metadata and the layout marker all resolve in their declared namespaces.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "post_blueprint",
+      "row": 2,
+      "column": "display_condition",
+      "current_value": "All enabled values resolve through validation_lists.display_condition",
+      "expected": "Controlled display conditions",
+      "severity": "info",
+      "error_code": "blueprint_display_conditions_valid",
+      "reason": "The image rows use image_count_gt_0 and all other rows use always.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "agent_workflow",
+      "row": 2,
+      "column": "run_condition",
+      "current_value": "All 19 workflow conditions resolve",
+      "expected": "Controlled run conditions with compatible required flags",
+      "severity": "info",
+      "error_code": "workflow_conditions_valid",
+      "reason": "Every conditional step is optional, and the workbook defines false conditions as successful skips.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "implementation_notes",
+      "row": 19,
+      "column": "acceptance_criteria_de",
+      "current_value": "Keine Bilder führt zu erfolgreichem Skip der Bildschritte und blendet Bildabschnitte aus; kein eval().",
+      "expected": "Typed condition handlers with no unrestricted eval()",
+      "severity": "info",
+      "error_code": "typed_condition_registry_valid",
+      "reason": "The workbook explicitly requires registered typed condition handlers and prohibits eval().",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "style_rules",
+      "row": 2,
+      "column": "match_type; match_value",
+      "current_value": {
+        "match_type": "field",
+        "match_value": "hero_intro"
+      },
+      "expected": "Exact ACF field-key reference",
+      "severity": "info",
+      "error_code": "style_001_valid",
+      "reason": "style_001 correctly resolves hero_intro as a field rather than a section.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "style_rules",
+      "row": 2,
+      "column": "match_value",
+      "current_value": "All 14 enabled style targets resolve",
+      "expected": "Exact fields, sections, context tags and content signals",
+      "severity": "info",
+      "error_code": "style_targets_valid",
+      "reason": "No fuzzy or fallback style matching is required.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "seo_rules",
+      "row": 2,
+      "column": "target_type; target_key",
+      "current_value": "All 25 enabled SEO targets resolve",
+      "expected": "Exact field, group, section, image metadata, internal-link and draft-validator targets",
+      "severity": "info",
+      "error_code": "seo_targets_valid",
+      "reason": "Every enabled SEO rule resolves in its declared namespace.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "story_patterns",
+      "row": 2,
+      "column": "trigger_tags; required_facts; required_content_signals",
+      "current_value": "All six enabled story patterns resolve",
+      "expected": "Known context tags, input facts and content signals",
+      "severity": "info",
+      "error_code": "story_pattern_references_valid",
+      "reason": "All story-pattern references resolve exactly to controlled lists or enabled input facts.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "image_rules_pillow",
+      "row": 14,
+      "column": "value; value_domain",
+      "current_value": {
+        "rule_key": "crop.mode",
+        "value": "cover",
+        "value_domain": "crop_mode"
+      },
+      "expected": "cover in validation_lists.crop_mode",
+      "severity": "info",
+      "error_code": "pillow_crop_enum_valid",
+      "reason": "The Pillow enum value resolves exactly through its declared domain.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "image_rules_pillow",
+      "row": 2,
+      "column": "rule_key; value",
+      "current_value": "Twenty unique Pillow rules with typed values and valid numeric ranges",
+      "expected": "Unique, typed and range-valid image-processing configuration",
+      "severity": "info",
+      "error_code": "pillow_rules_valid",
+      "reason": "No enabled Pillow rule has an invalid type, range or enum domain.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "context_building",
+      "row": 13,
+      "column": "source_sheet",
+      "current_value": "image_rules_pillow",
+      "expected": "Single source of image-processing parameter values",
+      "severity": "info",
+      "error_code": "pillow_single_source_valid",
+      "reason": "Other image-related sheets define analysis outputs, metadata or routing only; no duplicate Pillow parameter configuration was found.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "image_analysis_rules",
+      "row": 2,
+      "column": "expected_output; output_domain",
+      "current_value": "All 15 enabled image-analysis outputs resolve",
+      "expected": "Controlled output types and domains",
+      "severity": "info",
+      "error_code": "image_analysis_contracts_valid",
+      "reason": "Expected output types resolve through image_analysis_output, and enum-like outputs have valid domains.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "internal_links_database",
+      "row": 2,
+      "column": "target_url",
+      "current_value": "Eight active, unique, non-TBD URLs",
+      "expected": "One active row per valid URL",
+      "severity": "info",
+      "error_code": "active_internal_links_valid",
+      "reason": "No duplicate active URL or active TBD target exists.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "context_building",
+      "row": 11,
+      "column": "filter_expression",
+      "current_value": "active=TRUE AND target_url!=TBD AND (post_type_key=* OR post_type_key={post_type_key}) AND canonical_path(target_url)!={current_path}",
+      "expected": "Deterministic active, non-TBD and canonical self-link filtering",
+      "severity": "info",
+      "error_code": "internal_link_filter_valid",
+      "reason": "The current path is derived from target_url before semantic ranking.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "agent_instructions",
+      "row": 11,
+      "column": "instruction_de",
+      "current_value": "Keine URL erfinden. Nur die bereitgestellten Linkkandidaten verwenden.",
+      "expected": "The model cannot generate URLs",
+      "severity": "info",
+      "error_code": "internal_link_model_boundary_valid",
+      "reason": "The model may rank known candidates but cannot invent a URL.",
+      "recommended_correction": null
+    },
+    {
+      "classification": "valid_by_design",
+      "sheet": "agent_instructions",
+      "row": 13,
+      "column": "applies_to",
+      "current_value": "required_facts; source_fact_keys",
+      "expected": "Python identifies missing dependencies and the model only formulates bundled questions",
+      "severity": "info",
+      "error_code": "clarification_behavior_valid",
+      "reason": "Required dependencies lead to needs_input; optional dependencies are skipped without questions; confirmed user corrections take precedence.",
+      "recommended_correction": null
+    }
+  ]
+}

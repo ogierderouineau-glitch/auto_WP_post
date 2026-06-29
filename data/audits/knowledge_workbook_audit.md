@@ -1,0 +1,94 @@
+# Knowledge Workbook Audit
+
+- Generated at (UTC): 2026-06-23T08:56:47.648309+00:00
+- Storage mode: local_file
+- Workbook size (bytes): 242822
+- Workbook sha256: 99d3b03322c99f4c8ef348b9025bce26fa263cffa01676d545eee379066a2872
+- GCS URI: gs://auto-wordpress-post-499518-knowledge-workbook/knowledge/FLAIRLAB_EventPost_Master_Knowledge.xlsm
+- GCS generation: None
+- GCS updated: None
+- Local path: /home/ogier-derouineau/IT projects/whatsapp_to_Wordpess_post/data/knowledge/FLAIRLAB_EventPost_Master_Knowledge.xlsm
+- Local modified at: 2026-06-21T13:55:05.592484+00:00
+
+## Sheet Names
+- README
+- agent_workflow
+- field_schema
+- post_types
+- event_post_blueprint
+- seo_rules
+- style_rules
+- story_patterns
+- event_post_examples
+- image_rules_pillow
+- image_rules_semantic
+- internal_links_database
+- internal_link_rules
+- output_specification
+- export_structure
+- validation_lists
+- api_contract
+- application_state
+- implementation_notes
+- shared_field_schema
+- event_field_schema
+- event_acf_mapping
+- location_field_schema
+- location_post_blueprint
+- location_post_examples
+- location_acf_mapping
+- cocktail_field_schema
+- cocktail_post_blueprint
+- cocktail_post_examples
+- cocktail_acf_mapping
+- bartender_field_schema
+- bartender_post_blueprint
+- bartender_post_examples
+- bartender_acf_mapping
+- tab_legend
+- agent_instructions
+
+## seo_rules
+- Header mode: alias_match
+- Header row: 1
+- Field column: 3
+- Data rows: 25
+- Unique fields: 25
+- focus_keyword
+- keyword_variant_local
+- keyword_variant_service
+- secondary_keywords
+- seo_title
+- meta_description
+- social_title
+- social_description
+- slug
+- internal_link_primary
+- internal_link_secondary
+- internal_link_contextual
+- keyword_usage_intro
+- keyword_usage_h2
+- keyword_usage_body
+- avoid_keyword_stuffing
+- title_rule
+- faq_question_rule
+- faq_answer_rule
+- local_seo_rule
+- event_seo_rule
+- service_seo_rule
+- meta_no_generic
+- image_alt_seo
+- internal_link_count
+
+## shared_field_schema
+- Header mode: alias_match
+- Header row: 1
+- Field column: 1
+- Data rows: 6
+- Unique fields: 6
+- post_title
+- slug
+- excerpt
+- status
+- category
+- tags
