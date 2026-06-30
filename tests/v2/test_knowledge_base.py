@@ -15,7 +15,7 @@ from app.v2.workflow.step_03_registry import WORKFLOW_HANDLER_METHODS
 WORKBOOK = Path(
     os.getenv(
         "V2_TEST_WORKBOOK",
-        "/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V5.xlsm",
+        "/home/ogier-derouineau/Documents/FLAIRLAB_Knowledge_Base_Revised_V6.xlsm",
     )
 )
 
@@ -26,11 +26,12 @@ class WorkbookTests(unittest.TestCase):
         self.loader = WorkbookLoader()
         self.validator = WorkbookValidator()
 
-    def test_v5_loads_and_all_exact_joins_validate(self) -> None:
+    def test_v6_loads_and_all_exact_joins_validate(self) -> None:
         snapshot = self.validator.validate(self.loader.load(WORKBOOK))
-        self.assertEqual(snapshot.version.sha256, "6db9ba5d8ff8a43d20d8749076e33c9908a69d4a9b046bd95124671d7baac040")
+        self.assertEqual(snapshot.version.sha256, "dd6b6c339e9b95e691a2405dcbe502d439396b357a38f08199e16b64da5adc4a")
         self.assertEqual(len(snapshot.workflow_steps), 19)
         self.assertEqual(len(snapshot.blueprint), 14)
+        self.assertEqual(len(snapshot.image_metadata_rules), 2)
         self.assertEqual(
             {row.step_key for row in snapshot.workflow_steps},
             set(WORKFLOW_HANDLER_METHODS),

@@ -4,6 +4,11 @@ from typing import Any
 
 from app.v2.errors import DraftValidationError, ErrorDetail
 from app.v2.knowledge_base.step_01_models import WorkbookSnapshot
+from app.v2.models.step_01_session import ContentSession
+from app.v2.workflow.step_04_generation_conditions import (
+    GenerationConditionEvaluator,
+    source_fact_dependencies_are_available,
+)
 
 
 class DraftValidator:
@@ -15,6 +20,7 @@ class DraftValidator:
         shared_values: dict[str, Any],
         acf_source_values: dict[str, Any],
         no_eligible_links: bool = False,
+        session: ContentSession | None = None,
     ) -> dict[str, Any]:
         errors: list[ErrorDetail] = []
         for row in snapshot.shared_fields:
@@ -38,6 +44,8 @@ class DraftValidator:
         for row in snapshot.acf_fields:
             if not row.enabled or row.post_type_key != post_type_key or row.field_role == "input_fact":
                 continue
+            if session is not None and not self._acf_field_is_eligible(row, session):
+                continue
             value = acf_source_values.get(row.field_key)
             if row.required_for_output and self._empty(value):
                 errors.append(self._detail(
@@ -55,6 +63,15 @@ class DraftValidator:
                 details=errors,
             )
         return {"valid": True, "errors": []}
+
+    @staticmethod
+    def _acf_field_is_eligible(row: Any, session: ContentSession) -> bool:
+        if not source_fact_dependencies_are_available(row, session):
+            return False
+        return GenerationConditionEvaluator().evaluate(
+            row.generation_condition,
+            session=session,
+        )
 
     @staticmethod
     def _empty(value: Any) -> bool:

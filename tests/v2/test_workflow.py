@@ -16,7 +16,7 @@ from app.v2.sessions.step_03_service import ContentSessionService
 WORKBOOK = Path(
     os.getenv(
         "V2_TEST_WORKBOOK",
-        "/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V5.xlsm",
+        "/home/ogier-derouineau/Documents/FLAIRLAB_Knowledge_Base_Revised_V6.xlsm",
     )
 )
 

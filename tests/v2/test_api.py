@@ -21,7 +21,7 @@ from app.v2.storage.step_01_local import LocalObjectStorageProvider
 WORKBOOK = Path(
     os.getenv(
         "V2_TEST_WORKBOOK",
-        "/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V5.xlsm",
+        "/home/ogier-derouineau/Documents/FLAIRLAB_Knowledge_Base_Revised_V6.xlsm",
     )
 )
 

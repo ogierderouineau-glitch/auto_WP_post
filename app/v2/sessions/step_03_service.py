@@ -34,6 +34,11 @@ from app.v2.errors import (
 )
 from app.v2.internal_links.step_01_service import InternalLinkService
 from app.v2.images.step_02_processor import PillowProcessor
+from app.v2.images.step_03_metadata_context import (
+    ImageMetadataFactContextBuilder,
+    ImageMetadataFieldContextBuilder,
+    ImageMetadataRuleMatcher,
+)
 from app.v2.knowledge_base.step_04_service import KnowledgeBaseService
 from app.v2.models.step_01_session import Approval, ContentSession, FactValue
 from app.v2.models.step_02_payload import WordPressPayload
@@ -48,13 +53,12 @@ from app.v2.providers.step_01_interfaces import (
 )
 from app.v2.sessions.step_01_repository import SessionRepository
 from app.v2.sessions.step_02_state_machine import SessionStateMachine
+from app.v2.workflow.step_04_generation_conditions import (
+    GenerationConditionEvaluator,
+    source_fact_dependencies_are_available,
+)
 from app.v2.workflow.step_02_clarification import ClarificationService
 from app.v2.validation.step_01_draft import DraftValidator
-
-OPTIONAL_FIELD_SIGNAL_REQUIREMENTS = {
-    "event_challenge": "challenge_present",
-    "event_solution": "solution_present",
-}
 
 
 class ContentSessionService:
@@ -87,6 +91,10 @@ class ContentSessionService:
         self.payload_builder = PayloadBuilder()
         self.internal_links = InternalLinkService()
         self.draft_validator = DraftValidator()
+        self.generation_condition_evaluator = GenerationConditionEvaluator()
+        self.image_metadata_fact_context_builder = ImageMetadataFactContextBuilder()
+        self.image_metadata_rule_matcher = ImageMetadataRuleMatcher()
+        self.image_metadata_field_context_builder = ImageMetadataFieldContextBuilder()
 
     @staticmethod
     def _milestone(session: ContentSession, message: str) -> None:
@@ -525,6 +533,52 @@ class ContentSessionService:
         )
         return self.repository.save(updated, expected_version=expected_version)
 
+    def set_featured_image(
+        self,
+        session_id: str,
+        *,
+        filename: str,
+        expected_version: int,
+    ) -> ContentSession:
+        session = self.repository.get(session_id)
+        reference, processed = self._find_image_reference_and_processed(session, filename)
+        image_metadata_by_media = {
+            str(row.get("media_id")): dict(row)
+            for row in session.image_metadata
+            if row.get("media_id")
+        }
+        for index, image_ref in enumerate(session.image_refs, 1):
+            row = image_metadata_by_media.get(image_ref.media_id, {})
+            processed_row = next(
+                (
+                    item
+                    for item in session.processed_images
+                    if item.get("media_id") == image_ref.media_id
+                ),
+                {},
+            )
+            row.update(
+                {
+                    "media_id": image_ref.media_id,
+                    "image_number": index,
+                    "image_usage": "featured" if image_ref.media_id == reference.media_id else "gallery",
+                    "image_priority": 1 if image_ref.media_id == reference.media_id else index + 1,
+                    "path": row.get("path") or processed_row.get("path") or image_ref.storage_uri,
+                }
+            )
+            image_metadata_by_media[image_ref.media_id] = row
+        updated = session.model_copy(
+            update={
+                "image_metadata": sorted(
+                    image_metadata_by_media.values(),
+                    key=lambda row: int(row.get("image_priority") or 999),
+                ),
+                "updated_at": datetime.now(timezone.utc),
+            }
+        )
+        self._milestone(updated, f"featured image selected filename={processed.get('filename') or filename}")
+        return self.repository.save(updated, expected_version=expected_version)
+
     def media_path(
         self,
         session_id: str,
@@ -758,6 +812,7 @@ class ContentSessionService:
         state_machine = SessionStateMachine(snapshot)
         if session.state in {"ready_to_generate", "needs_review"}:
             session = state_machine.transition(session, "generating")
+        generation_trace = dict(session.generation_trace)
         if self.language_model is not None:
             enum_families = {
                 row.list_name: tuple(snapshot.validation_family(row.list_name))
@@ -777,6 +832,13 @@ class ContentSessionService:
                     field_keys=[row.field_key for row in rows],
                 )
                 context_payload = context.model_dump(by_alias=True)
+                generation_trace.update(
+                    self._generation_trace_from_context(
+                        context,
+                        field_keys=[row.field_key for row in rows],
+                        generation_task="shared_field_generation",
+                    )
+                )
                 if revision_instruction:
                     context_payload["draft_revision"] = {
                         "instruction": revision_instruction,
@@ -818,6 +880,13 @@ class ContentSessionService:
                     field_keys=[row.field_key for row in rows],
                 )
                 context_payload = context.model_dump(by_alias=True)
+                generation_trace.update(
+                    self._generation_trace_from_context(
+                        context,
+                        field_keys=[row.field_key for row in rows],
+                        generation_task="acf_field_generation",
+                    )
+                )
                 if revision_instruction:
                     context_payload["draft_revision"] = {
                         "instruction": revision_instruction,
@@ -913,6 +982,7 @@ class ContentSessionService:
             shared_values=routed_shared,
             acf_source_values=acf_source_fields,
             no_eligible_links=not eligible.candidates,
+            session=session,
         )
         payload = self.payload_builder.build(
             snapshot,
@@ -969,6 +1039,7 @@ class ContentSessionService:
                 "processed_images": processed_images,
                 "image_metadata": image_metadata,
                 "validation_report": validation_report,
+                "generation_trace": generation_trace,
             }
         )
         session = state_machine.transition(session, "needs_review")
@@ -1242,6 +1313,17 @@ class ContentSessionService:
             str(item.get("media_id"))
             for item in image_metadata
             if item.get("media_id")
+            and any(
+                item.get(key)
+                for key in (
+                    "image_alt",
+                    "image_title",
+                    "image_caption",
+                    "image_description",
+                    "image_description_wp",
+                    "image_filename",
+                )
+            )
         }
         missing_metadata_refs = [
             reference
@@ -1268,10 +1350,24 @@ class ContentSessionService:
         for index, reference in enumerate(session.image_refs, 1):
             if not overwrite_existing and reference.media_id in metadata_media_ids:
                 continue
+            existing = next(
+                (
+                    row
+                    for row in image_metadata
+                    if row.get("media_id") == reference.media_id
+                ),
+                {},
+            )
+            image_metadata = [
+                row
+                for row in image_metadata
+                if row.get("media_id") != reference.media_id
+            ]
             messages = structured_task_input(
                 task="image_metadata",
                 instructions=image_instructions,
                 context=self._image_metadata_context(
+                    snapshot,
                     session,
                     reference.media_id,
                     metadata_rows,
@@ -1287,18 +1383,29 @@ class ContentSessionService:
                 (row for row in processed_images if row["media_id"] == reference.media_id),
                 {},
             )
+            image_usage = existing.get("image_usage") or ("featured" if index == 1 else "gallery")
             image_metadata.append(
                 {
                     "media_id": reference.media_id,
                     "image_number": index,
-                    "image_usage": "featured" if index == 1 else "gallery",
-                    "image_priority": index,
+                    "image_usage": image_usage,
+                    "image_priority": 1 if image_usage == "featured" else (index + 1),
                     "path": processed.get("path", reference.storage_uri),
                     **generated,
                 }
             )
             metadata_media_ids.add(reference.media_id)
-        return session.model_copy(update={"image_metadata": image_metadata})
+        return session.model_copy(
+            update={
+                "image_metadata": sorted(
+                    image_metadata,
+                    key=lambda row: (
+                        0 if row.get("image_usage") == "featured" else 1,
+                        int(row.get("image_priority") or 999),
+                    ),
+                )
+            }
+        )
 
     @staticmethod
     def _confirm_extracted_input_facts(
@@ -1330,58 +1437,165 @@ class ContentSessionService:
             return session
         return session.model_copy(update={"confirmed_facts": confirmed})
 
-    @staticmethod
-    def _confirmed_fact_value(session: ContentSession, key: str) -> Any:
-        fact = session.confirmed_facts.get(key)
-        if fact is None or not fact.confirmed or fact.value in (None, "", []):
-            return None
-        return fact.value
-
     def _image_metadata_context(
         self,
+        snapshot: Any,
         session: ContentSession,
         media_id: str,
         metadata_rows: list[Any],
     ) -> dict[str, Any]:
-        bartender_fact = self._confirmed_fact_value(session, "bartender")
-        service_fact = self._confirmed_fact_value(session, "service_type")
-        additional_services_fact = self._confirmed_fact_value(session, "additional_services")
+        image_analysis = session.image_analysis.get(media_id, {})
+        matching_rules = self.image_metadata_rule_matcher.match(
+            rules=list(snapshot.image_metadata_rules),
+            post_type_key=session.post_type_key,
+            image_analysis=image_analysis,
+            content_signals=session.content_signals,
+            context_tags=session.context_tags,
+        )
+        rule_fact_context = self.image_metadata_field_context_builder.build(
+            metadata_rows=metadata_rows,
+            matching_rules=matching_rules,
+            session=session,
+        )
+        must_use_when_natural = [
+            {
+                "rule_id": rule.rule_id,
+                "priority": rule.priority,
+                "usage_mode": rule.usage_mode,
+                "instruction_de": rule.instruction_de,
+                "target_field_keys": rule.target_field_keys,
+                "confirmed_source_facts": {
+                    key: session.confirmed_facts[key].model_dump()
+                    for key in rule.source_fact_keys
+                    if key in session.confirmed_facts
+                    and session.confirmed_facts[key].confirmed
+                    and session.confirmed_facts[key].value not in (None, "", [])
+                },
+            }
+            for rule in matching_rules
+            if rule.usage_mode != "exclude"
+        ]
         return {
             "confirmed_facts": {
                 key: value.model_dump()
                 for key, value in session.confirmed_facts.items()
             },
+            "base_confirmed_facts": self.image_metadata_fact_context_builder.build_base_facts(
+                session=session,
+                acf_schema=list(snapshot.acf_fields),
+            ),
             "shared_fields": session.shared_fields,
             "acf_source_fields": session.acf_source_fields,
             "wordpress_payload": session.wordpress_payload,
-            "image_analysis": session.image_analysis.get(media_id, {}),
-            "image_metadata_priority_facts": {
-                "bartender": bartender_fact,
-                "service_type": service_fact,
-                "additional_services": additional_services_fact,
-            },
-            "image_metadata_usage_rules": [
-                (
-                    "If image_analysis indicates a bartender, barkeeper, bar team member, "
-                    "or cocktail preparation is visible, use the confirmed bartender fact "
-                    "in alt/title/caption/description where natural."
-                ),
-                (
-                    "If image_analysis indicates a bartender performance, show, flair "
-                    "bartending, or similar action, and confirmed service_type or "
-                    "additional_services contains show information, include that show "
-                    "context in the metadata where natural."
-                ),
-                (
-                    "Do not add bartender names, show details, services, clients, venues, "
-                    "or dates unless they are present in confirmed_facts or current draft fields."
-                ),
-            ],
+            "image_analysis": image_analysis,
+            "must_use_when_natural": must_use_when_natural,
+            "fields": rule_fact_context,
             "image_schema": [
                 row.model_dump(exclude={"sheet_row"})
                 for row in metadata_rows
             ],
         }
+
+    @staticmethod
+    def _generation_trace_from_context(
+        context: Any,
+        *,
+        field_keys: list[str],
+        generation_task: str,
+    ) -> dict[str, Any]:
+        trace: dict[str, Any] = {}
+        shared_rules = []
+        for instruction in context.instructions:
+            text = str(instruction.get("instruction_de") or "").strip()
+            if text:
+                shared_rules.append({
+                    "source": "agent_instructions",
+                    "scope": "task",
+                    "shared": True,
+                    "rule_id": instruction.get("instruction_id") or instruction.get("rule_id"),
+                    "priority": instruction.get("priority"),
+                    "text": text,
+                })
+        for pattern in context.story_patterns:
+            text = str(pattern.get("prompt_fragment_de") or pattern.get("use_when_de") or "").strip()
+            if text:
+                shared_rules.append({
+                    "source": "story_patterns",
+                    "scope": "story_pattern",
+                    "shared": True,
+                    "rule_id": pattern.get("pattern_id"),
+                    "priority": pattern.get("priority"),
+                    "text": text,
+                })
+
+        for field_key in field_keys:
+            field = context.fields.get(field_key)
+            if field is None:
+                continue
+            schema = dict(field.schema_data)
+            rules: list[dict[str, Any]] = []
+            description = str(schema.get("description_de") or "").strip()
+            if description:
+                rules.append({
+                    "source": "field_schema.description_de",
+                    "scope": "field",
+                    "shared": False,
+                    "text": description,
+                })
+            guidance = str(schema.get("guidance_de") or "").strip()
+            if guidance:
+                rules.append({
+                    "source": "field_schema.guidance_de",
+                    "scope": "field",
+                    "shared": False,
+                    "text": guidance,
+                })
+            limits = []
+            if schema.get("min_words") is not None:
+                limits.append(f"min_words={schema.get('min_words')}")
+            if schema.get("max_words") is not None:
+                limits.append(f"max_words={schema.get('max_words')}")
+            if schema.get("min_characters") is not None:
+                limits.append(f"min_characters={schema.get('min_characters')}")
+            if schema.get("max_characters") is not None:
+                limits.append(f"max_characters={schema.get('max_characters')}")
+            if limits:
+                rules.append({
+                    "source": "field_schema.validation_limits",
+                    "scope": "field",
+                    "shared": False,
+                    "text": ", ".join(limits),
+                })
+            for source, scope, shared, rows in (
+                ("seo_rules", "field", False, field.exact_rules),
+                ("seo_rules", "group", True, field.group_rules),
+                ("seo_rules", "section", True, field.section_rules),
+                ("style_rules", "style", True, field.style_rules),
+            ):
+                for row in rows:
+                    text = str(row.get("instruction_de") or "").strip()
+                    if not text:
+                        continue
+                    rules.append({
+                        "source": source,
+                        "scope": scope,
+                        "shared": shared,
+                        "rule_id": row.get("rule_id"),
+                        "priority": row.get("priority"),
+                        "target_type": row.get("target_type") or row.get("match_type"),
+                        "target_key": row.get("target_key") or row.get("match_value"),
+                        "text": text,
+                    })
+            trace[field_key] = {
+                "field_key": field_key,
+                "label": schema.get("description_de") or field_key,
+                "generation_task": generation_task,
+                "value_type": schema.get("value_type"),
+                "group": schema.get("group"),
+                "section": schema.get("section"),
+                "rules": [*shared_rules, *rules],
+            }
+        return trace
 
     @staticmethod
     def _archive_item(session: ContentSession) -> dict[str, Any]:
@@ -1454,20 +1668,12 @@ class ContentSessionService:
 
     @staticmethod
     def _acf_field_is_eligible(row: Any, session: ContentSession) -> bool:
-        if row.source_mode == "derived_from_facts":
-            if not row.source_fact_keys:
-                return False
-            usable = {
-                key
-                for key, fact in session.confirmed_facts.items()
-                if fact.confirmed and fact.value not in (None, "", [])
-            }
-            if not usable.intersection(row.source_fact_keys):
-                return False
-        required_signal = OPTIONAL_FIELD_SIGNAL_REQUIREMENTS.get(row.field_key)
-        if required_signal and required_signal not in session.content_signals:
+        if not source_fact_dependencies_are_available(row, session):
             return False
-        return True
+        return GenerationConditionEvaluator().evaluate(
+            row.generation_condition,
+            session=session,
+        )
 
     @staticmethod
     def _validation_feedback(error: ValidationError | ValueError) -> str:

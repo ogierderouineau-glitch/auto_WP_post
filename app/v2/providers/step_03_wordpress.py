@@ -5,7 +5,7 @@ from typing import Any
 from app.v2.models.step_01_session import ContentSession
 from app.v2.models.step_02_payload import WordPressPayload
 from app.v2.providers.step_01_interfaces import WordPressProvider
-from config import set_active_client
+from config import get_active_client_config, set_active_client
 from step_40_wordpress_api import (
     find_term,
     request_json,
@@ -100,7 +100,10 @@ class ExistingWordPressProvider(WordPressProvider):
             "post_id": post_id,
             "status": post.get("status"),
             "view_url": post.get("link"),
-            "edit_url": f"/wp-admin/post.php?post={post_id}&action=edit",
+            "edit_url": (
+                f"{get_active_client_config().wp_base_url.rstrip('/')}"
+                f"/wp-admin/post.php?post={post_id}&action=edit"
+            ),
             "write_mode": mode,
             "idempotency_key": idempotency_key,
             "media": media,

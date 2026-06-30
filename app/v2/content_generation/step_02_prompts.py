@@ -25,6 +25,10 @@ def structured_task_input(
             "Do not invent facts, URLs, identities, destinations, or field keys.",
         ],
     }
+    if task == "image_metadata":
+        system["constraints"].append(
+            "If context.must_use_when_natural contains matching rules with confirmed_source_facts, apply those workbook rules in the target fields whenever the wording remains natural."
+        )
     user = {
         "context": context,
         "validation_feedback": validation_feedback or [],

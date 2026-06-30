@@ -52,6 +52,10 @@ class ImageMetadataUpdateRequest(VersionedRequest):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class FeaturedImageRequest(VersionedRequest):
+    filename: str
+
+
 class ImageOptimizationRequest(VersionedRequest):
     filename: str
     prompt: str

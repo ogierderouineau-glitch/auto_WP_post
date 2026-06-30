@@ -22,7 +22,9 @@ from app.v2.models.step_01_session import ContentSession
 from app.v2.models.step_02_payload import WordPressFields, WordPressPayload
 from step_40_wordpress_api import find_term, preflight_wordpress_permissions
 from config import (
+    KNOWLEDGE_WORKBOOK_PATH,
     OPENAI_API_KEY,
+    V2_KNOWLEDGE_WORKBOOK_PATH,
     V2_LANGUAGE_MODEL,
     V2_IMAGE_EDIT_MODEL,
     V2_TRANSCRIPTION_MODEL,
@@ -32,6 +34,17 @@ from config import (
 
 _lock = RLock()
 _service: ContentSessionService | None = None
+DEFAULT_V2_WORKBOOK_PATH = "data/knowledge/FLAIRLAB_EventPost_Master_Knowledge.xlsm"
+
+
+def _configured_workbook_path() -> str:
+    return (
+        os.getenv("V2_KNOWLEDGE_WORKBOOK_PATH")
+        or V2_KNOWLEDGE_WORKBOOK_PATH
+        or os.getenv("KNOWLEDGE_WORKBOOK_PATH")
+        or KNOWLEDGE_WORKBOOK_PATH
+        or DEFAULT_V2_WORKBOOK_PATH
+    )
 
 
 def get_v2_service() -> ContentSessionService:
@@ -39,10 +52,7 @@ def get_v2_service() -> ContentSessionService:
     with _lock:
         if _service is not None:
             return _service
-        workbook_path = (
-            os.getenv("V2_KNOWLEDGE_WORKBOOK_PATH")
-            or "data/knowledge/FLAIRLAB_Knowledge_Base_Revised_V5.xlsm"
-        )
+        workbook_path = _configured_workbook_path()
         session_root = Path(os.getenv("V2_SESSION_ROOT", "data/v2_sessions"))
         if V2_SESSION_GCS_PREFIX:
             repository = GCSSessionRepository(V2_SESSION_GCS_PREFIX)

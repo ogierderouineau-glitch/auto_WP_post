@@ -109,7 +109,7 @@ def knowledge_source_policy() -> str:
   return "auto"
 
 app = FastAPI(
-    title="FLAIRLAB Event Post Generator",
+    title="FLAIRLAB Post Generator",
     version="0.1.0",
     description="Mobile workflow for voice, media, AI draft review, and WordPress event post creation.",
 )
@@ -2280,7 +2280,7 @@ APP_HTML = """
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FLAIRLAB Event Post Generator</title>
+  <title>FLAIRLAB Post Generator</title>
   <style>
     :root { color-scheme: light; --ink:#1f2933; --muted:#627386; --line:#d8e0e8; --brand:#0f766e; --brand-strong:#0b5f59; --soft:#f5f7fa; --paper:#ffffff; --danger:#b42318; }
     * { box-sizing: border-box; }
@@ -2372,6 +2372,12 @@ APP_HTML = """
     .draft-table td:nth-child(2), .draft-table th:nth-child(2) { width:var(--draft-col2-width, 20ch); color:var(--muted); font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; overflow-wrap:anywhere; word-break:break-word; }
     .draft-table td:nth-child(3), .draft-table th:nth-child(3) { width:auto; }
     .draft-table textarea { width:100%; min-height:86px; border:0; padding:0; border-radius:0; resize:vertical; line-height:1.4; }
+    .draft-field-label { display:flex; align-items:flex-start; gap:6px; }
+    .prompt-trace-button { border:1px solid var(--line); background:#fff; color:var(--brand); border-radius:999px; width:24px; height:24px; padding:0; margin:0; display:inline-flex; align-items:center; justify-content:center; font-weight:800; line-height:1; flex:0 0 auto; }
+    .prompt-trace-button:hover { background:var(--soft); }
+    .prompt-trace-modal .modal { width:min(860px, 100%); }
+    .prompt-trace-summary { white-space:pre-wrap; font-size:13px; }
+    #promptTraceText { min-height:360px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; line-height:1.45; }
     .draft-value-input { height:96px; min-height:96px; max-height:96px; resize:none; overflow-y:scroll; }
     .raw-csv { display:none; }
     .chat-log { display:grid; gap:10px; max-height:320px; overflow:auto; }
@@ -2452,7 +2458,7 @@ APP_HTML = """
 <body>
 <main>
   <header>
-    <h1>FLAIRLAB Event Post Generator</h1>
+    <h1>FLAIRLAB Post Generator</h1>
     <p>Eventdaten per Sprache und Medien erfassen, KI-Entwurf prüfen und den WordPress-Beitrag erstellen.</p>
   </header>
 
@@ -2543,7 +2549,7 @@ APP_HTML = """
     <label for="images">Bilder</label>
     <input id="images" type="file" accept="image/*" multiple onchange="renderImageChoices()">
     <label class="recent-session-select-all" style="margin-top:8px;">
-      <input id="v2UseVisionOnUpload" type="checkbox">
+      <input id="v2UseVisionOnUpload" type="checkbox" checked>
       Metadata mit Vision nach dem ersten Entwurf generieren lassen
     </label>
     <div id="featuredChoices" style="display:none"></div>
@@ -2585,6 +2591,7 @@ APP_HTML = """
     <textarea id="transcript" placeholder="Das Transkript erscheint hier. Du kannst es jederzeit bearbeiten."></textarea>
     <div class="step-actions">
       <button id="saveTranscriptButton" class="secondary" onclick="run(saveTranscript)" disabled>Transkript speichern</button>
+      <button id="generateFactsButton" class="secondary" onclick="run(generateFactsFromTranscript)" disabled>Fakten aus Transkript generieren</button>
       <button id="transcriptNextButton" onclick="run(generateDraft)" disabled>Weiter: Entwurf erstellen</button>
     </div>
     </div>
@@ -2703,6 +2710,19 @@ APP_HTML = """
     </details>
     <div class="modal-actions">
       <button class="secondary" type="button" onclick="closeErrorModal()">Schließen</button>
+    </div>
+  </div>
+</div>
+
+<div id="promptTraceModal" class="modal-backdrop prompt-trace-modal" role="dialog" aria-modal="true" aria-labelledby="promptTraceTitle">
+  <div class="modal">
+    <h2 id="promptTraceTitle">Prompt-Regeln</h2>
+    <div id="promptTraceSummary" class="summary prompt-trace-summary"></div>
+    <label for="promptTraceText">Kopierbarer Kontext</label>
+    <textarea id="promptTraceText" readonly></textarea>
+    <div class="modal-actions">
+      <button type="button" onclick="copyPromptTrace()">Kontext kopieren</button>
+      <button class="secondary" type="button" onclick="closePromptTraceModal()">Schließen</button>
     </div>
   </div>
 </div>
@@ -2829,7 +2849,7 @@ function formatElapsedDuration(ms){
 }
 function appendElapsedDuration(text, startedAt){
   const elapsed = formatElapsedDuration(Date.now() - startedAt);
-  const clean = String(text || "Aktion abgeschlossen.").replace(/\s+\(Dauer:.*?\)\s*$/, "");
+  const clean = String(text || "Aktion abgeschlossen.").replace(/\\s+\\(Dauer:.*?\\)\\s*$/, "");
   return `${clean} (Dauer: ${elapsed})`;
 }
 function readableError(error){
@@ -3023,6 +3043,7 @@ function actionLabel(fn){
     uploadFiles:"Dateien werden hochgeladen...",
     transcribe:"Sprache wird transkribiert...",
     saveTranscript:"Transkript wird gespeichert...",
+    generateFactsFromTranscript:"Fakten werden aus dem Transkript generiert...",
     generateDraft:"Entwurf wird erstellt...",
     saveDraft:"Entwurf wird gespeichert...",
     sendDraftChat:"Entwurf wird aktualisiert...",
@@ -3214,6 +3235,86 @@ function fieldMaps(){
   });
   return {acfMap: map, guidanceMap};
 }
+function draftGenerationTrace(){
+  const draft = (currentSessionData && currentSessionData.draft) || {};
+  const trace = draft.generation_trace || {};
+  return trace && typeof trace === "object" ? trace : {};
+}
+function traceForDraftField(field){
+  const trace = draftGenerationTrace();
+  for(const candidate of draftFieldCandidates(field)){
+    if(candidate in trace) return trace[candidate];
+  }
+  return null;
+}
+function promptTraceRuleLines(title, rules){
+  if(!Array.isArray(rules) || !rules.length) return [];
+  const lines = [`\\n${title}:`];
+  rules.forEach(rule => {
+    if(!rule || typeof rule !== "object") return;
+    const shared = rule.shared ? " [shared rule]" : "";
+    const parts = [
+      rule.rule_id || rule.key || rule.title || rule.field_key || "Regel",
+      rule.scope ? `scope=${rule.scope}` : "",
+      rule.section ? `section=${rule.section}` : "",
+      rule.group ? `group=${rule.group}` : "",
+    ].filter(Boolean);
+    lines.push(`- ${parts.join(" · ")}${shared}`);
+    const text = rule.guidance || rule.instruction || rule.rule || rule.description || rule.text || "";
+    if(text) lines.push(`  ${String(text)}`);
+  });
+  return lines;
+}
+function formatPromptTrace(field, trace){
+  if(!trace || typeof trace !== "object") return `Keine Prompt-Regeln für ${field} gespeichert.`;
+  const lines = [
+    `Feld: ${field}`,
+    trace.acf_field_name ? `ACF Feld: ${trace.acf_field_name}` : "",
+    trace.field_role ? `Rolle: ${trace.field_role}` : "",
+    trace.section ? `Sektion: ${trace.section}` : "",
+    trace.group ? `Gruppe: ${trace.group}` : "",
+    trace.value_type ? `Werttyp: ${trace.value_type}` : "",
+    trace.required_for_output !== undefined ? `Pflichtfeld: ${trace.required_for_output ? "ja" : "nein"}` : "",
+    trace.min_words ? `Min. Wörter: ${trace.min_words}` : "",
+    trace.max_words ? `Max. Wörter: ${trace.max_words}` : "",
+  ].filter(Boolean);
+  if(trace.description_de) lines.push(`\\nBeschreibung:\\n${trace.description_de}`);
+  if(trace.guidance_de) lines.push(`\\nFeld-Guidance:\\n${trace.guidance_de}`);
+  if(trace.example) lines.push(`\\nBeispiel:\\n${trace.example}`);
+  lines.push(...promptTraceRuleLines("SEO-Regeln", trace.seo_rules));
+  lines.push(...promptTraceRuleLines("Style-Regeln", trace.style_rules));
+  lines.push(...promptTraceRuleLines("Agent-Instruktionen", trace.agent_instructions));
+  lines.push(...promptTraceRuleLines("Story Patterns", trace.story_patterns));
+  if(Array.isArray(trace.source_fact_keys) && trace.source_fact_keys.length){
+    lines.push(`\\nQuell-Fakten:\\n- ${trace.source_fact_keys.join("\\n- ")}`);
+  }
+  return lines.join("\\n");
+}
+function openPromptTrace(field){
+  const trace = traceForDraftField(field);
+  const modal = document.getElementById("promptTraceModal");
+  const summary = document.getElementById("promptTraceSummary");
+  const text = document.getElementById("promptTraceText");
+  if(summary) summary.textContent = trace ? `Prompt-Kontext für "${field}"` : `Für "${field}" ist in dieser Session kein Prompt-Kontext gespeichert.`;
+  if(text) text.value = formatPromptTrace(field, trace);
+  if(modal) modal.classList.add("open");
+}
+function closePromptTraceModal(){
+  document.getElementById("promptTraceModal").classList.remove("open");
+}
+async function copyPromptTrace(){
+  const text = document.getElementById("promptTraceText");
+  const value = text ? text.value : "";
+  if(!value) return;
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    await navigator.clipboard.writeText(value);
+  } else {
+    text.focus();
+    text.select();
+    document.execCommand("copy");
+  }
+  status("Prompt-Kontext wurde kopiert.");
+}
 function collectDraftGuidanceOverrides(){
   const overrides = {};
   document.querySelectorAll("[data-guidance-field]").forEach(input => {
@@ -3278,7 +3379,22 @@ function renderDraftTable(csvText){
       const acf = document.createElement("td");
       const value = document.createElement("td");
       const input = document.createElement("textarea");
-      name.textContent = displayDraftFieldName(header);
+      const label = document.createElement("div");
+      label.className = "draft-field-label";
+      const labelText = document.createElement("span");
+      labelText.textContent = displayDraftFieldName(header);
+      label.appendChild(labelText);
+      if(traceForDraftField(header)){
+        const traceButton = document.createElement("button");
+        traceButton.type = "button";
+        traceButton.className = "prompt-trace-button";
+        traceButton.title = "Prompt-Regeln für dieses Feld anzeigen";
+        traceButton.setAttribute("aria-label", `Prompt-Regeln für ${header} anzeigen`);
+        traceButton.textContent = "?";
+        traceButton.addEventListener("click", () => openPromptTrace(header));
+        label.appendChild(traceButton);
+      }
+      name.appendChild(label);
       acf.textContent = acfName;
       input.dataset.csvField = header;
       input.className = "draft-value-input";
@@ -4505,6 +4621,7 @@ function updateButtons(){
   document.getElementById("uploadWpMediaButton").disabled = !hasSession || !uploadedImages.length;
   document.getElementById("transcribeButton").disabled = !canTranscribe;
   document.getElementById("saveTranscriptButton").disabled = !hasSession || !hasTranscript;
+  document.getElementById("generateFactsButton").disabled = !hasSession || !hasTranscript;
   document.getElementById("generateDraftButton").disabled = !canGenerateDraft;
   document.getElementById("transcriptNextButton").disabled = !canGenerateDraft;
   document.getElementById("saveDraftButton").disabled = !hasSession || !hasDraft;
@@ -4915,6 +5032,10 @@ async function saveTranscript(){
   openPanel("panelTranscript", true);
   status(data);
   updateButtons();
+}
+async function generateFactsFromTranscript(){
+  await saveTranscript();
+  status("Transkript gespeichert. Fakten bitte im V2-Modus über die V2-Analyse generieren.");
 }
 async function generateDraft(){
   if(!sessionId) throw new Error("Bitte zuerst eine Session erstellen.");

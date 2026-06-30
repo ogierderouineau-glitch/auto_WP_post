@@ -201,6 +201,15 @@
         },
       };
     });
+    const featuredMetadata = (session.image_metadata || []).find(
+      item => item && item.image_usage === "featured"
+    );
+    const featuredReference = (session.image_refs || []).find(
+      reference => reference.media_id === featuredMetadata?.media_id
+    );
+    const featuredImageFilename = featuredReference
+      ? (processedByMedia[featuredReference.media_id]?.filename || featuredReference.filename)
+      : "";
     const imageProcessingStatus = v2ImageUploadInFlight
       ? "processing"
       : (session.image_refs?.length || 0) > 0
@@ -217,7 +226,7 @@
         voices: (session.audio_refs || []).map(mediaItem),
         images,
         videos: [],
-        featured_image_filename: images[0]?.filename || "",
+        featured_image_filename: featuredImageFilename || images[0]?.filename || "",
       },
       transcript: {
         text: session.transcript || session.manual_text || "",
@@ -227,6 +236,7 @@
         csv_text: draftCsv(session),
         category: session.shared_fields?.category || "auto event post",
         chat: session.draft_chat || [],
+        generation_trace: session.generation_trace || {},
       },
       wordpress_post: result.post_id ? {
         post_id: result.post_id,
@@ -628,6 +638,24 @@
     });
   };
 
+  setFeaturedImage = async function setFeaturedImage(filename) {
+    if (!filename) return;
+    if (!v2Session) await loadActiveV2Session();
+    if (!v2Session) throw new Error("Bitte zuerst eine V2-Session erstellen.");
+    const data = await v2Api(
+      `/api/content-sessions/${v2Session.session_id}/featured-image`,
+      {
+        method: "PUT",
+        headers: v2Headers(),
+        body: JSON.stringify({
+          expected_version: v2Session.version,
+          filename,
+        }),
+      }
+    );
+    await renderV2(data.session, {statusText: "Titelbild in V2 gespeichert."});
+  };
+
   function appendPendingV2ImageCards(files) {
     const wrap = document.getElementById("imagePreviews");
     if (!wrap || !files.length) return;
@@ -662,7 +690,7 @@
       button.type = "button";
       button.className = "pillow-status-btn loading";
       button.disabled = true;
-      button.innerHTML = '<span class="pillow-spinner" aria-hidden="true"></span><span>Vision/Pillow läuft</span>';
+      button.innerHTML = '<span class="pillow-spinner" aria-hidden="true"></span><span>Wird optimiert</span>';
       controls.appendChild(button);
       card.appendChild(controls);
       wrap.appendChild(card);
@@ -687,7 +715,7 @@
       button.type = "button";
       button.className = "pillow-status-btn loading";
       button.disabled = true;
-      button.innerHTML = '<span class="pillow-spinner" aria-hidden="true"></span><span>Vision/Pillow läuft</span>';
+      button.innerHTML = '<span class="pillow-spinner" aria-hidden="true"></span><span>Wird optimiert</span>';
       controls.appendChild(button);
     });
   }
@@ -1078,6 +1106,38 @@
     await renderV2(data.session, {statusText: "Transkript in V2 gespeichert."});
   };
 
+  generateFactsFromTranscript = async function generateFactsFromTranscript() {
+    if (!v2Session && !sessionId) await createSession({preservePendingUploads: true});
+    if (!v2Session) await loadActiveV2Session();
+    if (!v2Session) throw new Error("Bitte zuerst eine V2-Session erstellen.");
+    if (!document.getElementById("transcript").value.trim()) {
+      throw new Error("Bitte zuerst ein Transkript oder Testnotizen eintragen.");
+    }
+    await saveTranscript();
+    status("Fakten werden aus dem gespeicherten Transkript generiert...");
+    let data;
+    try {
+      data = await v2Api(
+        `/api/content-sessions/${v2Session.session_id}/analyze`,
+        {
+          method: "POST",
+          headers: v2Headers(),
+          body: JSON.stringify({expected_version: v2Session.version}),
+        }
+      );
+    } catch (error) {
+      if (error.status !== 409) throw error;
+      await refreshV2Session();
+      data = {session: v2Session};
+    }
+    await renderV2(data.session, {
+      statusText: "Fakten aus dem gespeicherten Transkript generiert. Bitte Tabelle prüfen.",
+    });
+    const panel = ensureClarificationPanel();
+    panel.open = true;
+    openPanel("panelTranscript", true);
+  };
+
   generateDraft = async function generateDraft() {
     if (!v2Session) throw new Error("Bitte zuerst eine V2-Session erstellen.");
     if (!document.getElementById("transcript").value.trim()) {
@@ -1249,6 +1309,7 @@
     document.getElementById("transcribeButton").disabled =
       !hasSession || (!hasPendingVoice && !(v2Session.audio_refs || []).length);
     document.getElementById("saveTranscriptButton").disabled = !hasSession || !hasText;
+    document.getElementById("generateFactsButton").disabled = !hasSession || !hasText;
     document.getElementById("generateDraftButton").disabled = !hasSession || !hasText;
     document.getElementById("transcriptNextButton").disabled = !hasSession || !hasText;
     document.getElementById("saveDraftButton").disabled = !canEditDraft;

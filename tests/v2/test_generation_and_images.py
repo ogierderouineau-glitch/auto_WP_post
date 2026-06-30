@@ -19,7 +19,7 @@ from app.v2.knowledge_base.step_03_validator import WorkbookValidator
 WORKBOOK = Path(
     os.getenv(
         "V2_TEST_WORKBOOK",
-        "/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V5.xlsm",
+        "/home/ogier-derouineau/Documents/FLAIRLAB_Knowledge_Base_Revised_V6.xlsm",
     )
 )
 
@@ -83,6 +83,13 @@ class GenerationAndImageTests(unittest.TestCase):
         focal_def = schema["$defs"]["NormalizedFocalPoint"]
         self.assertFalse(boolean_def["additionalProperties"])
         self.assertFalse(focal_def["additionalProperties"])
+        enum_list_rows = [
+            row for row in self.snapshot.image_analysis_rules
+            if row.enabled and row.expected_output == "enum_list"
+        ]
+        self.assertTrue(enum_list_rows)
+        for row in enum_list_rows:
+            self.assertEqual(schema["properties"][row.analysis_key]["type"], "array")
 
     def test_pillow_values_come_from_workbook_and_original_survives(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -74,6 +74,8 @@ class ACFFieldSchema(WorkbookRow):
     source_fact_keys: tuple[str, ...] = ()
     guidance_de: str | None = None
     example: Any = None
+    generation_condition: str | None = None
+    include_in_image_metadata_context: bool | None = None
     validation_rule: str | None = None
     include_in_ai_schema: bool
     include_in_payload: bool
@@ -190,6 +192,22 @@ class ImageMetadataField(WorkbookRow):
     validation_rule: str | None = None
     example: Any = None
     enabled: bool
+
+
+class ImageMetadataRule(WorkbookRow):
+    rule_id: str
+    enabled: bool
+    post_type_key: str
+    workflow_stage: str
+    trigger_type: str
+    trigger_key: str | None = None
+    trigger_value: tuple[str, ...] = ()
+    source_fact_keys: tuple[str, ...] = ()
+    target_field_keys: tuple[str, ...] = ()
+    usage_mode: str
+    priority: str
+    instruction_de: str
+    notes_de: str | None = None
 
 
 class InternalLinkRecord(WorkbookRow):
@@ -320,6 +338,7 @@ class WorkbookSnapshot(BaseModel):
     image_analysis_rules: tuple[ImageAnalysisRule, ...]
     pillow_rules: tuple[PillowRule, ...]
     image_metadata_fields: tuple[ImageMetadataField, ...]
+    image_metadata_rules: tuple[ImageMetadataRule, ...]
     internal_links: tuple[InternalLinkRecord, ...]
     internal_link_rules: tuple[InternalLinkRule, ...]
     workflow_steps: tuple[WorkflowStep, ...]

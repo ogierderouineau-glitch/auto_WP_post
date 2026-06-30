@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict
 WORKBOOK = Path(
     os.getenv(
         "V2_TEST_WORKBOOK",
-        "/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V5.xlsm",
+        "/home/ogier-derouineau/Documents/FLAIRLAB_Knowledge_Base_Revised_V6.xlsm",
     )
 )
 
@@ -177,7 +177,19 @@ class WorkbookFakeVision(VisionProvider):
         for row in self.snapshot.image_analysis_rules:
             if not row.enabled:
                 continue
-            if row.output_domain:
+            if row.output_domain and row.expected_output == "enum_list":
+                family = tuple(self.snapshot.validation_family(row.output_domain))
+                if row.analysis_key == "visible_roles":
+                    data[row.analysis_key] = [
+                        value for value in ("bartender", "bar_team_member") if value in family
+                    ][:1]
+                elif row.analysis_key == "visible_actions":
+                    data[row.analysis_key] = [
+                        value for value in ("showbartending", "flair_bartending") if value in family
+                    ][:1]
+                else:
+                    data[row.analysis_key] = [family[0]]
+            elif row.output_domain:
                 data[row.analysis_key] = next(iter(self.snapshot.validation_family(row.output_domain)))
             elif row.expected_output == "short_text":
                 data[row.analysis_key] = "Mobile Bar bei einem Event"
@@ -322,6 +334,12 @@ class StructuredPipelineTests(unittest.TestCase):
             )
             self.assertTrue(session.wordpress_payload["meta"])
             self.assertTrue(session.wordpress_payload["acf"])
+            self.assertIn("event_story", session.generation_trace)
+            story_trace = session.generation_trace["event_story"]
+            self.assertEqual(story_trace["generation_task"], "acf_field_generation")
+            self.assertTrue(story_trace["rules"])
+            self.assertTrue(any(rule["shared"] for rule in story_trace["rules"]))
+            self.assertTrue(any(not rule["shared"] for rule in story_trace["rules"]))
             self.assertEqual(session.ai_usage["call_count"], 4)
             self.assertEqual(session.ai_usage["total_tokens"], 60)
             self.assertEqual(session.ai_usage["services"]["openai_text"]["call_count"], 4)
@@ -636,23 +654,42 @@ class StructuredPipelineTests(unittest.TestCase):
             ]
             final_context = image_contexts[-1]
             self.assertEqual(
-                final_context["image_metadata_priority_facts"]["bartender"],
+                final_context["base_confirmed_facts"]["bartender"]["value"],
                 "Barkeeper Max",
             )
             self.assertEqual(
-                final_context["image_metadata_priority_facts"]["service_type"],
+                final_context["base_confirmed_facts"]["service_type"]["value"],
                 "Cocktailshow",
             )
             self.assertEqual(
-                final_context["image_metadata_priority_facts"]["additional_services"],
+                final_context["base_confirmed_facts"]["additional_services"]["value"],
                 "Show-Bartending mit Flair-Einlage",
             )
             self.assertIn("shared_fields", final_context)
             self.assertIn("acf_source_fields", final_context)
             self.assertIn("wordpress_payload", final_context)
-            rules = " ".join(final_context["image_metadata_usage_rules"])
-            self.assertIn("bartender", rules)
-            self.assertIn("show", rules)
+            caption_context = final_context["fields"]["image_caption"]
+            self.assertEqual(
+                caption_context["priority_facts"]["bartender"]["value"],
+                "Barkeeper Max",
+            )
+            self.assertEqual(
+                caption_context["priority_facts"]["service_type"]["value"],
+                "Cocktailshow",
+            )
+            rule_ids = {row["rule_id"] for row in caption_context["matching_rules"]}
+            self.assertIn("img_meta_001", rule_ids)
+            self.assertIn("img_meta_002", rule_ids)
+            must_use = final_context["must_use_when_natural"]
+            self.assertTrue(must_use)
+            must_use_facts = {
+                key: value["value"]
+                for rule in must_use
+                for key, value in rule["confirmed_source_facts"].items()
+            }
+            self.assertEqual(must_use_facts["bartender"], "Barkeeper Max")
+            self.assertEqual(must_use_facts["service_type"], "Cocktailshow")
+            self.assertEqual(must_use_facts["additional_services"], "Show-Bartending mit Flair-Einlage")
             self.assertEqual(len(wordpress.payloads), 1)
             self.assertEqual(len(wordpress.payloads[0].media), 1)
             self.assertEqual(

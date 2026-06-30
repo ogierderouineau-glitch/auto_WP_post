@@ -190,7 +190,9 @@ def build_image_analysis_model(
     for row in rows:
         if not row.enabled:
             continue
-        if row.output_domain:
+        if row.output_domain and row.expected_output == "enum_list":
+            annotation = list[Literal.__getitem__(enum_families[row.output_domain])]
+        elif row.output_domain:
             annotation = Literal.__getitem__(enum_families[row.output_domain])
         else:
             annotation = type_map.get(row.expected_output, Any)

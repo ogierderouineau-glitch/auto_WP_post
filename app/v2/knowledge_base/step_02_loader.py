@@ -18,6 +18,7 @@ from app.v2.knowledge_base.step_01_models import (
     ContextManifestRow,
     ImageAnalysisRule,
     ImageMetadataField,
+    ImageMetadataRule,
     InternalLinkRecord,
     InternalLinkRule,
     OutputSpecification,
@@ -48,6 +49,7 @@ REQUIRED_SHEETS = {
     "image_rules_pillow",
     "image_analysis_rules",
     "image_metadata_schema",
+    "image_metadata_rules",
     "internal_links_database",
     "internal_link_rules",
     "output_specification",
@@ -67,6 +69,8 @@ LIST_COLUMNS = {
     "excluded_tags",
     "semantic_prompt_hints",
     "anchor_variants",
+    "trigger_value",
+    "target_field_keys",
     "allowed_next_states",
     "required_data",
 }
@@ -83,6 +87,7 @@ BOOLEAN_COLUMNS = {
     "required_for_analysis",
     "include_in_ai_schema",
     "include_in_payload",
+    "include_in_image_metadata_context",
     "terminal",
 }
 
@@ -177,6 +182,7 @@ class WorkbookLoader:
             image_analysis_rules=self._models(workbook["image_analysis_rules"], ImageAnalysisRule),
             pillow_rules=self._models(workbook["image_rules_pillow"], PillowRule),
             image_metadata_fields=self._models(workbook["image_metadata_schema"], ImageMetadataField),
+            image_metadata_rules=self._models(workbook["image_metadata_rules"], ImageMetadataRule),
             internal_links=self._models(workbook["internal_links_database"], InternalLinkRecord),
             internal_link_rules=self._models(workbook["internal_link_rules"], InternalLinkRule),
             workflow_steps=self._models(workbook["agent_workflow"], WorkflowStep),

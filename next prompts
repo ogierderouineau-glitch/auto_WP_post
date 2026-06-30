@@ -1,15 +1,8 @@
-- need to print milestones to the terminal if possible, so I can follow whats being done
-- suggest a plan to make the current solution as versatile as possible when it comes to different post types. In the file, the 'post_type_key' column is the beacon. It needs to accept additional data under tab 'ACF_fields_schema', 'post_blueprint', 'story_patterns', 'style_rules', 'internal_links_database', 'post_examples', 'agent_instructions', 'seo_rules'
-Please write that down in the README file to help setting up a new post type. Highlight the most important ones to get the juice out the machine
-- Add other very relevant information in the README file
-- Add your perfect test voice message text as tooltip over 'Aufnahme starten' button
-
------------------------------------------
-NEXT
-- Genaues Eventdatum fact isnt correctly transcribed. Ideally value_type 'date'  is to be extracted as dd.MM.yyyy
 
 
-- make the master prompt example integrate more context to feed fact_list_item_html for 'fakten' ACF field, I want to see al that it can do with facts like fact_speciality, fact_focus, fact_challenge
-I was expecting fact_challenge to pick up on the word 'Herausforderung' that was transcribed, for both these fields: fact_challenge & event_challenge. They both have that German word under 'description_de' column, yet they weren't added to the facts list. It would be worth being able to really capture that kind of stuff. should I use extra input_facts to really stress that out? Thinking Id rather avoid that to avoid more template maintenance. Highlight and Solution and atmosphere were well processed I think it may just be a question of matching fields in a fuzzier way on 'description_de' column
 
-- is there a straightforward way to show what guidance prompt rules were passed to generate each field? In case there is a guidance part shared by several fields, in would be nice to add them and flag them as shared rule
+
+
+YOAST
+- Yoast doesn't see my internal links (Internal links: No internal links appear in this page) in the ACF field, nor the content (Text length: The text contains 0 words), maybe because I don't use the standard content Widget. Is that bad for SEO?
+- Keyphrase synonyms should be added

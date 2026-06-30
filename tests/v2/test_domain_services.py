@@ -19,9 +19,21 @@ from app.v2.sessions.step_03_service import ContentSessionService
 WORKBOOK = Path(
     os.getenv(
         "V2_TEST_WORKBOOK",
-        "/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V5.xlsm",
+        "/home/ogier-derouineau/Documents/FLAIRLAB_Knowledge_Base_Revised_V6.xlsm",
     )
 )
+
+
+class StaticKnowledge:
+    def __init__(self, snapshot: object) -> None:
+        self.snapshot = snapshot
+
+    def current(self) -> object:
+        return self.snapshot
+
+    def by_hash(self, workbook_hash: str) -> object:
+        self.assert_hash = workbook_hash
+        return self.snapshot
 
 
 @unittest.skipUnless(WORKBOOK.is_file(), f"V2 test workbook not found: {WORKBOOK}")
@@ -165,19 +177,27 @@ class DomainServiceTests(unittest.TestCase):
             ContentSessionService._acf_field_is_eligible(row, confirmed)
         )
 
-    def test_optional_challenge_field_requires_content_signal(self) -> None:
+    def test_optional_challenge_field_requires_confirmed_fact_condition(self) -> None:
         row = next(
             item for item in self.snapshot.acf_fields
             if item.field_key == "event_challenge"
         )
+        self.assertEqual(row.generation_condition, "fact_present:challenge")
         self.assertFalse(
             ContentSessionService._acf_field_is_eligible(row, self.session())
         )
+        confirmed = self.session(
+            confirmed_facts={
+                "challenge": FactValue(
+                    value="enger Aufbau",
+                    source="user_correction",
+                    confidence=1,
+                    confirmed=True,
+                )
+            }
+        )
         self.assertTrue(
-            ContentSessionService._acf_field_is_eligible(
-                row,
-                self.session(content_signals={"challenge_present"}),
-            )
+            ContentSessionService._acf_field_is_eligible(row, confirmed)
         )
 
     def test_user_correction_overrides_extracted_fact(self) -> None:
@@ -268,3 +288,49 @@ class DomainServiceTests(unittest.TestCase):
                 expected_version=1,
             )
             self.assertEqual(saved.version, 2)
+
+    def test_featured_image_selection_is_stored_in_v2_image_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = FileSessionRepository(temporary)
+            session = self.session(
+                state="uploading",
+                image_refs=[
+                    MediaReference(
+                        media_id="image-1",
+                        filename="first.png",
+                        storage_uri="local://first.png",
+                        content_type="image/png",
+                        size_bytes=1,
+                    ),
+                    MediaReference(
+                        media_id="image-2",
+                        filename="second.png",
+                        storage_uri="local://second.png",
+                        content_type="image/png",
+                        size_bytes=1,
+                    ),
+                ],
+                processed_images=[
+                    {"media_id": "image-1", "filename": "first.webp", "path": "local://first.webp"},
+                    {"media_id": "image-2", "filename": "second.webp", "path": "local://second.webp"},
+                ],
+            )
+            repository.create(session)
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(self.snapshot),
+                repository=repository,
+            )
+
+            updated = service.set_featured_image(
+                session.session_id,
+                filename="second.webp",
+                expected_version=session.version,
+            )
+
+            featured = [
+                row for row in updated.image_metadata
+                if row.get("image_usage") == "featured"
+            ]
+            self.assertEqual(len(featured), 1)
+            self.assertEqual(featured[0]["media_id"], "image-2")
+            self.assertEqual(featured[0]["image_priority"], 1)
