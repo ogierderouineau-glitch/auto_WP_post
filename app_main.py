@@ -5035,7 +5035,7 @@ async function saveTranscript(){
 }
 async function generateFactsFromTranscript(){
   await saveTranscript();
-  status("Transkript gespeichert. Fakten bitte im V2-Modus über die V2-Analyse generieren.");
+  status("Transkript gespeichert. Fakten können jetzt aus dem Transkript generiert werden.");
 }
 async function generateDraft(){
   if(!sessionId) throw new Error("Bitte zuerst eine Session erstellen.");
@@ -5212,11 +5212,6 @@ def app_interface() -> str:
     return rendered_app_html()
 
 
-@app.get("/v2", response_class=HTMLResponse)
-def v2_interface() -> str:
-    return (APP_ROOT / "app/v2/api/v2_ui.html").read_text(encoding="utf-8")
-
-
 @app.get("/v2/legacy-ui-adapter.js", include_in_schema=False)
 def v2_legacy_ui_adapter() -> Response:
     return Response(
@@ -5327,7 +5322,7 @@ async def upload_knowledge_workbook(
           status_code=400,
           detail={
             **exc.as_dict(),
-            "message": f"V2 workbook validation failed: {exc.message}",
+            "message": f"Workbook validation failed: {exc.message}",
           },
         ) from exc
       except Exception as exc:
@@ -5336,7 +5331,7 @@ async def upload_knowledge_workbook(
           status_code=400,
           detail={
             "error_code": "invalid_workbook",
-            "message": f"V2 workbook validation failed: {exc}",
+            "message": f"Workbook validation failed: {exc}",
             "details": [],
           },
         ) from exc
@@ -5628,7 +5623,7 @@ def get_session_image(
                 None,
             )
             if reference is None:
-                raise HTTPException(status_code=404, detail="Image not found in this V2 session.")
+                raise HTTPException(status_code=404, detail="Image not found in this session.")
             source_uri = reference.storage_uri
             content_type = reference.content_type
         suffix = Path(filename).suffix or ".bin"
@@ -5679,7 +5674,7 @@ def get_session_original_image(
             None,
         )
         if reference is None:
-            raise HTTPException(status_code=404, detail="Original V2 image not found.")
+            raise HTTPException(status_code=404, detail="Original image not found.")
         suffix = Path(reference.filename).suffix or ".bin"
         fd, temporary_name = tempfile.mkstemp(prefix="v2-original-", suffix=suffix)
         os.close(fd)

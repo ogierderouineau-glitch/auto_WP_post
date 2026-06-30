@@ -62,7 +62,7 @@ from app.v2.validation.step_01_draft import DraftValidator
 
 
 class ContentSessionService:
-    """Application service for the typed V2 session lifecycle."""
+    """Application service for the typed content session lifecycle."""
 
     def __init__(
         self,
@@ -101,7 +101,7 @@ class ContentSessionService:
         if os.getenv("V2_MILESTONE_LOGS", "1").lower() in {"0", "false", "off", "no"}:
             return
         print(
-            f"[V2 milestone] session={session.session_id[:8]} state={session.state} {message}",
+            f"[pipeline milestone] session={session.session_id[:8]} state={session.state} {message}",
             flush=True,
         )
 
@@ -151,7 +151,7 @@ class ContentSessionService:
             or not post_type.template_ready
         ):
             raise UnknownPostTypeError(
-                f"Post type {post_type_key!r} is unavailable for V2 generation."
+                f"Post type {post_type_key!r} is unavailable for generation."
             )
         session = ContentSession(
             session_id=uuid.uuid4().hex,
@@ -240,7 +240,7 @@ class ContentSessionService:
         use_vision: bool = True,
     ) -> ContentSession:
         if self.object_storage is None:
-            raise RuntimeError("A V2 ObjectStorageProvider is not configured.")
+            raise RuntimeError("An ObjectStorageProvider is not configured.")
         session = self.repository.get(session_id)
         self._milestone(session, f"upload received kind={kind} filename={filename}")
         storage_uri = self.object_storage.put(
@@ -326,7 +326,7 @@ class ContentSessionService:
         if session.audio_refs:
             if self.speech_to_text is None or self.object_storage is None:
                 raise RuntimeError(
-                    "V2 speech transcription requires configured speech and storage providers."
+                    "Speech transcription requires configured speech and storage providers."
                 )
             transcripts: list[str] = []
             for reference in session.audio_refs:
@@ -670,7 +670,7 @@ class ContentSessionService:
             if not updates["audio_refs"]:
                 updates["transcript"] = ""
         else:
-            raise ValueError(f"Unsupported V2 media kind: {kind}")
+            raise ValueError(f"Unsupported media kind: {kind}")
         return self.repository.save(session.model_copy(update=updates), expected_version=expected_version)
 
     def optimize_image(
@@ -682,7 +682,7 @@ class ContentSessionService:
         expected_version: int,
     ) -> ContentSession:
         if self.image_editor is None or self.object_storage is None:
-            raise RuntimeError("A V2 ImageEditingProvider and ObjectStorageProvider are required.")
+            raise RuntimeError("An ImageEditingProvider and ObjectStorageProvider are required.")
         session = self.repository.get(session_id)
         reference, processed = self._find_image_reference_and_processed(session, filename)
         if processed is None:
@@ -742,7 +742,7 @@ class ContentSessionService:
         expected_version: int,
     ) -> ContentSession:
         if self.object_storage is None:
-            raise RuntimeError("A V2 ObjectStorageProvider is required.")
+            raise RuntimeError("An ObjectStorageProvider is required.")
         session = self.repository.get(session_id)
         reference, processed = self._find_image_reference_and_processed(session, filename)
         if processed is None:
@@ -1054,7 +1054,7 @@ class ContentSessionService:
         schema: type[Any],
     ) -> Any:
         if self.language_model is None:
-            raise RuntimeError("A V2 LanguageModelProvider is not configured.")
+            raise RuntimeError("A LanguageModelProvider is not configured.")
         current_messages = list(messages)
         validation_errors: list[str] = []
         max_attempts = 5 if task in {"shared_field_generation", "acf_field_generation"} else 3
@@ -1776,7 +1776,7 @@ class ContentSessionService:
         if not session.approval.approved:
             raise PublishingNotApprovedError("Explicit approval is required before publication.")
         if self.wordpress is None:
-            raise RuntimeError("A V2 WordPressProvider is not configured.")
+            raise RuntimeError("A WordPressProvider is not configured.")
         snapshot = self.knowledge.by_hash(session.workbook_hash)
         state_machine = SessionStateMachine(snapshot)
         refined = self._generate_missing_image_metadata(

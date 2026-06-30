@@ -2,11 +2,11 @@
 
 This project turns event inputs — voice notes, manual notes and images — into a structured WordPress post draft, then publishes it through WordPress REST APIs.
 
-The current V2 workflow is workbook-driven. The workbook is the source of truth for post types, fact extraction, draft fields, image metadata, internal links, style rules and payload routing.
+The current production workflow is workbook-driven. The workbook is the source of truth for post types, fact extraction, draft fields, image metadata, internal links, style rules and payload routing.
 
-## Current V2 workflow
+## Current production workflow
 
-1. Create a V2 content session.
+1. Create a content session.
 2. Upload or record voice notes, add manual notes and optionally upload images.
 3. Transcribe and analyze the input.
 4. Review/edit extracted facts under the transcript panel.
@@ -15,16 +15,16 @@ The current V2 workflow is workbook-driven. The workbook is the source of truth 
 7. Review image metadata and draft fields.
 8. Publish to WordPress.
 
-The old UI is still used as the main interface, but in V2 mode its core actions are routed to `/api/content-sessions`.
+The familiar app UI is the main interface. Its core actions are routed to the structured `/api/content-sessions` workflow.
 
 ## Terminal milestones
 
-V2 prints readable milestones to the server terminal for longer-running stages, for example:
+The workflow prints readable milestones to the server terminal for longer-running stages, for example:
 
 ```text
-[V2 milestone] session=abc12345 state=generating shared field generation started
-[V2 milestone] session=abc12345 state=generating ACF field generation finished
-[V2 milestone] session=abc12345 state=needs_review draft generation finished
+[pipeline milestone] session=abc12345 state=generating shared field generation started
+[pipeline milestone] session=abc12345 state=generating ACF field generation finished
+[pipeline milestone] session=abc12345 state=needs_review draft generation finished
 ```
 
 This helps follow the pipeline while testing. Disable these logs with:
@@ -36,7 +36,6 @@ export V2_MILESTONE_LOGS=0
 ## Running locally
 
 ```bash
-export CONTENT_PIPELINE_VERSION=v2
 export V2_KNOWLEDGE_WORKBOOK_PATH=/absolute/path/FLAIRLAB_Knowledge_Base_Revised_V5.xlsm
 myenv/bin/uvicorn main:app --reload
 ```
@@ -45,7 +44,6 @@ Useful environment variables:
 
 | Variable | Purpose |
 |---|---|
-| `CONTENT_PIPELINE_VERSION=v2` | Activates the V2 adapter in the familiar UI |
 | `V2_KNOWLEDGE_WORKBOOK_PATH` | Workbook source of truth |
 | `V2_SESSION_ROOT` | Local file-backed session storage |
 | `V2_SESSION_GCS_PREFIX` | Cloud/GCS session/object prefix |
@@ -62,7 +60,7 @@ Run the full suite:
 myenv/bin/python -m unittest discover -s tests -p 'test*.py'
 ```
 
-Run focused V2 checks:
+Run focused structured workflow checks:
 
 ```bash
 myenv/bin/python -m unittest tests.v2.test_structured_pipeline tests.v2.test_legacy_ui_adapter tests.v2.test_api
@@ -175,7 +173,7 @@ Metadata mit Vision nach dem ersten Entwurf generieren lassen
 
 When checked, contextual Vision analysis runs during draft generation/save, after the draft context is available. This helps metadata use confirmed facts such as bartender names or show/service details.
 
-For WordPress media descriptions, V2 prefers the workbook field mapped to destination key `description`. Older `image_description_wp` values are kept as fallback only.
+For WordPress media descriptions, the workflow prefers the workbook field mapped to destination key `description`. Older `image_description_wp` values are kept as fallback only.
 
 ## Test voice message
 

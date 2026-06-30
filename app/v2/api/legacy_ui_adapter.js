@@ -70,7 +70,7 @@
         v2WakeLock = null;
       });
     } catch (error) {
-      console.warn("V2 wake lock unavailable", error);
+      console.warn("Wake lock unavailable", error);
     }
   }
 
@@ -79,7 +79,7 @@
     try {
       await v2WakeLock.release();
     } catch (error) {
-      console.warn("V2 wake lock release failed", error);
+      console.warn("Wake lock release failed", error);
     } finally {
       v2WakeLock = null;
     }
@@ -98,10 +98,10 @@
         });
       }
       if (current.status !== "complete") {
-        throw new Error(current.error || `V2-Job ${current.job_id} ist fehlgeschlagen.`);
+        throw new Error(current.error || `Job ${current.job_id} ist fehlgeschlagen.`);
       }
       if (!current.session) {
-        throw new Error(`V2-Job ${current.job_id} lieferte keine Session zurück.`);
+        throw new Error(`Job ${current.job_id} lieferte keine Session zurück.`);
       }
       return current.session;
     } finally {
@@ -280,15 +280,15 @@
         }
         if (statusValue === "processing" && Date.now() - startedAt < 180000) {
           pillowStatusPollTimer = setTimeout(
-            () => poll().catch(error => console.warn("V2 Pillow poll failed", error)),
+            () => poll().catch(error => console.warn("Pillow poll failed", error)),
             2200
           );
         }
       } catch (error) {
-        console.warn("V2 Pillow status poll failed", error);
+        console.warn("Pillow status poll failed", error);
       }
     };
-    poll().catch(error => console.warn("V2 Pillow poll failed", error));
+    poll().catch(error => console.warn("Pillow poll failed", error));
   };
 
   function factValues(session) {
@@ -370,7 +370,7 @@
     panel.style.marginTop = "14px";
     panel.style.borderColor = "#f59e0b";
     panel.innerHTML = `
-      <summary style="cursor:pointer;font-weight:800;color:#1f2933;">V2 Fakten anzeigen / bearbeiten</summary>
+      <summary style="cursor:pointer;font-weight:800;color:#1f2933;">Fakten anzeigen / bearbeiten</summary>
       <p id="v2ClarificationQuestions"></p>
       <table class="v2-facts-table" style="width:100%;border-collapse:collapse;margin:10px 0;">
         <thead><tr><th style="text-align:left;">Fakt</th><th style="text-align:left;">Wert</th></tr></thead>
@@ -416,7 +416,7 @@
   }
 
   async function confirmV2Facts() {
-    if (!v2Session) throw new Error("Bitte zuerst eine V2-Session erstellen.");
+    if (!v2Session) throw new Error("Bitte zuerst eine Session erstellen.");
     let corrections;
     try {
       corrections = factsFromTable();
@@ -444,7 +444,7 @@
         body: JSON.stringify({expected_version: v2Session.version}),
       }
     );
-    await renderV2(data.session, {statusText: "Fakten bestätigt und V2-Analyse aktualisiert."});
+    await renderV2(data.session, {statusText: "Fakten bestätigt und Analyse aktualisiert."});
   }
   window.confirmV2Facts = confirmV2Facts;
 
@@ -539,7 +539,7 @@
       await loadActiveV2Session();
     }
     if (!v2Session || !Number.isInteger(Number(v2Session.version))) {
-      throw new Error("V2-Session-Version fehlt. Bitte Session neu laden und Upload erneut versuchen.");
+      throw new Error("Session-Version fehlt. Bitte Session neu laden und Upload erneut versuchen.");
     }
     const form = new FormData();
     form.append("expected_version", String(Number(v2Session.version)));
@@ -565,7 +565,7 @@
       const imageItem = findSessionImageItem(filename);
       const localUrl = v2LocalImagePreviewUrls.get(imageItem?.original_filename || filename);
       if (localUrl) return await (await fetch(localUrl)).blob();
-      throw new Error("Originalbild konnte nicht aus der V2-Session geladen werden.");
+      throw new Error("Originalbild konnte nicht aus der Session geladen werden.");
     }
     return await response.blob();
   };
@@ -596,7 +596,7 @@
           isProcessed,
         });
       } catch (error) {
-        console.warn("V2 image preview failed", error);
+        console.warn("Image preview failed", error);
       }
     }
     if (!items.length) return;
@@ -624,7 +624,7 @@
 
   removeUploadedMedia = async function removeUploadedMedia(kind, filename) {
     if (!v2Session) await loadActiveV2Session();
-    if (!v2Session) throw new Error("Bitte zuerst eine V2-Session erstellen.");
+    if (!v2Session) throw new Error("Bitte zuerst eine Session erstellen.");
     const data = await v2Api(
       `/api/content-sessions/${v2Session.session_id}/media/${kind}/${encodeURIComponent(filename)}`,
       {
@@ -634,14 +634,14 @@
       }
     );
     await renderV2(data.session, {
-      statusText: kind === "images" ? "Bild aus V2-Session entfernt." : "Sprachnachricht aus V2-Session entfernt.",
+      statusText: kind === "images" ? "Bild aus der Session entfernt." : "Sprachnachricht aus der Session entfernt.",
     });
   };
 
   setFeaturedImage = async function setFeaturedImage(filename) {
     if (!filename) return;
     if (!v2Session) await loadActiveV2Session();
-    if (!v2Session) throw new Error("Bitte zuerst eine V2-Session erstellen.");
+    if (!v2Session) throw new Error("Bitte zuerst eine Session erstellen.");
     const data = await v2Api(
       `/api/content-sessions/${v2Session.session_id}/featured-image`,
       {
@@ -653,7 +653,7 @@
         }),
       }
     );
-    await renderV2(data.session, {statusText: "Titelbild in V2 gespeichert."});
+    await renderV2(data.session, {statusText: "Titelbild gespeichert."});
   };
 
   function appendPendingV2ImageCards(files) {
@@ -757,7 +757,7 @@
     saveKey();
     const selected = document.getElementById("postType").value.toLowerCase();
     if (selected !== "event") {
-      throw new Error("Die V2-Testphase unterstützt derzeit den Beitragstyp Event.");
+      throw new Error("Der aktuelle Workflow unterstützt derzeit den Beitragstyp Event.");
     }
     if (!options.preservePendingUploads) clearV2LocalMediaUi();
     const data = await v2Api("/api/content-sessions", {
@@ -768,7 +768,7 @@
     sessionId = data.session.session_id;
     sessionStorage.setItem("flairlab_session_id", sessionId);
     clearSessionRecoveryBanner();
-    await renderV2(data.session, {statusText: "V2-Session erstellt."});
+    await renderV2(data.session, {statusText: "Session erstellt."});
     openPanel("panelUpload", true);
   };
 
@@ -785,7 +785,7 @@
       sessionId = "";
       currentSessionData = null;
       await createSession();
-      status("Eine nicht kompatible ältere Browser-Session wurde durch eine neue V2-Session ersetzt.");
+      status("Eine nicht kompatible ältere Browser-Session wurde durch eine neue Session ersetzt.");
     }
   };
 
@@ -819,7 +819,7 @@
     }
     recentSelectedSessionIds = new Set();
     await loadRecentSessions();
-    status(`${Number(data.deleted || 0)} V2-Session(s) gelöscht.`);
+    status(`${Number(data.deleted || 0)} Session(s) gelöscht.`);
   };
 
   openSessionLogsById = async function openSessionLogsById(targetSessionId) {
@@ -838,7 +838,7 @@
   loadKnowledgeStatus = async function loadKnowledgeStatus() {
     if (!key()) {
       document.getElementById("knowledgeSummary").textContent =
-        "Bitte zuerst den API-Schlüssel eingeben. Danach wird das aktive V2 Workbook geprüft.";
+        "Bitte zuerst den API-Schlüssel eingeben. Danach wird die aktive Database Datei geprüft.";
       document.getElementById("knowledgeActions").innerHTML = "";
       return;
     }
@@ -849,7 +849,7 @@
     sessionStorage.setItem("flairlab_knowledge_status", JSON.stringify(version));
     const target = document.getElementById("knowledgeSummary");
     target.innerHTML =
-      `<strong>V2 Workbook:</strong> ${esc(version.filename || "")}<br>` +
+      `<strong>Database Datei:</strong> ${esc(version.filename || "")}<br>` +
       `<strong>SHA-256:</strong> ${esc(version.sha256 || "")}<br>` +
       `<strong>Validiert:</strong> ja`;
     document.getElementById("knowledgeActions").innerHTML = "";
@@ -900,7 +900,7 @@
 
   uploadPendingMediaFiles = async function uploadPendingMediaFiles() {
     const videos = [...document.getElementById("videos").files];
-    if (videos.length) throw new Error("Video-Uploads sind im aktuellen V2-Workflow nicht vorgesehen.");
+    if (videos.length) throw new Error("Video-Uploads sind im aktuellen Workflow nicht vorgesehen.");
     const images = [...document.getElementById("images").files];
     markLocalImageCardsProcessing(images);
     for (const [index, image] of images.entries()) {
@@ -912,11 +912,11 @@
     }
     if (images.length) {
       await renderV2(v2Session, {
-        statusText: `Bilder in V2 gespeichert und ${imageUploadActionLabel()}.`,
+        statusText: `Bilder gespeichert und ${imageUploadActionLabel()}.`,
       });
       clearUploadInputs({images: true, videos: true});
       if (v2Session.state === "needs_review") {
-        status("Bilder werden per V2/Pillow verarbeitet und der Entwurf wird aktualisiert...");
+        status("Bilder werden per Pillow verarbeitet und der Entwurf wird aktualisiert...");
         await saveDraft();
       }
     }
@@ -926,7 +926,7 @@
   uploadFiles = async function uploadFiles() {
     if (!sessionId) await createSession({preservePendingUploads: true});
     const videos = [...document.getElementById("videos").files];
-    if (videos.length) throw new Error("Video-Uploads sind im aktuellen V2-Workflow nicht vorgesehen.");
+    if (videos.length) throw new Error("Video-Uploads sind im aktuellen Workflow nicht vorgesehen.");
     const voices = [...queuedRecordedVoiceFiles(), ...document.getElementById("voice").files];
     for (const voice of voices) await uploadV2File(voice, "audio");
     for (const image of [...document.getElementById("images").files]) {
@@ -934,11 +934,11 @@
     }
     clearUploadInputs({voices: true, images: true, videos: true});
     clearQueuedRecordings();
-    await renderV2(v2Session, {statusText: "Dateien in V2 gespeichert."});
+    await renderV2(v2Session, {statusText: "Dateien gespeichert."});
     if (voices.length) {
-      status("Sprachnachrichten in V2 gespeichert. Klicke „Sprache transkribieren“, wenn die Faktenanalyse starten soll.");
+      status("Sprachnachrichten gespeichert. Klicke „Sprache transkribieren“, wenn die Faktenanalyse starten soll.");
     } else if (v2Session.state === "needs_review" && document.getElementById("draftCsv").value.trim()) {
-      status("Bilder werden per V2/Pillow verarbeitet und der Entwurf wird aktualisiert...");
+      status("Bilder werden per Pillow verarbeitet und der Entwurf wird aktualisiert...");
       await saveDraft();
     }
   };
@@ -954,7 +954,7 @@
     else await loadActiveV2Session();
     for (const voice of queuedVoices) await uploadV2File(voice, "audio");
     clearQueuedRecordings();
-    await renderV2(v2Session, {statusText: "Aufnahme in V2 gespeichert. Klicke „Sprache transkribieren“, wenn die Faktenanalyse starten soll."});
+    await renderV2(v2Session, {statusText: "Aufnahme gespeichert. Klicke „Sprache transkribieren“, wenn die Faktenanalyse starten soll."});
     openPanel("panelUpload");
   };
 
@@ -1037,7 +1037,7 @@
 
   transcribe = async function transcribe() {
     if (!v2Session && !sessionId) await createSession({preservePendingUploads: true});
-    if (!v2Session) throw new Error("Bitte zuerst eine V2-Session erstellen.");
+    if (!v2Session) throw new Error("Bitte zuerst eine Session erstellen.");
     const pendingVoices = [...queuedRecordedVoiceFiles(), ...document.getElementById("voice").files];
     if (pendingVoices.length) {
       for (const voice of pendingVoices) await uploadV2File(voice, "audio");
@@ -1049,7 +1049,7 @@
     if (v2Session.state === "needs_input") {
       renderV2Clarifications(v2Session);
       status(
-        "V2 wartet auf bestätigte Fakten. Bitte im Abschnitt „V2 Faktenprüfung“ prüfen und bestätigen."
+        "Der Workflow wartet auf bestätigte Fakten. Bitte im Abschnitt „Faktenprüfung“ prüfen und bestätigen."
       );
       return;
     }
@@ -1067,13 +1067,13 @@
       if (error.status !== 409) throw error;
       await refreshV2Session();
       if (v2Session && v2Session.state === "needs_review") {
-        status("V2-Transkription/Fakten wurden aktualisiert. Der bestehende Entwurf bleibt aktiv.");
+        status("Transkription/Fakten wurden aktualisiert. Der bestehende Entwurf bleibt aktiv.");
         return;
       }
       if (v2Session && v2Session.state === "needs_input") {
         renderV2Clarifications(v2Session);
         status(
-          "V2 wartet auf bestätigte Fakten. Bitte im Abschnitt „V2 Faktenprüfung“ prüfen und bestätigen."
+          "Der Workflow wartet auf bestätigte Fakten. Bitte im Abschnitt „Faktenprüfung“ prüfen und bestätigen."
         );
         return;
       }
@@ -1086,11 +1086,11 @@
         }
       );
     }
-    await renderV2(data.session, {statusText: "V2-Transkription und Faktenanalyse abgeschlossen."});
+    await renderV2(data.session, {statusText: "Transkription und Faktenanalyse abgeschlossen."});
   };
 
   saveTranscript = async function saveTranscript() {
-    if (!v2Session) throw new Error("Bitte zuerst eine V2-Session erstellen.");
+    if (!v2Session) throw new Error("Bitte zuerst eine Session erstellen.");
     const data = await v2Api(
       `/api/content-sessions/${v2Session.session_id}/inputs`,
       {
@@ -1103,13 +1103,13 @@
         }),
       }
     );
-    await renderV2(data.session, {statusText: "Transkript in V2 gespeichert."});
+    await renderV2(data.session, {statusText: "Transkript gespeichert."});
   };
 
   generateFactsFromTranscript = async function generateFactsFromTranscript() {
     if (!v2Session && !sessionId) await createSession({preservePendingUploads: true});
     if (!v2Session) await loadActiveV2Session();
-    if (!v2Session) throw new Error("Bitte zuerst eine V2-Session erstellen.");
+    if (!v2Session) throw new Error("Bitte zuerst eine Session erstellen.");
     if (!document.getElementById("transcript").value.trim()) {
       throw new Error("Bitte zuerst ein Transkript oder Testnotizen eintragen.");
     }
@@ -1139,7 +1139,7 @@
   };
 
   generateDraft = async function generateDraft() {
-    if (!v2Session) throw new Error("Bitte zuerst eine V2-Session erstellen.");
+    if (!v2Session) throw new Error("Bitte zuerst eine Session erstellen.");
     if (!document.getElementById("transcript").value.trim()) {
       throw new Error("Bitte zuerst transkribieren oder Notizen eintragen.");
     }
@@ -1159,12 +1159,12 @@
     if (v2Session.state === "needs_input") {
       renderV2Clarifications(v2Session);
       status(
-        "V2 benötigt bestätigte Fakten. Bitte im Abschnitt „V2 Faktenprüfung“ prüfen und bestätigen."
+        "Der Workflow benötigt bestätigte Fakten. Bitte im Abschnitt „Faktenprüfung“ prüfen und bestätigen."
       );
       return;
     }
     if (v2Session.state !== "ready_to_generate") {
-      throw new Error(`V2 kann aus dem Status „${v2Session.state}“ keinen neuen Entwurf starten.`);
+      throw new Error(`Der Workflow kann aus dem Status „${v2Session.state}“ keinen neuen Entwurf starten.`);
     }
     const generated = await startV2SessionJob(
       `/api/content-sessions/${v2Session.session_id}/generate-job`,
@@ -1176,15 +1176,15 @@
         current_url: null,
         use_vision_for_image_metadata: useVisionOnUpload(),
       },
-      "V2-Entwurf wird im Hintergrund erstellt. Du kannst den Browser kurz verlassen; der Status wird beim Zurückkehren aktualisiert."
+      "Entwurf wird im Hintergrund erstellt. Du kannst den Browser kurz verlassen; der Status wird beim Zurückkehren aktualisiert."
     );
-    await renderV2(generated, {statusText: "V2-Entwurf erstellt."});
+    await renderV2(generated, {statusText: "Entwurf erstellt."});
     openPanel("panelDraft", true);
   };
 
   saveDraft = async function saveDraft() {
     if (!v2Session || v2Session.state !== "needs_review") {
-      throw new Error("Bitte zuerst einen V2-Entwurf erstellen.");
+      throw new Error("Bitte zuerst einen Entwurf erstellen.");
     }
     const {shared, acf} = editedFieldMaps();
     const data = await v2Api(
@@ -1202,13 +1202,13 @@
         }),
       }
     );
-    await renderV2(data.session, {statusText: "Bearbeitete Felder in V2 gespeichert."});
+    await renderV2(data.session, {statusText: "Bearbeitete Felder gespeichert."});
   };
 
   sendDraftChat = async function sendDraftChat() {
     await loadActiveV2Session();
     if (!v2Session || v2Session.state !== "needs_review") {
-      throw new Error("Bitte zuerst einen V2-Entwurf erstellen.");
+      throw new Error("Bitte zuerst einen Entwurf erstellen.");
     }
     const input = document.getElementById("draftChatInput");
     const message = input.value.trim();
@@ -1231,26 +1231,26 @@
       }
     );
     input.value = "";
-    await renderV2(data.session, {statusText: "V2-Entwurf wurde mit dem Agenten aktualisiert."});
+    await renderV2(data.session, {statusText: "Entwurf wurde mit dem Agenten aktualisiert."});
     openPanel("panelDraft", true);
   };
 
   goToWordPressStep = async function goToWordPressStep() {
     await loadActiveV2Session();
     if (!v2Session || !hasV2DraftReadyForWordPress()) {
-      throw new Error("Bitte zuerst einen V2-Entwurf erstellen.");
+      throw new Error("Bitte zuerst einen Entwurf erstellen.");
     }
     openPanel("panelWordPress", true);
-    status("V2-Entwurf bereit. Vor dem WordPress-Schritt Änderungen mit „Entwurf speichern“ übernehmen.");
+    status("Entwurf bereit. Vor dem WordPress-Schritt Änderungen mit „Entwurf speichern“ übernehmen.");
   };
 
   createWordPressPost = async function createWordPressPost() {
     await loadActiveV2Session();
     if (!v2Session || !hasV2DraftReadyForWordPress()) {
-      throw new Error("Bitte zuerst einen V2-Entwurf erstellen.");
+      throw new Error("Bitte zuerst einen Entwurf erstellen.");
     }
     if (v2Session.state === "published") {
-      await renderV2(v2Session, {statusText: "V2-Beitrag wurde bereits veröffentlicht."});
+      await renderV2(v2Session, {statusText: "Beitrag wurde bereits veröffentlicht."});
       showResultModal(adaptSession(v2Session).wordpress_post);
       return;
     }
@@ -1275,9 +1275,9 @@
         expected_version: v2Session.version,
         idempotency_key: `${v2Session.session_id}-publish`,
       },
-      "V2-WordPress-Beitrag wird im Hintergrund erstellt. Bitte Seite möglichst offen lassen; bei Mobile-Sleep wird danach weiter gepollt."
+      "WordPress-Beitrag wird im Hintergrund erstellt. Bitte Seite möglichst offen lassen; bei Mobile-Sleep wird danach weiter gepollt."
     );
-    await renderV2(published, {statusText: "V2-WordPress-Schritt abgeschlossen."});
+    await renderV2(published, {statusText: "WordPress-Schritt abgeschlossen."});
     showResultModal(adaptSession(published).wordpress_post);
   };
 
@@ -1289,7 +1289,7 @@
   };
 
   uploadWordPressMediaLibrary = async function uploadWordPressMediaLibrary() {
-    throw new Error("V2 überträgt Bilder zusammen mit dem freigegebenen Beitrag.");
+    throw new Error("Bilder werden zusammen mit dem freigegebenen Beitrag übertragen.");
   };
 
   const baseUpdateButtons = updateButtons;
@@ -1338,10 +1338,10 @@
 
   persistImageMetadata = async function persistImageMetadata(useSuggestions = false) {
     if (!v2Session) await loadActiveV2Session();
-    if (!v2Session) throw new Error("Bitte zuerst eine V2-Session erstellen.");
+    if (!v2Session) throw new Error("Bitte zuerst eine Session erstellen.");
     if (!currentCompareImageFilename) throw new Error("Kein Bild im Vergleichsfenster ausgewählt.");
     if (useSuggestions) {
-      throw new Error("Automatische Legacy-Metadatenvorschläge sind im V2-Modus durch die strukturierte Bildmetadaten-Generierung ersetzt.");
+      throw new Error("Automatische Legacy-Metadatenvorschläge sind durch die strukturierte Bildmetadaten-Generierung ersetzt.");
     }
     const metadata = {
       alt_text: document.getElementById("imageCompareAlt").value.trim(),
@@ -1361,7 +1361,7 @@
         }),
       }
     );
-    await renderV2(data.session, {statusText: "Bildmetadaten in V2 gespeichert."});
+    await renderV2(data.session, {statusText: "Bildmetadaten gespeichert."});
     populateImageCompareMetadataForm(currentCompareImageFilename);
   };
 
@@ -1370,7 +1370,7 @@
   };
 
   applyVisionMetadataFromCompare = async function applyVisionMetadataFromCompare() {
-    await loadActiveV2Session("V2-Bildanalyse und Metadaten wurden aus der Session aktualisiert.");
+    await loadActiveV2Session("Bildanalyse und Metadaten wurden aus der Session aktualisiert.");
     if (currentCompareImageFilename) populateImageCompareMetadataForm(currentCompareImageFilename);
   };
 
@@ -1388,7 +1388,7 @@
 
   sendImageOptimizationPrompt = async function sendImageOptimizationPrompt() {
     if (!v2Session) await loadActiveV2Session();
-    if (!v2Session) throw new Error("Bitte zuerst eine V2-Session erstellen.");
+    if (!v2Session) throw new Error("Bitte zuerst eine Session erstellen.");
     if (!currentCompareImageFilename) throw new Error("Kein Bild im Vergleichsfenster ausgewählt.");
     const promptInput = document.getElementById("imageOptimizePrompt");
     const prompt = (promptInput && promptInput.value ? promptInput.value : "").trim();
@@ -1427,7 +1427,7 @@
 
   restoreComparedImageToOriginal = async function restoreComparedImageToOriginal() {
     if (!v2Session) await loadActiveV2Session();
-    if (!v2Session) throw new Error("Bitte zuerst eine V2-Session erstellen.");
+    if (!v2Session) throw new Error("Bitte zuerst eine Session erstellen.");
     if (!currentCompareImageFilename) throw new Error("Kein Bild im Vergleichsfenster ausgewählt.");
     setImageCompareOptimizeLoading(true, "Originalbild wird wiederhergestellt...");
     status("Originalbild wird wiederhergestellt...");
@@ -1457,17 +1457,17 @@
   };
 
   document.querySelector("header p").textContent =
-    "Vertraute Oberfläche, ausgeführt mit der strukturierten V2 Content Pipeline.";
-  document.getElementById("generateDraftButton").textContent = "V2-Entwurf erstellen";
-  document.getElementById("transcriptNextButton").textContent = "Weiter: V2-Entwurf erstellen";
+    "Vertraute Oberfläche, ausgeführt mit der strukturierten Content Pipeline.";
+  document.getElementById("generateDraftButton").textContent = "Entwurf erstellen";
+  document.getElementById("transcriptNextButton").textContent = "Weiter: Entwurf erstellen";
   document.getElementById("sendDraftChatButton").title =
-    "V2-Sprachnachrichten können transkribiert werden; strukturierte Agenten-Überarbeitung folgt.";
+    "Sprachnachrichten können transkribiert werden; der Agent kann den Entwurf strukturiert überarbeiten.";
   document.getElementById("uploadKnowledgeButton").disabled = false;
   document.getElementById("uploadKnowledgeButton").title =
-    "Neue Database Datei hochladen, validieren und für neue V2-Sessions aktivieren.";
+    "Neue Database Datei hochladen, validieren und für neue Sessions aktivieren.";
   document.getElementById("videos").disabled = true;
   document.getElementById("videos").title =
-    "Video ist nicht Teil des aktuellen V2 Content Workflows.";
+    "Video ist nicht Teil des aktuellen Content Workflows.";
   for (const id of [
     "uploadWpMediaButton",
   ]) {
