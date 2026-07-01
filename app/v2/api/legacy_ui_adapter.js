@@ -54,6 +54,9 @@
       if (category && !category.value.trim()) category.value = selectedOption.dataset.category;
     }
     renderVoiceInstructionsForSelectedPostType();
+    if (typeof window.renderRecentPostTypeOptionsFromWorkbook === "function") {
+      window.renderRecentPostTypeOptionsFromWorkbook(version.post_types || []);
+    }
   }
 
   function v2Headers(json = true) {
@@ -842,6 +845,9 @@
       headers: v2Headers(false),
     });
     renderRecentSessions(data);
+    if (typeof renderRecentStatusOptionsFromSessions === "function") {
+      renderRecentStatusOptionsFromSessions((data && data.sessions) || []);
+    }
   };
 
   deleteSelectedRecentSessions = async function deleteSelectedRecentSessions() {

@@ -52,6 +52,39 @@ Useful environment variables:
 | `V2_TRANSCRIPTION_MODEL` | Speech-to-text model |
 | `V2_MILESTONE_LOGS=0` | Disables terminal milestone logs |
 
+## Fast live sync and deploy
+
+Use the helper scripts in `scripts/` for quick loops:
+
+1. Mirror live on localhost (no deploy needed):
+
+```bash
+./scripts/live-local.sh
+```
+
+This proxies Cloud Run to `http://localhost:8000`.
+
+2. Fast image-based deploy:
+
+```bash
+./scripts/deploy-fast.sh
+```
+
+Defaults:
+
+- `SERVICE=auto-wp-post`
+- `PROJECT=auto-wordpress-post-499518`
+- `REGION=europe-west1`
+- `REPO=cloud-run-source-deploy`
+- `IMAGE_NAME=auto-wp-post`
+- `TAG=quick`
+
+Override any value inline, for example:
+
+```bash
+TAG=$(date +%Y%m%d-%H%M%S) ./scripts/deploy-fast.sh
+```
+
 ## Testing
 
 Run the full suite:

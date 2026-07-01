@@ -2290,6 +2290,11 @@ APP_HTML = """
       main { margin-left:max(16px, calc((100vw - 1180px) / 2)); margin-right:380px; }
     }
     header { padding:16px 0 22px; margin-bottom:18px; }
+    .header-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .hamburger { width:48px; height:48px; border-radius:12px; border:1px solid #c6d2dd; background:#fff; display:grid; place-items:center; cursor:pointer; box-shadow:0 8px 20px rgba(31,41,51,.12); margin-top:2px; }
+    .hamburger:hover { transform:translateY(-1px); }
+    .hamburger-lines { width:22px; height:16px; display:grid; gap:4px; }
+    .hamburger-lines span { display:block; height:2px; border-radius:999px; background:#1f2933; }
     h1 { font-size:clamp(24px, 6vw, 38px); line-height:1.05; margin:0 0 8px; letter-spacing:0; }
     h2 { font-size:18px; margin:0 0 14px; }
     p { color:var(--muted); line-height:1.45; margin:0; }
@@ -2305,7 +2310,6 @@ APP_HTML = """
     #panelTranscript { --panel-accent:#d97706; --panel-soft:#fff7ed; }
     #panelDraft { --panel-accent:#be123c; --panel-soft:#fff1f2; }
     #panelWordPress { --panel-accent:#15803d; --panel-soft:#f0fdf4; }
-    #panelStatus { --panel-accent:#64748b; --panel-soft:#f8fafc; }
     details.panel > summary { list-style:none; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px; cursor:pointer; font-weight:800; font-size:18px; }
     details.panel > summary::-webkit-details-marker { display:none; }
     details.panel > summary::after { content:"+"; flex:0 0 auto; width:28px; height:28px; border-radius:8px; display:grid; place-items:center; background:var(--soft); border:1px solid var(--line); color:var(--muted); font-size:18px; line-height:1; }
@@ -2389,6 +2393,24 @@ APP_HTML = """
     #imageCompareModal { z-index:80; }
     #imageCompareModal.open { display:flex; align-items:center; justify-content:center; }
     .modal { width:min(620px, 100%); max-height:90vh; overflow:auto; background:#fff; border-radius:8px; padding:18px; box-shadow:0 22px 60px rgba(31,41,51,.28); }
+    .sections-modal { width:min(980px, 100%); padding:0; overflow:hidden; }
+    .sections-shell { display:grid; grid-template-columns:minmax(180px, 240px) 1fr; min-height:min(76vh, 760px); }
+    .sections-nav { border-right:1px solid var(--line); background:linear-gradient(180deg, #eef7f5 0, #f8fafc 100%); padding:16px; display:grid; gap:8px; align-content:start; }
+    .sections-nav button { margin:0; box-shadow:none; text-align:left; background:#314352; }
+    .sections-nav button.is-active { background:#0f766e; box-shadow:inset 0 0 0 2px rgba(255,255,255,.24); }
+    #sectionsMenuModal { opacity:0; transition:opacity .18s ease; }
+    #sectionsMenuModal .sections-modal { transform:translateY(14px) scale(.985); opacity:.72; transition:transform .22s ease, opacity .2s ease; }
+    #sectionsMenuModal.open { opacity:1; }
+    #sectionsMenuModal.open .sections-modal { transform:translateY(0) scale(1); opacity:1; }
+    .sections-content { padding:16px; overflow:auto; background:#fff; }
+    .sections-content details.panel { display:none; margin:0; border:0; box-shadow:none; background:transparent; }
+    .sections-content details.panel.is-active { display:block; }
+    .sections-content details.panel > summary { display:none; }
+    .sections-content details.panel > .panel-body { padding:0; }
+    @media (max-width: 860px) {
+      .sections-shell { grid-template-columns:1fr; }
+      .sections-nav { border-right:0; border-bottom:1px solid var(--line); }
+    }
     .modal h2 { margin-bottom:8px; }
     .modal-actions { display:grid; gap:10px; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); margin-top:16px; }
     .modal-actions a, .modal-actions button { display:block; text-align:center; text-decoration:none; border-radius:8px; padding:12px 14px; background:var(--brand); color:#fff; font-weight:750; margin:0; }
@@ -2430,6 +2452,7 @@ APP_HTML = """
     .is-recording .recording-indicator { display:flex; }
     .is-draft-chat-recording #draftChatRecordingIndicator { display:inline; }
     .recent-sessions-list { display:grid; gap:8px; margin-top:12px; }
+    #recentSessionsList.recent-sessions-list { max-height:min(56vh, 520px); overflow-y:auto; padding-right:4px; }
     .recent-session-item { border:1px solid var(--line); border-radius:8px; background:#fff; padding:10px; }
     .recent-session-head { display:flex; align-items:flex-start; gap:8px; }
     .recent-session-head input { width:auto; margin:2px 0 0; }
@@ -2458,91 +2481,19 @@ APP_HTML = """
 <body>
 <main>
   <header>
-    <h1>FLAIRLAB Post Generator</h1>
-    <p>Eventdaten per Sprache und Medien erfassen, KI-Entwurf prüfen und den WordPress-Beitrag erstellen.</p>
+    <div class="header-row">
+      <div>
+        <h1>FLAIRLAB Post Generator</h1>
+        <p>Eventdaten per Sprache und Medien erfassen, KI-Entwurf pruefen und den WordPress-Beitrag erstellen.</p>
+      </div>
+      <button class="hamburger" type="button" onclick="openSectionsMenu('panelAccess')" aria-label="Menu oeffnen" title="Menu">
+        <span class="hamburger-lines" aria-hidden="true"><span></span><span></span><span></span></span>
+      </button>
+    </div>
   </header>
 
-  <details id="panelAccess" class="panel">
-    <summary>Zugang</summary>
-    <div class="panel-body">
-    <label for="apiKey">API-Schlüssel</label>
-    <input id="apiKey" type="password" autocomplete="off" placeholder="X-API-Key">
-    <button class="secondary" onclick="run(saveKeyAndMaybeCreateSession)">Schlüssel speichern</button>
-    </div>
-  </details>
-
-  <details id="panelKnowledge" class="panel">
-    <summary>Database Datei</summary>
-    <div class="panel-body">
-    <label for="knowledgeWorkbook">Template-/Datenbank-Datei</label>
-    <input id="knowledgeWorkbook" type="file" accept=".xlsm,.xlsx">
-    <button id="uploadKnowledgeButton" class="secondary" onclick="run(uploadKnowledgeWorkbook)">Database Datei aktualisieren</button>
-    <div id="knowledgeSummary" class="summary">Der Status der Database Datei erscheint hier.</div>
-    <div id="knowledgeActions" class="summary-actions"></div>
-    </div>
-  </details>
-
-  <details id="panelSession" class="panel">
-    <summary>1. Session</summary>
-    <div class="panel-body">
-    <div class="grid">
-      <div>
-        <label for="clientId">Kunde</label>
-        <input id="clientId" value="flairlab">
-      </div>
-      <div>
-        <label for="postType">Beitragstyp</label>
-        <select id="postType">
-          <option value="event">Event</option>
-        </select>
-      </div>
-      <div>
-        <label for="category">Kategorie</label>
-        <input id="category" value="auto event post">
-      </div>
-    </div>
-    <div class="step-actions">
-      <button onclick="run(createSession)">Weiter: Session erstellen</button>
-      <button class="secondary" type="button" onclick="run(createNewPostSession)">Neue Beitrag erstellen</button>
-    </div>
-    <div id="sessionRecoveryBanner" class="session-recovery-banner hidden"></div>
-    <div id="mediaRecoveryNotice" class="media-recovery-notice hidden"></div>
-    <div id="sessionSummary" class="summary">Keine aktive Session.</div>
-    </div>
-  </details>
-
-  <details id="panelArchive" class="panel">
-    <summary>Sessions Archive</summary>
-    <div class="panel-body">
-    <div class="grid">
-      <div>
-        <label for="recentClientId">Client Filter</label>
-        <input id="recentClientId" placeholder="z.B. flairlab">
-      </div>
-      <div>
-        <label for="recentPostType">Post Type Filter</label>
-        <input id="recentPostType" placeholder="z.B. Event">
-      </div>
-      <div>
-        <label for="recentStatus">Status Filter</label>
-        <input id="recentStatus" placeholder="z.B. wordpress_post_created">
-      </div>
-      <div>
-        <label for="recentLimit">Limit</label>
-        <input id="recentLimit" type="number" min="1" max="200" value="20">
-      </div>
-    </div>
-    <div class="step-actions">
-      <button class="secondary" onclick="run(loadRecentSessions)">Sessions laden</button>
-      <button class="secondary" type="button" onclick="run(deleteSelectedRecentSessions)">Ausgewählte löschen</button>
-    </div>
-    <label class="recent-session-select-all"><input id="recentSessionsSelectAll" type="checkbox" onchange="toggleAllRecentSessions(this.checked)">Alle aktuell angezeigten Sessions auswählen</label>
-    <div id="recentSessionsList" class="summary">Lade Sessions, um Logs anderer Runs direkt aufzurufen.</div>
-    </div>
-  </details>
-
   <details id="panelUpload" class="panel">
-    <summary>2. Upload</summary>
+    <summary>1. Upload</summary>
     <div class="panel-body">
     <label for="images">Bilder</label>
     <input id="images" type="file" accept="image/*" multiple onchange="renderImageChoices()">
@@ -2574,7 +2525,7 @@ APP_HTML = """
   </details>
 
   <details id="panelTranscript" class="panel">
-    <summary>3. Transkript</summary>
+    <summary>2. Transkript</summary>
     <div class="panel-body">
     <button id="transcribeButton" onclick="run(transcribe)" disabled>Sprache transkribieren</button>
     <label for="transcript">Bearbeitbares Transkript</label>
@@ -2588,7 +2539,7 @@ APP_HTML = """
   </details>
 
   <details id="panelDraft" class="panel">
-    <summary>4. Entwurf</summary>
+    <summary>3. Entwurf</summary>
     <div class="panel-body">
     <button id="generateDraftButton" onclick="run(generateDraft)" disabled>CSV-Entwurf erstellen</button>
     <label>Bearbeitbare Felder</label>
@@ -2609,7 +2560,7 @@ APP_HTML = """
   </details>
 
   <details id="panelWordPress" class="panel">
-    <summary>5. WordPress</summary>
+    <summary>4. WordPress</summary>
     <div class="panel-body">
     <label for="postStatus">Beitragsstatus</label>
     <select id="postStatus">
@@ -2627,38 +2578,116 @@ APP_HTML = """
     </div>
   </details>
 
-  <details id="panelStatus" class="panel">
-    <summary>Status</summary>
-    <div class="panel-body">
-    <div id="status" class="summary">Bereit.</div>
-    <details class="summary">
-      <summary>Entwicklerdetails</summary>
-      <div id="statusDeveloper" class="status">Noch keine technischen Details.</div>
-    </details>
-    <details id="statusAiUsageWrap" class="summary status-rail-usage-wrap">
-      <summary id="statusAiUsageSummary">AI Nutzung für Session: 0 Calls · 0 Tokens · 0.0000 USD</summary>
-      <div id="statusAiUsage" class="status-rail-usage">Noch keine AI-Aufrufe in dieser Session.</div>
-    </details>
-    </div>
-  </details>
 </main>
 
 <aside id="statusRail" class="status-rail" aria-live="polite">
   <h2>Status</h2>
   <div id="statusRailContent" class="summary">Bereit.</div>
-  <details class="summary">
-    <summary>Entwicklerdetails</summary>
-    <div id="statusRailDeveloper" class="status status-rail-output">Noch keine technischen Details.</div>
-  </details>
-  <details id="statusRailAiUsageWrap" class="summary status-rail-usage-wrap">
-    <summary id="statusRailAiUsageSummary">AI Nutzung pro Beitrag: 0 Calls · 0 Tokens · 0.0000 USD</summary>
-    <div id="statusRailAiUsage" class="status-rail-usage">Noch keine AI-Aufrufe in dieser Session.</div>
-  </details>
   <div id="statusRailState" class="status-rail-state">
     <span class="mini-spinner" aria-hidden="true"></span>
     <span id="statusRailStateText">Bereit</span>
   </div>
 </aside>
+
+<div id="sectionsMenuModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="sectionsMenuTitle">
+  <div class="modal sections-modal">
+    <div class="sections-shell">
+      <nav class="sections-nav" aria-label="Bereiche">
+        <h2 id="sectionsMenuTitle">Menu</h2>
+        <button type="button" class="secondary" data-menu-panel="panelAccess" onclick="openMenuPanel('panelAccess')">Zugang</button>
+        <button type="button" class="secondary" data-menu-panel="panelKnowledge" onclick="openMenuPanel('panelKnowledge')">Database Datei</button>
+        <button type="button" class="secondary" data-menu-panel="panelSession" onclick="openMenuPanel('panelSession')">Session</button>
+        <button type="button" class="secondary" data-menu-panel="panelArchive" onclick="openMenuPanel('panelArchive')">Sessions archive</button>
+        <button type="button" class="secondary" onclick="closeSectionsMenu()">Schliessen</button>
+      </nav>
+      <div class="sections-content">
+        <details id="panelAccess" class="panel">
+          <summary>Zugang</summary>
+          <div class="panel-body">
+          <label for="apiKey">API-Schluessel</label>
+          <input id="apiKey" type="password" autocomplete="off" placeholder="X-API-Key">
+          <button class="secondary" onclick="run(saveKeyAndMaybeCreateSession)">Schluessel speichern</button>
+          </div>
+        </details>
+
+        <details id="panelKnowledge" class="panel">
+          <summary>Database Datei</summary>
+          <div class="panel-body">
+          <label for="knowledgeWorkbook">Template-/Datenbank-Datei</label>
+          <input id="knowledgeWorkbook" type="file" accept=".xlsm,.xlsx">
+          <button id="uploadKnowledgeButton" class="secondary" onclick="run(uploadKnowledgeWorkbook)">Database Datei aktualisieren</button>
+          <button class="secondary" type="button" onclick="run(downloadKnowledgeWorkbook)">Aktuelle Database Datei herunterladen</button>
+          <div id="knowledgeSummary" class="summary">Der Status der Database Datei erscheint hier.</div>
+          <div id="knowledgeActions" class="summary-actions"></div>
+          </div>
+        </details>
+
+        <details id="panelSession" class="panel">
+          <summary>Session</summary>
+          <div class="panel-body">
+          <div class="grid">
+            <div>
+              <label for="clientId">Kunde</label>
+              <input id="clientId" value="flairlab">
+            </div>
+            <div>
+              <label for="postType">Beitragstyp</label>
+              <select id="postType">
+                <option value="event">Event</option>
+              </select>
+            </div>
+            <div>
+              <label for="category">Kategorie</label>
+              <input id="category" value="auto event post" readonly>
+            </div>
+          </div>
+          <div class="step-actions">
+            <button onclick="run(createSession)">Weiter: Session erstellen</button>
+            <button class="secondary" type="button" onclick="run(createNewPostSession)">Neue Beitrag erstellen</button>
+          </div>
+          <div id="sessionRecoveryBanner" class="session-recovery-banner hidden"></div>
+          <div id="mediaRecoveryNotice" class="media-recovery-notice hidden"></div>
+          <div id="sessionSummary" class="summary">Keine aktive Session.</div>
+          </div>
+        </details>
+
+        <details id="panelArchive" class="panel">
+          <summary>Sessions Archive</summary>
+          <div class="panel-body">
+          <div class="grid">
+            <div>
+              <label for="recentClientId">Client Filter</label>
+              <input id="recentClientId" placeholder="z.B. flairlab">
+            </div>
+            <div>
+              <label for="recentPostType">Post Type Filter</label>
+              <select id="recentPostType">
+                <option value="">Alle Post Types</option>
+              </select>
+            </div>
+            <div>
+              <label for="recentStatus">Status Filter</label>
+              <select id="recentStatus">
+                <option value="">Alle Status</option>
+              </select>
+            </div>
+            <div>
+              <label for="recentLimit">Limit</label>
+              <input id="recentLimit" type="number" min="1" max="200" value="20">
+            </div>
+          </div>
+          <div class="step-actions">
+            <button class="secondary" onclick="run(loadRecentSessions)">Sessions laden</button>
+            <button class="secondary" type="button" onclick="run(deleteSelectedRecentSessions)">Ausgewaehlte loeschen</button>
+          </div>
+          <label class="recent-session-select-all"><input id="recentSessionsSelectAll" type="checkbox" onchange="toggleAllRecentSessions(this.checked)">Alle aktuell angezeigten Sessions auswaehlen</label>
+          <div id="recentSessionsList" class="summary">Lade Sessions, um Logs anderer Runs direkt aufzurufen.</div>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div id="loadingOverlay" class="loading-backdrop" role="status" aria-live="polite" aria-label="Läuft">
   <div class="loading-box">
@@ -2691,10 +2720,6 @@ APP_HTML = """
   <div class="modal">
     <h2 id="errorModalTitle">Fehler</h2>
     <div id="errorModalMessage" class="summary"></div>
-    <details class="summary">
-      <summary>Entwicklerdetails</summary>
-      <div id="errorModalDetails" class="status">Keine technischen Details.</div>
-    </details>
     <div class="modal-actions">
       <button class="secondary" type="button" onclick="closeErrorModal()">Schließen</button>
     </div>
@@ -2817,15 +2842,14 @@ function userMessage(obj){
 }
 function status(obj){
   const userText = userMessage(obj);
-  const technicalText = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
   const isError = /^\\s*(Fehler|Error):/i.test(userText);
-  document.getElementById("status").textContent = userText;
-  document.getElementById("status").classList.toggle("is-error", isError);
-  document.getElementById("statusRailContent").textContent = userText;
-  document.getElementById("statusRailContent").classList.toggle("is-error", isError);
-  document.getElementById("statusDeveloper").textContent = technicalText;
-  document.getElementById("statusRailDeveloper").textContent = technicalText;
-  document.getElementById("statusRailState").classList.toggle("is-error", isError);
+  const railContent = document.getElementById("statusRailContent");
+  const railState = document.getElementById("statusRailState");
+  if(railContent){
+    railContent.textContent = userText;
+    railContent.classList.toggle("is-error", isError);
+  }
+  if(railState) railState.classList.toggle("is-error", isError);
 }
 function formatElapsedDuration(ms){
   const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
@@ -2854,7 +2878,6 @@ function isMissingSessionError(error){
 function showErrorModal(error){
   const message = readableError(error);
   document.getElementById("errorModalMessage").textContent = message;
-  document.getElementById("errorModalDetails").textContent = (error && error.message) || String(error || "");
   document.getElementById("errorModal").classList.add("open");
 }
 function clearSessionRecoveryBanner(){
@@ -3057,7 +3080,45 @@ function setBusy(isBusy, label="Bitte warten..."){
   document.getElementById("loadingText").textContent = label;
   document.getElementById("statusRailStateText").textContent = active ? label : "Bereit";
 }
+const MENU_PANEL_IDS = ["panelAccess", "panelKnowledge", "panelSession", "panelArchive"];
+function isMenuPanel(id){
+  return MENU_PANEL_IDS.includes(String(id || ""));
+}
+function openSectionsMenu(initialPanelId="panelAccess"){
+  const modal = document.getElementById("sectionsMenuModal");
+  if(!modal) return;
+  modal.classList.add("open");
+  openMenuPanel(initialPanelId);
+  const activeButton = document.querySelector(`#sectionsMenuModal [data-menu-panel="${String(initialPanelId || "panelAccess")}"]`);
+  if(activeButton && typeof activeButton.focus === "function") activeButton.focus();
+}
+function closeSectionsMenu(){
+  const modal = document.getElementById("sectionsMenuModal");
+  if(!modal) return;
+  modal.classList.remove("open");
+}
+function openMenuPanel(panelId){
+  const selected = String(panelId || "panelAccess");
+  MENU_PANEL_IDS.forEach(id => {
+    const panel = document.getElementById(id);
+    if(panel){
+      panel.open = id === selected;
+      panel.classList.toggle("is-active", id === selected);
+    }
+  });
+  document.querySelectorAll("#sectionsMenuModal [data-menu-panel]").forEach(button => {
+    const isActive = button.getAttribute("data-menu-panel") === selected;
+    button.classList.toggle("is-active", isActive);
+    if(isActive) button.setAttribute("aria-current", "true");
+    else button.removeAttribute("aria-current");
+  });
+  const selectedPanel = document.getElementById(selected);
+  if(selectedPanel){
+    selectedPanel.scrollIntoView({behavior:"smooth", block:"start"});
+  }
+}
 function openPanel(id, scroll=false){
+  if(isMenuPanel(id)) openSectionsMenu(id);
   const panel = document.getElementById(id);
   if(!panel) return;
   panel.open = true;
@@ -3460,11 +3521,15 @@ async function loadKnowledgeStatus(){
   const postTypeElement = document.getElementById("postType");
   const postType = (postTypeElement && postTypeElement.value) || "";
   const cached = JSON.parse(sessionStorage.getItem("flairlab_knowledge_status") || "null");
-  if(cached && (cached.post_type || "") === postType) renderKnowledgeStatus(cached);
+  if(cached && (cached.post_type || "") === postType){
+    renderKnowledgeStatus(cached);
+    renderRecentPostTypeOptionsFromWorkbook(cached.post_types || []);
+  }
   if(!key()) return;
   const suffix = postType ? `?post_type=${encodeURIComponent(postType)}` : "";
   const data = await api(`/app/knowledge/status${suffix}`, {headers:headers(false)});
   renderKnowledgeStatus(data);
+  renderRecentPostTypeOptionsFromWorkbook(data.post_types || []);
 }
 async function uploadKnowledgeWorkbook(){
   const file = document.getElementById("knowledgeWorkbook").files[0];
@@ -4296,6 +4361,51 @@ function recentSessionsQueryString(){
   if(statusValue) params.set("status", statusValue);
   return params.toString();
 }
+function setRecentFilterOptions(selectId, options, emptyLabel){
+  const select = document.getElementById(selectId);
+  if(!select) return;
+  const previous = String(select.value || "");
+  const items = Array.isArray(options) ? options : [];
+  select.innerHTML = "";
+  const emptyOption = document.createElement("option");
+  emptyOption.value = "";
+  emptyOption.textContent = emptyLabel;
+  select.appendChild(emptyOption);
+  items.forEach(item => {
+    const option = document.createElement("option");
+    option.value = String(item.value || "");
+    option.textContent = String(item.label || item.value || "");
+    select.appendChild(option);
+  });
+  select.value = [...select.options].some(option => option.value === previous) ? previous : "";
+}
+function renderRecentPostTypeOptionsFromWorkbook(postTypes){
+  const entries = [];
+  const seen = new Set();
+  (Array.isArray(postTypes) ? postTypes : []).forEach(item => {
+    const value = String((item && (item.post_type_key || item.value || item.key)) || "").trim();
+    if(!value || seen.has(value)) return;
+    seen.add(value);
+    entries.push({
+      value,
+      label: String((item && (item.display_name_de || item.display_name || item.label)) || value).trim() || value,
+    });
+  });
+  setRecentFilterOptions("recentPostType", entries, "Alle Post Types");
+}
+window.renderRecentPostTypeOptionsFromWorkbook = renderRecentPostTypeOptionsFromWorkbook;
+function renderRecentStatusOptionsFromSessions(sessions){
+  const seen = new Set();
+  const entries = [];
+  (Array.isArray(sessions) ? sessions : []).forEach(item => {
+    const value = String((item && item.status) || "").trim();
+    if(!value || seen.has(value)) return;
+    seen.add(value);
+    entries.push({value, label: value});
+  });
+  entries.sort((a, b) => a.label.localeCompare(b.label, "de", {sensitivity:"base"}));
+  setRecentFilterOptions("recentStatus", entries, "Alle Status");
+}
 function formatArchiveDateTime(value){
   const text = String(value || "").trim();
   if(!text) return "-";
@@ -4357,6 +4467,7 @@ async function deleteSelectedRecentSessions(){
 function renderRecentSessions(payload){
   const target = document.getElementById("recentSessionsList");
   const sessions = (payload && payload.sessions) || [];
+  renderRecentStatusOptionsFromSessions(sessions);
   recentSessionIdsInView = sessions
     .map(item => String((item && item.session_id) || "").trim())
     .filter(Boolean);
@@ -4718,7 +4829,8 @@ async function run(fn){
       }, 1200);
     }
     if(!failed){
-      const currentStatus = document.getElementById("status").textContent || actionLabel(fn);
+      const statusNode = document.getElementById("statusRailContent");
+      const currentStatus = (statusNode && statusNode.textContent) || actionLabel(fn);
       status(appendElapsedDuration(currentStatus, startedAt));
       document.getElementById("statusRailStateText").textContent = appendElapsedDuration("Fertig", startedAt);
     }
@@ -5154,6 +5266,14 @@ document.getElementById("errorModal").addEventListener("click", event => {
 });
 document.getElementById("imageCompareModal").addEventListener("click", event => {
   if(event.target.id === "imageCompareModal") closeImageCompareModal();
+});
+document.getElementById("sectionsMenuModal").addEventListener("click", event => {
+  if(event.target.id === "sectionsMenuModal") closeSectionsMenu();
+});
+document.addEventListener("keydown", event => {
+  if(event.key !== "Escape") return;
+  const sectionsModal = document.getElementById("sectionsMenuModal");
+  if(sectionsModal && sectionsModal.classList.contains("open")) closeSectionsMenu();
 });
 document.getElementById("apiKeyModalInput").addEventListener("keydown", event => {
   if(event.key === "Enter") run(saveKeyFromModal);
