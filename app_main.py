@@ -2615,9 +2615,6 @@ APP_HTML = """
     <audio id="draftChatRecordingPlayback" controls style="display:none;width:100%;margin-bottom:12px;"></audio>
     <textarea id="draftChatInput" placeholder="Beispiel: Bitte FAQ aus den Fakten bauen, CTA stärker machen und Hero-Felder spezifischer formulieren."></textarea>
     <button id="sendDraftChatButton" onclick="run(sendDraftChat)" disabled>An Agenten senden</button>
-    <div class="step-actions">
-      <button id="draftNextButton" onclick="run(goToWordPressStep)" disabled>Weiter: WordPress-Einstellungen</button>
-    </div>
     </div>
   </details>
 
@@ -3604,7 +3601,10 @@ function renderMediaPreviewItems(targetId, items, options={}){
       input.type = "radio";
       input.name = "featured";
       input.value = item.value || item.name || "";
-      input.checked = options.selectedValue ? input.value === options.selectedValue : index === 0;
+      input.dataset.mediaId = item.media_id || "";
+      input.checked = options.selectedMediaId
+        ? input.dataset.mediaId === options.selectedMediaId
+        : (options.selectedValue ? input.value === options.selectedValue : index === 0);
       input.addEventListener("change", () => {
         syncFeaturedCardState();
         scheduleUiCacheSave();
@@ -3925,7 +3925,7 @@ async function applyVisionMetadataFromCompare(){
   }
 }
 
-async function renderUploadedImagePreviews(images, featuredValue=""){
+async function renderUploadedImagePreviews(images, featuredValue="", featuredMediaId=""){
   document.getElementById("imagePreviews").innerHTML = "";
   if(!sessionId || !images || !images.length || !key()) return;
   revokeImagePreviewUrls();
@@ -3941,6 +3941,7 @@ async function renderUploadedImagePreviews(images, featuredValue=""){
         url,
         name:image.original_filename || image.filename,
         value:image.filename,
+        media_id:image.media_id || "",
         persisted:true,
         hasOriginal: !!image.original_path,
         isProcessed: !!image.processed_at,
@@ -3954,6 +3955,7 @@ async function renderUploadedImagePreviews(images, featuredValue=""){
     removable:true,
     kind:"images",
     selectedValue:featuredValue,
+    selectedMediaId:featuredMediaId,
     compareable:true,
     onCompare: async (filename, processedUrl) => {
       if(!sessionId) return;
@@ -4517,6 +4519,7 @@ function renderSession(data, options={}){
   if(draft.category) document.getElementById("category").value = draft.category;
   const files = data.files || {};
   const featured = files.featured_image_filename || "none";
+  const featuredMediaId = files.featured_image_media_id || "";
   const visionSelectedCount = (files.vision_selected_filenames || []).length;
   const wpMediaCount = Number(((data.wordpress_media_library || {}).uploaded_count) || 0);
   const aiUsage = (data.ai_usage && typeof data.ai_usage === "object") ? data.ai_usage : {};
@@ -4541,7 +4544,7 @@ function renderSession(data, options={}){
   renderAiUsage(aiUsage);
   renderMediaRecoveryNotice(data.media_recovery || {});
   renderVoiceList(files.voices || (files.voice ? [files.voice] : []), [...document.getElementById("voice").files]);
-  renderUploadedImagePreviews(files.images || [], featured);
+  renderUploadedImagePreviews(files.images || [], featured, featuredMediaId);
   renderUploadedVideoPreviews(files.videos || []);
   openWorkflowPanels(data);
   if(options.applyCache !== false){
@@ -4626,7 +4629,6 @@ function updateButtons(){
   document.getElementById("transcriptNextButton").disabled = !canGenerateDraft;
   document.getElementById("saveDraftButton").disabled = !hasSession || !hasDraft;
   document.getElementById("sendDraftChatButton").disabled = !hasSession || !hasDraft || !hasChatMessage;
-  document.getElementById("draftNextButton").disabled = !hasSession || !hasDraft;
   document.getElementById("createPostButton").disabled = !hasSession || !hasDraft;
   const hasExistingPost = !!(currentSessionData && currentSessionData.wordpress_post && currentSessionData.wordpress_post.post_id);
   document.getElementById("updatePostButton").disabled = !hasSession || !hasDraft || !hasExistingPost;
@@ -5345,7 +5347,7 @@ async def upload_knowledge_workbook(
         temporary.unlink(missing_ok=True)
         use_local_destination = False
       except Exception as exc:
-        if knowledge_source_policy() == "gcs_required":
+        if knowledge_source_policy() == "gcs_required" or os.getenv("K_SERVICE"):
           temporary.unlink(missing_ok=True)
           raise HTTPException(
             status_code=502,
@@ -5367,9 +5369,14 @@ async def upload_knowledge_workbook(
       temporary.replace(destination)
     if CONTENT_PIPELINE_VERSION == "v2":
       get_v2_service().knowledge.reload()
+    storage_label = "GCS" if gcs_upload_info.get("gcs_uri") else "local"
+    generation = gcs_upload_info.get("gcs_generation")
+    message = f"Database Datei aktualisiert ({storage_label})."
+    if generation:
+      message = f"Database Datei aktualisiert (GCS generation {generation})."
     return {
         "success": True,
-        "message": "Knowledge workbook updated.",
+        "message": message,
       "storage": gcs_upload_info,
       **knowledge_status_payload(post_type=post_type),
     }

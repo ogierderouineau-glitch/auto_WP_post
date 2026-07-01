@@ -139,6 +139,9 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             response.json()["sha256"],
             "6db9ba5d8ff8a43d20d8749076e33c9908a69d4a9b046bd95124671d7baac040",
         )
+        self.assertIn(response.json()["storage_mode"], {"gcs", "local_file"})
+        self.assertIn("knowledge_source_policy", response.json())
+        self.assertIn("gcs_uri", response.json())
 
     async def test_workbook_status_exposes_legacy_acf_mapping(self) -> None:
         response = await self.client.get("/api/content-sessions/_workbook")

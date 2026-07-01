@@ -28,6 +28,7 @@ from app.v2.api.step_01_models import (
     SessionsDeleteRequest,
     VersionedRequest,
 )
+from config import KNOWLEDGE_SOURCE_POLICY, KNOWLEDGE_WORKBOOK_GCS_URI
 from app.v2.errors import InvalidUploadError, SessionOwnershipError, V2Error
 from app.v2.sessions.step_03_service import ContentSessionService
 from app.v2.storage.step_02_uploads import safe_upload_name, validate_upload
@@ -63,6 +64,9 @@ def create_router(
         snapshot = service_provider().knowledge.current()
         return {
             **snapshot.version.model_dump(mode="json"),
+            "storage_mode": "gcs" if KNOWLEDGE_WORKBOOK_GCS_URI else "local_file",
+            "knowledge_source_policy": KNOWLEDGE_SOURCE_POLICY or "auto",
+            "gcs_uri": KNOWLEDGE_WORKBOOK_GCS_URI or None,
             "acf_guidance_list": _legacy_acf_guidance_list(snapshot),
             "fact_schema": [
                 {

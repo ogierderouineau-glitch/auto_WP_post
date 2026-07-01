@@ -4,9 +4,12 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 from app.v2.context.step_01_builder import GenerationContextBuilder
 from app.v2.internal_links.step_01_service import InternalLinkService
+from app.v2.knowledge_base.step_01_models import ImageMetadataField
 from app.v2.knowledge_base.step_02_loader import WorkbookLoader
 from app.v2.knowledge_base.step_03_validator import WorkbookValidator
 from app.v2.models.step_01_session import ContentSession, FactValue, MediaReference
@@ -34,6 +37,104 @@ class StaticKnowledge:
     def by_hash(self, workbook_hash: str) -> object:
         self.assert_hash = workbook_hash
         return self.snapshot
+
+
+class MetadataOnlyLanguageModel:
+    last_usage: dict[str, Any] | None = None
+
+    def structured(self, *, task: str, context: dict[str, Any], schema: type[Any]) -> Any:
+        if task != "image_metadata":
+            raise AssertionError(f"Unexpected fake model task: {task}")
+        self.last_usage = {
+            "service": "openai_text",
+            "call_name": task,
+            "model": "fake-text",
+            "prompt_tokens": 1,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+            "estimated_cost_usd": None,
+        }
+        return schema.model_validate(
+            {
+                field_key: f"generated {field_key}"
+                for field_key in schema.model_fields
+            }
+        )
+
+
+class FeaturedImageMetadataRegressionTests(unittest.TestCase):
+    def test_metadata_overwrite_preserves_selected_featured_image(self) -> None:
+        snapshot = SimpleNamespace(
+            image_metadata_fields=(
+                ImageMetadataField(
+                    sheet_row=1,
+                    field_key="image_alt",
+                    destination_type="meta",
+                    destination_key="alt",
+                    description_de="Alternativtext",
+                    required=True,
+                    value_type="text",
+                    generation_stage="draft",
+                    source_mode="generated",
+                    enabled=True,
+                ),
+            ),
+            agent_instructions=(),
+            image_metadata_rules=(),
+            acf_fields=(),
+        )
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            state="needs_review",
+            workbook_hash="hash",
+            language="de-DE",
+            image_refs=[
+                MediaReference(
+                    media_id="image-1",
+                    filename="first.png",
+                    storage_uri="local://first.png",
+                    content_type="image/png",
+                    size_bytes=1,
+                ),
+                MediaReference(
+                    media_id="image-2",
+                    filename="second.png",
+                    storage_uri="local://second.png",
+                    content_type="image/png",
+                    size_bytes=1,
+                ),
+            ],
+            processed_images=[
+                {"media_id": "image-1", "filename": "first.webp", "path": "local://first.webp"},
+                {"media_id": "image-2", "filename": "second.webp", "path": "local://second.webp"},
+            ],
+            image_metadata=[
+                {"media_id": "image-2", "image_usage": "featured", "image_priority": 1},
+                {"media_id": "image-1", "image_usage": "gallery", "image_priority": 2},
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(snapshot),
+                repository=FileSessionRepository(temporary),
+                language_model=MetadataOnlyLanguageModel(),
+            )
+
+            updated = service._generate_missing_image_metadata(
+                snapshot,
+                session,
+                overwrite_existing=True,
+            )
+
+        featured = [
+            row for row in updated.image_metadata
+            if row.get("image_usage") == "featured"
+        ]
+        self.assertEqual(len(featured), 1)
+        self.assertEqual(featured[0]["media_id"], "image-2")
+        self.assertEqual(featured[0]["image_priority"], 1)
 
 
 @unittest.skipUnless(WORKBOOK.is_file(), f"V2 test workbook not found: {WORKBOOK}")

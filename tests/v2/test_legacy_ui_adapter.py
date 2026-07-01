@@ -153,6 +153,8 @@ class LegacyUiAdapterTests(unittest.TestCase):
         )[0]
         self.assertIn("flairlab_knowledge_status", workbook_loader)
         self.assertIn("JSON.stringify(version)", workbook_loader)
+        self.assertIn("version.storage_mode", workbook_loader)
+        self.assertIn("version.gcs_uri", workbook_loader)
 
     def test_workbook_upload_remains_available_in_v2_adapter(self) -> None:
         source = ADAPTER.read_text(encoding="utf-8")

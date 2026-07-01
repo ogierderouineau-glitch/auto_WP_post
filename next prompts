@@ -1,8 +1,49 @@
 
 
+"gcloud is broken in this sandbox" Please fix it, I want to deploy without entering any credentials.
+I used to deply using
+gcloud run deploy auto-wp-post \
+  --source . \
+  --region europe-west1 \
+  --allow-unauthenticated
 
+  Now I get an error: Deployment failed
+ERROR: (gcloud.run.deploy) Revision 'auto-wp-post-00138-bqs' is not ready and cannot serve traffic. The user-provided container failed to start and listen on the port defined provided by the PORT=8080 environment variable within the allocated timeout. This can happen when the container port is misconfigured or if the timeout is too short. The health check timeout can be extended. Logs for this revision might contain more information.
+
+Logs URL: https://console.cloud.google.com/logs/viewer?project=auto-wordpress-post-499518&resource=cloud_run_revision/service_name/auto-wp-post/revision_name/auto-wp-post-00138-bqs&advancedFilter=resource.type%3D%22cloud_run_revision%22%0Aresource.labels.service_name%3D%22auto-wp-post%22%0Aresource.labels.revision_name%3D%22auto-wp-post-00138-bqs%22
+For more troubleshooting guidance, see https://cloud.google.com/run/docs/troubleshooting#container-failed-to-start
+
+
+ESSENTIALS
+-----------------------------------
+- featured image still defaults back to the first one
+- 5. Wordpress section:
+  o updatePostButton should update the linked created post. Disable it if no post was created
+  o Need a new button to create a new post with the current section content. Update-Ziel needs to be updated and wired accordingly
+
+
+NICE TO HAVE
+-----------------------------------
+- need a button to download the current version of the knowledge file to check it when I want
+- no need for Entwicklerdetails anymore
+- No need for the extra status section at the bottom
+- Need a side-menu for these sections:
+    o Zugang
+    o Database Datei
+    o Session
+    o Sessions archive
+Sections numbers should reflect the move of 1. Session outside the main screen
+The menu should appear on the top of the screen as a cool hamburger icon. Menu sections content should appear in a popup window
+
+
+CLEANUP TASKS
+-----------------------------------
+- app_main.py has 6000+ lines. Thats way too much, propose a strcuture to dispatch those lines in different files
+- List all files that are not used for the current version
+- what folder structure would you recommend, so that I can easily find my way through?
+- Review all code and find parts that are not actually use
 
 
 YOAST
-- Yoast doesn't see my internal links (Internal links: No internal links appear in this page) in the ACF field, nor the content (Text length: The text contains 0 words), maybe because I don't use the standard content Widget. Is that bad for SEO?
+-----------------------------------
 - Keyphrase synonyms should be added

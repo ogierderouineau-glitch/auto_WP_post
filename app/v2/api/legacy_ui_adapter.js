@@ -207,6 +207,7 @@
     const featuredReference = (session.image_refs || []).find(
       reference => reference.media_id === featuredMetadata?.media_id
     );
+    const featuredImageMediaId = featuredReference?.media_id || "";
     const featuredImageFilename = featuredReference
       ? (processedByMedia[featuredReference.media_id]?.filename || featuredReference.filename)
       : "";
@@ -226,6 +227,7 @@
         voices: (session.audio_refs || []).map(mediaItem),
         images,
         videos: [],
+        featured_image_media_id: featuredImageMediaId,
         featured_image_filename: featuredImageFilename || images[0]?.filename || "",
       },
       transcript: {
@@ -591,6 +593,7 @@
           url,
           name: image.original_filename || image.filename,
           value: image.filename,
+          media_id: image.media_id || "",
           persisted: true,
           hasOriginal: !!image.original_path,
           isProcessed,
@@ -606,6 +609,7 @@
       removable: true,
       kind: "images",
       selectedValue: featuredValue,
+      selectedMediaId: (((currentSessionData || {}).files || {}).featured_image_media_id) || "",
       compareable: true,
       onCompare: async (filename) => {
         const beforeBlob = await fetchOriginalImageBlobWithRetry(filename);
@@ -850,6 +854,8 @@
     const target = document.getElementById("knowledgeSummary");
     target.innerHTML =
       `<strong>Database Datei:</strong> ${esc(version.filename || "")}<br>` +
+      `${version.storage_mode ? `<strong>Speicher:</strong> ${esc(version.storage_mode)}<br>` : ""}` +
+      `${version.gcs_uri ? `<strong>GCS:</strong> ${esc(version.gcs_uri)}<br>` : ""}` +
       `<strong>SHA-256:</strong> ${esc(version.sha256 || "")}<br>` +
       `<strong>Validiert:</strong> ja`;
     document.getElementById("knowledgeActions").innerHTML = "";
@@ -1314,7 +1320,6 @@
     document.getElementById("transcriptNextButton").disabled = !hasSession || !hasText;
     document.getElementById("saveDraftButton").disabled = !canEditDraft;
     document.getElementById("sendDraftChatButton").disabled = !hasDraft || !hasDraftMessage;
-    document.getElementById("draftNextButton").disabled = !hasDraft;
     document.getElementById("createPostButton").disabled = !hasDraft;
     document.getElementById("updatePostButton").disabled = !(v2Session?.wordpress_result?.edit_url);
     document.getElementById("uploadWpMediaButton").disabled = true;
@@ -1457,7 +1462,7 @@
   };
 
   document.querySelector("header p").textContent =
-    "Vertraute Oberfläche, ausgeführt mit der strukturierten Content Pipeline.";
+    "WordPress-Beiträge mit KI-Inhalten und Single-Post Vorlagen.";
   document.getElementById("generateDraftButton").textContent = "Entwurf erstellen";
   document.getElementById("transcriptNextButton").textContent = "Weiter: Entwurf erstellen";
   document.getElementById("sendDraftChatButton").title =

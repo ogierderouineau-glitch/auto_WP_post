@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from threading import RLock
 
+from google.cloud import storage as gcs_storage
+
 from app.v2.knowledge_base.step_04_service import KnowledgeBaseService
 from app.v2.images.step_02_processor import PillowProcessor
 from app.v2.providers.step_02_openai import (
@@ -22,6 +24,8 @@ from app.v2.models.step_01_session import ContentSession
 from app.v2.models.step_02_payload import WordPressFields, WordPressPayload
 from step_40_wordpress_api import find_term, preflight_wordpress_permissions
 from config import (
+    KNOWLEDGE_SOURCE_POLICY,
+    KNOWLEDGE_WORKBOOK_GCS_URI,
     KNOWLEDGE_WORKBOOK_PATH,
     OPENAI_API_KEY,
     V2_KNOWLEDGE_WORKBOOK_PATH,
@@ -37,14 +41,47 @@ _service: ContentSessionService | None = None
 DEFAULT_V2_WORKBOOK_PATH = "data/knowledge/FLAIRLAB_EventPost_Master_Knowledge.xlsm"
 
 
-def _configured_workbook_path() -> str:
-    return (
+def _parse_gcs_uri(uri: str) -> tuple[str, str]:
+    raw = str(uri or "").strip()
+    if not raw.startswith("gs://"):
+        raise ValueError("KNOWLEDGE_WORKBOOK_GCS_URI must use gs://bucket/path format.")
+    bucket, _, blob = raw[5:].partition("/")
+    if not bucket or not blob:
+        raise ValueError("KNOWLEDGE_WORKBOOK_GCS_URI must include both bucket and object path.")
+    return bucket, blob
+
+
+def _sync_workbook_from_gcs(path: Path) -> Path:
+    gcs_uri = str(KNOWLEDGE_WORKBOOK_GCS_URI or "").strip()
+    policy = str(KNOWLEDGE_SOURCE_POLICY or "").strip().lower()
+    if not gcs_uri or policy == "local_only":
+        return path
+    try:
+        bucket_name, blob_name = _parse_gcs_uri(gcs_uri)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        client = gcs_storage.Client()
+        blob = client.bucket(bucket_name).blob(blob_name)
+        if not blob.exists():
+            raise RuntimeError(f"Workbook object does not exist in GCS: {gcs_uri}")
+        blob.download_to_filename(str(path))
+    except Exception:
+        if policy == "gcs_required" or os.getenv("K_SERVICE") or not path.exists():
+            raise
+    return path
+
+
+def _configured_workbook_path() -> Path:
+    configured = (
         os.getenv("V2_KNOWLEDGE_WORKBOOK_PATH")
         or V2_KNOWLEDGE_WORKBOOK_PATH
         or os.getenv("KNOWLEDGE_WORKBOOK_PATH")
         or KNOWLEDGE_WORKBOOK_PATH
         or DEFAULT_V2_WORKBOOK_PATH
     )
+    path = Path(configured)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return _sync_workbook_from_gcs(path)
 
 
 def get_v2_service() -> ContentSessionService:

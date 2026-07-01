@@ -1308,6 +1308,11 @@ class ContentSessionService:
     ) -> ContentSession:
         if self.language_model is None or not session.image_refs:
             return session
+        previous_metadata_by_media = {
+            str(item.get("media_id")): dict(item)
+            for item in session.image_metadata
+            if item.get("media_id")
+        }
         image_metadata = [] if overwrite_existing else list(session.image_metadata)
         metadata_media_ids = {
             str(item.get("media_id"))
@@ -1356,8 +1361,8 @@ class ContentSessionService:
                     for row in image_metadata
                     if row.get("media_id") == reference.media_id
                 ),
-                {},
-            )
+                previous_metadata_by_media.get(reference.media_id, {}),
+            ) or {}
             image_metadata = [
                 row
                 for row in image_metadata
