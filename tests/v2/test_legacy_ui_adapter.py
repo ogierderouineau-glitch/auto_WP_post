@@ -219,6 +219,16 @@ class LegacyUiAdapterTests(unittest.TestCase):
         )[0]
         self.assertIn('document.getElementById("saveDraftButton").disabled = !hasDraft;', update_buttons)
 
+    def test_draft_agent_is_available_after_approval(self) -> None:
+        source = ADAPTER.read_text(encoding="utf-8")
+        send_draft_chat = source.split(
+            "sendDraftChat = async function sendDraftChat()", 1
+        )[1].split(
+            "goToWordPressStep = async function goToWordPressStep()", 1
+        )[0]
+        self.assertIn("!hasV2DraftReadyForWordPress()", send_draft_chat)
+        self.assertNotIn('v2Session.state !== "needs_review"', send_draft_chat)
+
     def test_transcribe_recovers_from_stale_session_version(self) -> None:
         source = ADAPTER.read_text(encoding="utf-8")
         transcribe = source.split("transcribe = async function transcribe()", 1)[1].split(
@@ -328,6 +338,8 @@ class LegacyUiAdapterTests(unittest.TestCase):
         self.assertIn("/api/content-sessions/delete", source)
         self.assertIn("renderRecentSessions(data)", source)
         self.assertIn("openSessionLogsById = async function", source)
+        self.assertIn("openSessionLogs = async function", source)
+        self.assertIn("await openSessionLogsById(id)", source)
         self.assertIn("loadSessionById = async function", source)
         self.assertIn("Session geladen.", source)
         self.assertIn("generate-job", source)

@@ -136,6 +136,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(session.state, "published")
         self.assertEqual(session.wordpress_result["post_id"], 123)
         self.assertEqual(self.wordpress.calls, 1)
+
         repeated = self.service.publish(
             session.session_id,
             idempotency_key="publish-1",
@@ -143,6 +144,19 @@ class WorkflowTests(unittest.TestCase):
         )
         self.assertEqual(repeated.version, session.version)
         self.assertEqual(self.wordpress.calls, 1)
+
+        revised = self.service.generate(
+            session.session_id,
+            shared_fields=session.shared_fields,
+            acf_source_fields=session.acf_source_fields,
+            selected_links=session.selected_links,
+            current_url=None,
+            revision_instruction="Bitte den Entwurf aktualisieren.",
+            expected_version=session.version,
+        )
+        self.assertEqual(revised.state, "needs_review")
+        self.assertFalse(revised.approval.approved)
+        self.assertIsNone(revised.publication_idempotency_key)
 
     def test_generation_caps_selected_internal_links_to_workbook_maximum(self) -> None:
         session = self.service.create(user_id="user-1", post_type_key="event")

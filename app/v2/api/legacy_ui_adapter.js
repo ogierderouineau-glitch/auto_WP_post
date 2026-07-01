@@ -884,6 +884,12 @@
     });
   };
 
+  openSessionLogs = async function openSessionLogs() {
+    const id = String(sessionId || v2Session?.session_id || "").trim();
+    if (!id) throw new Error("Bitte zuerst eine Session erstellen.");
+    await openSessionLogsById(id);
+  };
+
   loadSessionById = async function loadSessionById(targetSessionId) {
     const id = String(targetSessionId || "").trim();
     if (!id) throw new Error("Session-ID fehlt.");
@@ -1273,7 +1279,7 @@
 
   sendDraftChat = async function sendDraftChat() {
     await loadActiveV2Session();
-    if (!v2Session || v2Session.state !== "needs_review") {
+    if (!v2Session || !hasV2DraftReadyForWordPress()) {
       throw new Error("Bitte zuerst einen Entwurf erstellen.");
     }
     const input = document.getElementById("draftChatInput");

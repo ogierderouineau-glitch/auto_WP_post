@@ -1079,7 +1079,16 @@ class ContentSessionService:
                 "generation_trace": generation_trace,
             }
         )
-        session = state_machine.transition(session, "needs_review")
+        if session.state in {"ready_to_publish", "published"} and revision_instruction:
+            session = session.model_copy(
+                update={
+                    "state": "needs_review",
+                    "approval": Approval(),
+                    "publication_idempotency_key": None,
+                }
+            )
+        else:
+            session = state_machine.transition(session, "needs_review")
         self._milestone(session, "draft generation finished")
         return self.repository.save(session, expected_version=expected_version)
 

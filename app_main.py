@@ -2588,6 +2588,10 @@ APP_HTML = """
 <aside id="statusRail" class="status-rail" aria-live="polite">
   <h2>Status</h2>
   <div id="statusRailContent" class="summary">Bereit.</div>
+  <details class="status-rail-usage-wrap">
+    <summary id="statusRailAiUsageSummary">AI Nutzung pro Beitrag: 0 Calls · 0 Tokens · 0.0000 USD</summary>
+    <div id="statusRailAiUsage" class="status-rail-usage">Noch keine AI-Aufrufe in dieser Session.</div>
+  </details>
   <div id="statusRailState" class="status-rail-state">
     <span class="mini-spinner" aria-hidden="true"></span>
     <span id="statusRailStateText">Bereit</span>
