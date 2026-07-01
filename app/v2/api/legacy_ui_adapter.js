@@ -15,6 +15,35 @@
     return (document.getElementById("clientId").value || "flairlab").trim();
   }
 
+  function selectedPostTypeKey() {
+    return (document.getElementById("postType").value || "").trim().toLowerCase();
+  }
+
+  function renderPostTypeOptions(version) {
+    const select = document.getElementById("postType");
+    if (!select || !Array.isArray(version.post_types) || !version.post_types.length) return;
+    const previous = selectedPostTypeKey();
+    select.innerHTML = "";
+    for (const postType of version.post_types) {
+      const key = String(postType.post_type_key || "").trim();
+      if (!key) continue;
+      const option = document.createElement("option");
+      option.value = key;
+      option.textContent = postType.display_name_de || key;
+      option.dataset.category = postType.wp_category_name || "";
+      select.appendChild(option);
+    }
+    const selected = version.selected_post_type_key || previous || select.options[0]?.value || "";
+    select.value = [...select.options].some(option => option.value === selected)
+      ? selected
+      : (select.options[0]?.value || "");
+    const selectedOption = select.selectedOptions[0];
+    if (selectedOption?.dataset.category) {
+      const category = document.getElementById("category");
+      if (category && !category.value.trim()) category.value = selectedOption.dataset.category;
+    }
+  }
+
   function v2Headers(json = true) {
     return {
       "X-API-Key": key(),
@@ -221,7 +250,7 @@
     return {
       session_id: session.session_id,
       client_id: session.user_id,
-      post_type: "Event",
+      post_type: session.post_type_key,
       status: session.state,
       files: {
         voices: (session.audio_refs || []).map(mediaItem),
@@ -236,7 +265,7 @@
       },
       draft: {
         csv_text: draftCsv(session),
-        category: session.shared_fields?.category || "auto event post",
+        category: session.shared_fields?.category || "",
         chat: session.draft_chat || [],
         generation_trace: session.generation_trace || {},
       },
@@ -759,10 +788,8 @@
 
   createSession = async function createSession(options = {}) {
     saveKey();
-    const selected = document.getElementById("postType").value.toLowerCase();
-    if (selected !== "event") {
-      throw new Error("Der aktuelle Workflow unterstützt derzeit den Beitragstyp Event.");
-    }
+    const selected = selectedPostTypeKey();
+    if (!selected) throw new Error("Bitte zuerst einen Beitragstyp auswählen.");
     if (!options.preservePendingUploads) clearV2LocalMediaUi();
     const data = await v2Api("/api/content-sessions", {
       method: "POST",
@@ -846,14 +873,18 @@
       document.getElementById("knowledgeActions").innerHTML = "";
       return;
     }
-    const version = await v2Api("/api/content-sessions/_workbook", {
+    const selected = selectedPostTypeKey();
+    const suffix = selected ? `?post_type_key=${encodeURIComponent(selected)}` : "";
+    const version = await v2Api(`/api/content-sessions/_workbook${suffix}`, {
       headers: v2Headers(false),
     });
     v2WorkbookStatus = version;
+    renderPostTypeOptions(version);
     sessionStorage.setItem("flairlab_knowledge_status", JSON.stringify(version));
     const target = document.getElementById("knowledgeSummary");
     target.innerHTML =
       `<strong>Database Datei:</strong> ${esc(version.filename || "")}<br>` +
+      `${version.selected_post_type_key ? `<strong>Beitragstyp:</strong> ${esc(version.selected_post_type_key)}<br>` : ""}` +
       `${version.storage_mode ? `<strong>Speicher:</strong> ${esc(version.storage_mode)}<br>` : ""}` +
       `${version.gcs_uri ? `<strong>GCS:</strong> ${esc(version.gcs_uri)}<br>` : ""}` +
       `<strong>SHA-256:</strong> ${esc(version.sha256 || "")}<br>` +
@@ -1486,9 +1517,6 @@
   ]) {
     const control = document.getElementById(id);
     if (control) control.dataset.pipeline = "v2";
-  }
-  for (const option of document.querySelectorAll("#postType option")) {
-    option.disabled = option.textContent.trim().toLowerCase() !== "event";
   }
   ensureClarificationPanel().style.display = "none";
 

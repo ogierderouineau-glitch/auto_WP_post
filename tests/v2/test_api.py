@@ -142,9 +142,11 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(response.json()["storage_mode"], {"gcs", "local_file"})
         self.assertIn("knowledge_source_policy", response.json())
         self.assertIn("gcs_uri", response.json())
+        self.assertIn("post_types", response.json())
+        self.assertIn("selected_post_type_key", response.json())
 
     async def test_workbook_status_exposes_legacy_acf_mapping(self) -> None:
-        response = await self.client.get("/api/content-sessions/_workbook")
+        response = await self.client.get("/api/content-sessions/_workbook?post_type_key=event")
         self.assertEqual(response.status_code, 200)
         mapping = response.json()["acf_guidance_list"]
         hero = next(item for item in mapping if item["user_field"] == "hero_h1")

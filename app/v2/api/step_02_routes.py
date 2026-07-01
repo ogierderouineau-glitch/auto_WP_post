@@ -60,13 +60,47 @@ def create_router(
         return SessionResponse(session=service_provider().create(**payload.model_dump()))
 
     @router.get("/_workbook")
-    async def workbook_status() -> dict[str, Any]:
+    async def workbook_status(
+        post_type_key: str | None = Query(default=None),
+    ) -> dict[str, Any]:
         snapshot = service_provider().knowledge.current()
+        selectable_post_types = [
+            row
+            for row in snapshot.post_types
+            if row.enabled and row.user_selectable
+        ]
+        enabled_post_types = [row for row in snapshot.post_types if row.enabled]
+        post_types = selectable_post_types or enabled_post_types
+        selected_post_type = (
+            snapshot.post_type(post_type_key)
+            if post_type_key
+            else None
+        )
+        if (
+            selected_post_type is None
+            or not selected_post_type.enabled
+            or (selectable_post_types and not selected_post_type.user_selectable)
+        ):
+            selected_post_type = post_types[0] if post_types else None
+        selected_post_type_key = selected_post_type.post_type_key if selected_post_type else None
         return {
             **snapshot.version.model_dump(mode="json"),
             "storage_mode": "gcs" if KNOWLEDGE_WORKBOOK_GCS_URI else "local_file",
             "knowledge_source_policy": KNOWLEDGE_SOURCE_POLICY or "auto",
             "gcs_uri": KNOWLEDGE_WORKBOOK_GCS_URI or None,
+            "selected_post_type_key": selected_post_type_key,
+            "post_types": [
+                {
+                    "post_type_key": row.post_type_key,
+                    "display_name_de": row.display_name_de,
+                    "wp_category_name": row.wp_category_name,
+                    "default_language": row.default_language,
+                    "generation_enabled": row.generation_enabled,
+                    "template_ready": row.template_ready,
+                    "description_de": row.description_de,
+                }
+                for row in post_types
+            ],
             "acf_guidance_list": _legacy_acf_guidance_list(snapshot),
             "fact_schema": [
                 {
@@ -76,7 +110,7 @@ def create_router(
                 }
                 for row in snapshot.acf_fields
                 if row.enabled
-                and row.post_type_key == "event"
+                and row.post_type_key == selected_post_type_key
                 and row.field_role == "input_fact"
             ],
         }

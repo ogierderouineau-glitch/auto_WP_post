@@ -62,6 +62,20 @@ class MetadataOnlyLanguageModel:
         )
 
 
+class FakeObjectStorage:
+    def __init__(self) -> None:
+        self.downloads: list[tuple[str, Path]] = []
+
+    def put(self, source: Path, key: str) -> str:
+        return f"gs://bucket/{key}"
+
+    def get(self, uri: str, destination: Path) -> Path:
+        self.downloads.append((uri, destination))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"image")
+        return destination
+
+
 class FeaturedImageMetadataRegressionTests(unittest.TestCase):
     def test_metadata_overwrite_preserves_selected_featured_image(self) -> None:
         snapshot = SimpleNamespace(
@@ -135,6 +149,91 @@ class FeaturedImageMetadataRegressionTests(unittest.TestCase):
         self.assertEqual(len(featured), 1)
         self.assertEqual(featured[0]["media_id"], "image-2")
         self.assertEqual(featured[0]["image_priority"], 1)
+
+    def test_media_path_materializes_gcs_uri_before_file_response(self) -> None:
+        storage = FakeObjectStorage()
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            state="uploading",
+            workbook_hash="hash",
+            language="de-DE",
+            image_refs=[
+                MediaReference(
+                    media_id="image-1",
+                    filename="first.png",
+                    storage_uri="gs://bucket/session/originals/first.png",
+                    content_type="image/png",
+                    size_bytes=1,
+                ),
+            ],
+            processed_images=[
+                {
+                    "media_id": "image-1",
+                    "filename": "first.webp",
+                    "path": "gs://bucket/session/processed/first.webp",
+                },
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = FileSessionRepository(temporary)
+            repository.create(session)
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(SimpleNamespace()),
+                repository=repository,
+                object_storage=storage,
+            )
+
+            path = service.media_path(
+                session.session_id,
+                kind="image",
+                filename="first.webp",
+            )
+
+        self.assertTrue(path.is_file())
+        self.assertNotEqual(path.parts[0], "gs:")
+        self.assertEqual(storage.downloads[0][0], "gs://bucket/session/processed/first.webp")
+
+    def test_publication_media_materializes_gcs_uri_before_wordpress_upload(self) -> None:
+        storage = FakeObjectStorage()
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            state="ready_to_publish",
+            workbook_hash="hash",
+            language="de-DE",
+            processed_images=[
+                {
+                    "media_id": "image-1",
+                    "filename": "first.webp",
+                    "path": "gs://bucket/session/processed/first.webp",
+                },
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(SimpleNamespace()),
+                repository=FileSessionRepository(temporary),
+                object_storage=storage,
+            )
+
+            media = service._materialize_publication_media(
+                session,
+                [
+                    {
+                        "media_id": "image-1",
+                        "path": "gs://bucket/session/processed/first.webp",
+                        "image_usage": "featured",
+                    }
+                ],
+            )
+
+        self.assertTrue(Path(media[0]["path"]).is_file())
+        self.assertFalse(media[0]["path"].startswith("gs:"))
+        self.assertEqual(media[0]["output"], media[0]["path"])
+        self.assertEqual(storage.downloads[0][0], "gs://bucket/session/processed/first.webp")
 
 
 @unittest.skipUnless(WORKBOOK.is_file(), f"V2 test workbook not found: {WORKBOOK}")

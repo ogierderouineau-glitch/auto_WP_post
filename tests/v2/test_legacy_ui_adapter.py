@@ -141,7 +141,7 @@ class LegacyUiAdapterTests(unittest.TestCase):
         )[0]
         self.assertLess(
             workbook_loader.index("if (!key())"),
-            workbook_loader.index('v2Api("/api/content-sessions/_workbook"'),
+            workbook_loader.index("v2Api(`/api/content-sessions/_workbook${suffix}`"),
         )
 
     def test_workbook_status_feeds_old_ui_acf_field_map(self) -> None:
@@ -155,6 +155,18 @@ class LegacyUiAdapterTests(unittest.TestCase):
         self.assertIn("JSON.stringify(version)", workbook_loader)
         self.assertIn("version.storage_mode", workbook_loader)
         self.assertIn("version.gcs_uri", workbook_loader)
+        self.assertIn("renderPostTypeOptions(version)", workbook_loader)
+
+    def test_post_type_selection_is_workbook_driven(self) -> None:
+        source = ADAPTER.read_text(encoding="utf-8")
+        create_session = source.split("createSession = async function createSession", 1)[1].split(
+            "restoreSession = async function restoreSession()", 1
+        )[0]
+        self.assertIn("selectedPostTypeKey()", create_session)
+        self.assertNotIn('selected !== "event"', create_session)
+        self.assertNotIn("unterstützt derzeit den Beitragstyp Event", create_session)
+        self.assertNotIn('option.disabled = option.textContent.trim().toLowerCase() !== "event"', source)
+        self.assertIn("function renderPostTypeOptions(version)", source)
 
     def test_workbook_upload_remains_available_in_v2_adapter(self) -> None:
         source = ADAPTER.read_text(encoding="utf-8")

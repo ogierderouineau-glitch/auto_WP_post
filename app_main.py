@@ -2493,9 +2493,7 @@ APP_HTML = """
       <div>
         <label for="postType">Beitragstyp</label>
         <select id="postType">
-          <option>Event</option>
-          <option>Location</option>
-          <option>Cocktail</option>
+          <option value="event">Event</option>
         </select>
       </div>
       <div>
@@ -3251,10 +3249,14 @@ function promptTraceRuleLines(title, rules){
     if(!rule || typeof rule !== "object") return;
     const shared = rule.shared ? " [shared rule]" : "";
     const parts = [
-      rule.rule_id || rule.key || rule.title || rule.field_key || "Regel",
+      rule.rule_id || rule.key || rule.title || rule.field_key || rule.source || "Regel",
+      rule.source ? `source=${rule.source}` : "",
+      rule.priority ? `priority=${rule.priority}` : "",
       rule.scope ? `scope=${rule.scope}` : "",
       rule.section ? `section=${rule.section}` : "",
       rule.group ? `group=${rule.group}` : "",
+      rule.target_type ? `target_type=${rule.target_type}` : "",
+      rule.target_key ? `target_key=${rule.target_key}` : "",
     ].filter(Boolean);
     lines.push(`- ${parts.join(" · ")}${shared}`);
     const text = rule.guidance || rule.instruction || rule.rule || rule.description || rule.text || "";
@@ -3266,6 +3268,8 @@ function formatPromptTrace(field, trace){
   if(!trace || typeof trace !== "object") return `Keine Prompt-Regeln für ${field} gespeichert.`;
   const lines = [
     `Feld: ${field}`,
+    trace.label ? `Label: ${trace.label}` : "",
+    trace.generation_task ? `Generierungsaufgabe: ${trace.generation_task}` : "",
     trace.acf_field_name ? `ACF Feld: ${trace.acf_field_name}` : "",
     trace.field_role ? `Rolle: ${trace.field_role}` : "",
     trace.section ? `Sektion: ${trace.section}` : "",
@@ -3278,6 +3282,7 @@ function formatPromptTrace(field, trace){
   if(trace.description_de) lines.push(`\\nBeschreibung:\\n${trace.description_de}`);
   if(trace.guidance_de) lines.push(`\\nFeld-Guidance:\\n${trace.guidance_de}`);
   if(trace.example) lines.push(`\\nBeispiel:\\n${trace.example}`);
+  lines.push(...promptTraceRuleLines("Angewendete Regeln", trace.rules));
   lines.push(...promptTraceRuleLines("SEO-Regeln", trace.seo_rules));
   lines.push(...promptTraceRuleLines("Style-Regeln", trace.style_rules));
   lines.push(...promptTraceRuleLines("Agent-Instruktionen", trace.agent_instructions));

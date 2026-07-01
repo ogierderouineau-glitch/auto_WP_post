@@ -53,6 +53,7 @@ from app.v2.providers.step_01_interfaces import (
 )
 from app.v2.sessions.step_01_repository import SessionRepository
 from app.v2.sessions.step_02_state_machine import SessionStateMachine
+from app.v2.storage.step_02_uploads import safe_upload_name
 from app.v2.workflow.step_04_generation_conditions import (
     GenerationConditionEvaluator,
     source_fact_dependencies_are_available,
@@ -612,17 +613,52 @@ class ContentSessionService:
                     None,
                 )
                 if reference is not None:
-                    return Path(reference.storage_uri)
+                    return self._materialize_media_uri(
+                        reference.storage_uri,
+                        session_id=session_id,
+                        filename=reference.filename,
+                    )
             if processed is not None:
-                return Path(str(processed.get("path") or processed.get("output")))
+                return self._materialize_media_uri(
+                    str(processed.get("path") or processed.get("output") or ""),
+                    session_id=session_id,
+                    filename=str(processed.get("filename") or filename),
+                )
             reference = next((ref for ref in session.image_refs if ref.filename == filename), None)
             if reference is not None:
-                return Path(reference.storage_uri)
+                return self._materialize_media_uri(
+                    reference.storage_uri,
+                    session_id=session_id,
+                    filename=reference.filename,
+                )
         if kind == "audio":
             reference = next((ref for ref in session.audio_refs if ref.filename == filename), None)
             if reference is not None:
-                return Path(reference.storage_uri)
+                return self._materialize_media_uri(
+                    reference.storage_uri,
+                    session_id=session_id,
+                    filename=reference.filename,
+                )
         raise ValueError(f"Media not found in this session: {kind}/{filename}")
+
+    def _materialize_media_uri(
+        self,
+        uri: str,
+        *,
+        session_id: str,
+        filename: str,
+    ) -> Path:
+        if uri.startswith("gs://"):
+            if self.object_storage is None:
+                raise ValueError("GCS media storage is not configured.")
+            destination = (
+                Path(tempfile.gettempdir())
+                / "flairlab-v2-media-cache"
+                / session_id
+                / safe_upload_name(filename, Path(filename).suffix or ".bin")
+            )
+            return self.object_storage.get(uri, destination)
+        return Path(uri)
 
     def remove_media(
         self,
@@ -1801,9 +1837,18 @@ class ContentSessionService:
             refined = refined.model_copy(update={"wordpress_payload": payload.model_dump()})
         publishing = state_machine.transition(refined, "publishing")
         try:
+            wordpress_payload = WordPressPayload.model_validate(publishing.wordpress_payload)
+            wordpress_payload = wordpress_payload.model_copy(
+                update={
+                    "media": self._materialize_publication_media(
+                        publishing,
+                        wordpress_payload.media,
+                    )
+                }
+            )
             result = self.wordpress.publish(
                 session=publishing,
-                payload=WordPressPayload.model_validate(publishing.wordpress_payload),
+                payload=wordpress_payload,
                 idempotency_key=idempotency_key,
             )
         except Exception as exc:
@@ -1817,3 +1862,41 @@ class ContentSessionService:
         published = state_machine.transition(published, "published")
         self._milestone(published, "publication finished")
         return self.repository.save(published, expected_version=expected_version)
+
+    def _materialize_publication_media(
+        self,
+        session: ContentSession,
+        media: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        processed_by_media = {
+            str(item.get("media_id")): item
+            for item in session.processed_images
+            if item.get("media_id")
+        }
+        materialized: list[dict[str, Any]] = []
+        for item in media:
+            next_item = dict(item)
+            uri = str(next_item.get("path") or next_item.get("output") or "").strip()
+            if uri:
+                processed = processed_by_media.get(str(next_item.get("media_id") or ""))
+                filename = (
+                    str((processed or {}).get("filename") or "").strip()
+                    or self._filename_from_uri(uri)
+                    or f"{next_item.get('media_id') or 'media'}.bin"
+                )
+                path = self._materialize_media_uri(
+                    uri,
+                    session_id=session.session_id,
+                    filename=filename,
+                )
+                next_item["path"] = str(path)
+                next_item["output"] = str(path)
+            materialized.append(next_item)
+        return materialized
+
+    @staticmethod
+    def _filename_from_uri(uri: str) -> str:
+        value = str(uri or "").rstrip("/")
+        if not value:
+            return ""
+        return value.rsplit("/", 1)[-1]
