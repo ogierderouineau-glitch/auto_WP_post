@@ -14,8 +14,8 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from config import get_client_config
-from run_event_import import run_import
-from step_10_event_payload import DEFAULT_OUTPUT_ROOT, safe_name
+from legacy.run_event_import import run_import
+from legacy.step_10_event_payload import DEFAULT_OUTPUT_ROOT, safe_name
 from pydantic import BaseModel, ConfigDict, Field
 
 API_UPLOAD_ROOT = Path("data/api_uploads")

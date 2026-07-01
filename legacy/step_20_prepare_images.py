@@ -2,8 +2,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from step_10_event_payload import find_picture_files
-from step_21_compress_photo import compress_image_to_target
+from legacy.step_10_event_payload import find_picture_files
+from legacy.step_21_compress_photo import compress_image_to_target
 
 
 COMPRESSIBLE_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}

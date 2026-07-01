@@ -36,7 +36,7 @@ try:
 except Exception:
   OpenAI = None
 
-from action_api_event_import import (
+from legacy.action_api_event_import import (
     EventPostActionRequest,
     app as action_app,
     build_import_args,
@@ -73,8 +73,8 @@ from config import (
   get_client_config,
   set_active_client,
 )
-from run_event_import import run_import
-from step_10_event_payload import ColumnSpec
+from legacy.run_event_import import run_import
+from legacy.step_10_event_payload import ColumnSpec
 from step_40_wordpress_api import preflight_wordpress_permissions, set_post_featured_media, update_media_metadata, upload_media
 from app.v2.api.step_02_routes import create_router as create_v2_router, v2_error_handler
 from app.v2.api.step_03_container import get_v2_service, v2_readiness
@@ -116,7 +116,7 @@ app = FastAPI(
 
 
 def verify_api_key(x_api_key: str | None = Header(default=None)) -> None:
-    from action_api_event_import import IMPORT_API_KEY as configured_key
+    from legacy.action_api_event_import import IMPORT_API_KEY as configured_key
 
     if configured_key and x_api_key != configured_key:
         raise HTTPException(status_code=401, detail="Invalid or missing API key.")
@@ -126,7 +126,7 @@ def verify_download_api_key(
   x_api_key: str | None = Header(default=None),
   api_key: str | None = Query(default=None),
 ) -> None:
-  from action_api_event_import import IMPORT_API_KEY as configured_key
+  from legacy.action_api_event_import import IMPORT_API_KEY as configured_key
 
   if configured_key and x_api_key != configured_key and api_key != configured_key:
     raise HTTPException(status_code=401, detail="Invalid or missing API key.")
@@ -2291,6 +2291,8 @@ APP_HTML = """
     }
     header { padding:16px 0 22px; margin-bottom:18px; }
     .header-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .header-actions { display:flex; align-items:flex-start; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
+    .header-shortcut { width:auto; min-height:48px; margin-top:2px; padding:0 16px; }
     .hamburger { width:48px; height:48px; border-radius:12px; border:1px solid #c6d2dd; background:#fff; display:grid; place-items:center; cursor:pointer; box-shadow:0 8px 20px rgba(31,41,51,.12); margin-top:2px; }
     .hamburger:hover { transform:translateY(-1px); }
     .hamburger-lines { width:22px; height:16px; display:grid; gap:4px; }
@@ -2486,9 +2488,12 @@ APP_HTML = """
         <h1>FLAIRLAB Post Generator</h1>
         <p>Eventdaten per Sprache und Medien erfassen, KI-Entwurf pruefen und den WordPress-Beitrag erstellen.</p>
       </div>
-      <button class="hamburger" type="button" onclick="openSectionsMenu('panelAccess')" aria-label="Menu oeffnen" title="Menu">
-        <span class="hamburger-lines" aria-hidden="true"><span></span><span></span><span></span></span>
-      </button>
+      <div class="header-actions">
+        <button class="secondary header-shortcut" type="button" onclick="run(createNewPostSession)">Neue Session</button>
+        <button class="hamburger" type="button" onclick="openSectionsMenu('panelAccess')" aria-label="Menu oeffnen" title="Menu">
+          <span class="hamburger-lines" aria-hidden="true"><span></span><span></span><span></span></span>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -3115,6 +3120,12 @@ function openMenuPanel(panelId){
   const selectedPanel = document.getElementById(selected);
   if(selectedPanel){
     selectedPanel.scrollIntoView({behavior:"smooth", block:"start"});
+  }
+  if(selected === "panelArchive" && key()){
+    loadRecentSessions().catch(error => {
+      console.warn(error);
+      status("Fehler: " + readableError(error));
+    });
   }
 }
 function openPanel(id, scroll=false){

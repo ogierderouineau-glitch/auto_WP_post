@@ -12,13 +12,13 @@ DEFAULT_OUT_JSON = APP_ROOT / "data/audits/seo_payload_mapping_report.json"
 DEFAULT_OUT_MD = APP_ROOT / "data/audits/seo_payload_mapping_report.md"
 
 CODE_REFS = {
-    "build_payload": "step_10_event_payload.py:481",
-    "marker_map": "step_10_event_payload.py:495",
-    "technical_field_route": "step_10_event_payload.py:512",
-    "create_post_payload": "step_30_wordpress_payload.py:4",
-    "wp_payload_status": "step_30_wordpress_payload.py:15",
-    "wp_payload_slug": "step_30_wordpress_payload.py:17",
-    "wp_payload_excerpt": "step_30_wordpress_payload.py:19",
+    "build_payload": "legacy/step_10_event_payload.py:481",
+    "marker_map": "legacy/step_10_event_payload.py:495",
+    "technical_field_route": "legacy/step_10_event_payload.py:512",
+    "create_post_payload": "legacy/step_30_wordpress_payload.py:4",
+    "wp_payload_status": "legacy/step_30_wordpress_payload.py:15",
+    "wp_payload_slug": "legacy/step_30_wordpress_payload.py:17",
+    "wp_payload_excerpt": "legacy/step_30_wordpress_payload.py:19",
     "media_metadata_update": "step_40_wordpress_api.py:244",
 }
 

@@ -4,7 +4,7 @@ from typing import Any
 
 from app_knowledge_base import guidance_for_field, load_workbook_guidance, normalize_lookup
 from config import KNOWLEDGE_WORKBOOK_PATH, KNOWLEDGE_WORKBOOK_SHEET, set_active_client
-from step_10_event_payload import (
+from legacy.step_10_event_payload import (
     DEFAULT_OUTPUT_ROOT,
     ColumnSpec,
     build_gallery_html,
@@ -15,8 +15,8 @@ from step_10_event_payload import (
     safe_name,
     write_json,
 )
-from step_20_prepare_images import prepare_event_images
-from step_30_wordpress_payload import create_post_payload
+from legacy.step_20_prepare_images import prepare_event_images
+from legacy.step_30_wordpress_payload import create_post_payload
 from step_40_wordpress_api import (
     acf_failure_payload,
     acf_update_has_values,
@@ -31,7 +31,7 @@ from step_40_wordpress_api import (
     upload_media_plan,
     upload_media_plan_for_post_attachments,
 )
-from step_50_batch_workflow import run_batch_import
+from legacy.step_50_batch_workflow import run_batch_import
 
 
 APP_ROOT = Path(__file__).resolve().parent

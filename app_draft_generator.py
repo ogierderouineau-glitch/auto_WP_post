@@ -17,7 +17,7 @@ except ModuleNotFoundError:
     OpenAI = None
 
 from config import OPENAI_API_KEY
-from step_10_event_payload import ColumnSpec, safe_name
+from legacy.step_10_event_payload import ColumnSpec, safe_name
 
 
 DEFAULT_TEXT_MODEL = "gpt-4o-mini"
@@ -1839,4 +1839,3 @@ def apply_refinement_answers(
         "zip_path": str(zip_path),
         "package_dir": str(session_dir / "draft" / "package"),
     }
-

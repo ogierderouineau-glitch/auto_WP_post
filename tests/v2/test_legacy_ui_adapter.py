@@ -328,6 +328,8 @@ class LegacyUiAdapterTests(unittest.TestCase):
         self.assertIn("/api/content-sessions/delete", source)
         self.assertIn("renderRecentSessions(data)", source)
         self.assertIn("openSessionLogsById = async function", source)
+        self.assertIn("loadSessionById = async function", source)
+        self.assertIn("Session geladen.", source)
         self.assertIn("generate-job", source)
         self.assertIn("publish-job", source)
         self.assertIn("waitForV2Job", source)

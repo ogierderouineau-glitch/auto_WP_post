@@ -884,6 +884,20 @@
     });
   };
 
+  loadSessionById = async function loadSessionById(targetSessionId) {
+    const id = String(targetSessionId || "").trim();
+    if (!id) throw new Error("Session-ID fehlt.");
+    v2Session = null;
+    sessionId = id;
+    sessionStorage.setItem("flairlab_session_id", sessionId);
+    const data = await v2Api(`/api/content-sessions/${encodeURIComponent(id)}`, {
+      headers: v2Headers(false),
+    });
+    await renderV2(data.session, {statusText: "Session geladen."});
+    if (typeof closeSectionsMenu === "function") closeSectionsMenu();
+    openPanel("panelUpload", true);
+  };
+
   loadKnowledgeStatus = async function loadKnowledgeStatus() {
     if (!key()) {
       document.getElementById("knowledgeSummary").textContent =

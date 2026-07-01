@@ -127,15 +127,15 @@ the workbook before production.
 The V1 CSV/ZIP/import modules remain operational and are not called by V2:
 
 - `app_draft_generator.py`
-- `run_event_import.py`
-- `action_api_event_import.py`
-- `step_10_event_payload.py`
-- `step_20_prepare_images.py`
-- `step_21_compress_photo.py`
-- `step_30_wordpress_payload.py`
-- `step_50_batch_workflow.py`
-- `step_51_drive_sync.py`
-- `step_52_processed_files.py`
+- `legacy/run_event_import.py`
+- `legacy/action_api_event_import.py`
+- `legacy/step_10_event_payload.py`
+- `legacy/step_20_prepare_images.py`
+- `legacy/step_21_compress_photo.py`
+- `legacy/step_30_wordpress_payload.py`
+- `legacy/step_50_batch_workflow.py`
+- `legacy/step_51_drive_sync.py`
+- `legacy/step_52_processed_files.py`
 
 ## Cleanup recommendation
 

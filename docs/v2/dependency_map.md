@@ -9,13 +9,13 @@
 | WordPress authentication/API | `step_40_wordpress_api.py` | Candidate for a provider adapter; not called by V2 foundation yet |
 | Transcription | `app_transcription.py` | Candidate for `SpeechToTextProvider` adapter |
 | GCS | `app_main.py`, `tools/knowledge_workbook_audit.py` | Candidate for repository/storage adapters |
-| Pillow processing | `app_main.py`, `step_21_compress_photo.py` | Values replaced by workbook-driven V2 rules in the future image adapter |
+| Pillow processing | `app_main.py`, `legacy/step_21_compress_photo.py` | Values replaced by workbook-driven V2 rules in the future image adapter |
 | Existing UI | inline HTML/JS in `app_main.py` | V1 remains operational; V2 compatibility adapter routes the core old-UI workflow |
 
 ## Legacy-only flow
 
-`app_draft_generator.py`, `run_event_import.py`, `action_api_event_import.py`,
-`step_10_event_payload.py`, and `step_50_*` retain CSV/ZIP behavior for V1.
+`app_draft_generator.py`, `legacy/run_event_import.py`, `legacy/action_api_event_import.py`,
+`legacy/step_10_event_payload.py`, and `legacy/step_50_*` retain CSV/ZIP behavior for V1.
 No module under `app/v2` imports or invokes them.
 
 The old-UI/V2 compatibility adapter also does not call the legacy CSV/ZIP

@@ -2,15 +2,15 @@ import argparse
 from pathlib import Path
 from typing import Callable
 
-from step_10_event_payload import safe_name, write_json
-from step_51_drive_sync import (
+from legacy.step_10_event_payload import safe_name, write_json
+from legacy.step_51_drive_sync import (
     download_rclone_item,
     is_bare_rclone_remote,
     move_rclone_item_to_processed,
     rclone_remote_items,
     remote_child,
 )
-from step_52_processed_files import (
+from legacy.step_52_processed_files import (
     find_companion_zip,
     is_batch_candidate,
     move_to_processed,
