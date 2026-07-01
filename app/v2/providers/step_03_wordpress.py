@@ -46,6 +46,8 @@ class ExistingWordPressProvider(WordPressProvider):
         session: ContentSession,
         payload: WordPressPayload,
         idempotency_key: str,
+        target_post_id: int | None = None,
+        force_create_new: bool = False,
     ) -> dict[str, Any]:
         set_active_client(self.client_id)
         wordpress = payload.wordpress
@@ -81,13 +83,17 @@ class ExistingWordPressProvider(WordPressProvider):
             else session.wordpress_post_type
         )
         endpoint = f"/wp-json/wp/v2/{rest_base}"
-        existing = self._find_existing(endpoint, wordpress.slug, idempotency_key)
-        if existing:
-            post = request_json("POST", f"{endpoint}/{existing['id']}", json=body)
-            mode = "updated_idempotently"
+        if target_post_id:
+            post = request_json("POST", f"{endpoint}/{int(target_post_id)}", json=body)
+            mode = "updated_linked_post"
         else:
-            post = request_json("POST", endpoint, json=body)
-            mode = "created"
+            existing = None if force_create_new else self._find_existing(endpoint, wordpress.slug, idempotency_key)
+            if existing:
+                post = request_json("POST", f"{endpoint}/{existing['id']}", json=body)
+                mode = "updated_idempotently"
+            else:
+                post = request_json("POST", endpoint, json=body)
+                mode = "created"
         post_id = int(post["id"])
         for item in media:
             if item.get("image_usage") != "featured":

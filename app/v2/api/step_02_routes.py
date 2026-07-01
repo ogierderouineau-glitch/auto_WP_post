@@ -18,6 +18,7 @@ from app.v2.api.step_01_models import (
     ApproveRequest,
     CreateSessionRequest,
     DraftChatRequest,
+    DraftFieldsUpdateRequest,
     FeaturedImageRequest,
     GenerateRequest,
     ImageOptimizationRequest,
@@ -98,6 +99,7 @@ def create_router(
                     "generation_enabled": row.generation_enabled,
                     "template_ready": row.template_ready,
                     "description_de": row.description_de,
+                    "voice_instructions": row.voice_instructions or "",
                 }
                 for row in post_types
             ],
@@ -347,6 +349,20 @@ def create_router(
             expected_version=session.version,
         )
         return SessionResponse(session=session)
+
+    @router.put("/{session_id}/draft-fields", response_model=SessionResponse)
+    async def update_draft_fields(
+        session_id: str,
+        payload: DraftFieldsUpdateRequest,
+        x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    ) -> SessionResponse:
+        service_provider().require_owner(session_id, x_user_id)
+        return SessionResponse(
+            session=service_provider().update_draft_fields(
+                session_id,
+                **payload.model_dump(),
+            )
+        )
 
     @router.get("/jobs/{job_id}")
     async def session_job(job_id: str) -> dict[str, Any]:

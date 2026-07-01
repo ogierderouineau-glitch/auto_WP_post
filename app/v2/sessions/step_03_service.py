@@ -20,6 +20,7 @@ from app.v2.content_generation.step_01_schema_factory import (
 )
 from app.v2.content_generation.step_02_prompts import structured_task_input
 from app.v2.errors import (
+    DraftValidationError,
     ImageProcessingError,
     InvalidInternalLinksError,
     MissingRequiredFactsError,
@@ -1799,12 +1800,54 @@ class ContentSessionService:
         updated = SessionStateMachine(snapshot).transition(updated, "ready_to_publish")
         return self.repository.save(updated, expected_version=expected_version)
 
+    def update_draft_fields(
+        self,
+        session_id: str,
+        *,
+        shared_fields: dict[str, Any],
+        acf_source_fields: dict[str, Any],
+        expected_version: int,
+    ) -> ContentSession:
+        session = self.repository.get(session_id)
+        if not session.wordpress_payload:
+            raise DraftValidationError("Generate a draft before saving manual draft edits.")
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        updated_shared = {
+            **session.shared_fields,
+            **(shared_fields or {}),
+        }
+        updated_acf = {
+            **session.acf_source_fields,
+            **(acf_source_fields or {}),
+        }
+        payload = self.payload_builder.build(
+            snapshot,
+            post_type_key=session.post_type_key,
+            shared_values=updated_shared,
+            acf_source_values=updated_acf,
+            media=session.image_metadata,
+        )
+        updated = session.model_copy(
+            update={
+                "shared_fields": updated_shared,
+                "acf_source_fields": updated_acf,
+                "wordpress_payload": payload.model_dump(),
+                "updated_at": datetime.now(timezone.utc),
+            }
+        )
+        self._milestone(updated, "manual draft fields saved")
+        return self.repository.save(updated, expected_version=expected_version)
+
     def publish(
         self,
         session_id: str,
         *,
         idempotency_key: str,
         expected_version: int,
+        target_post_id: int | None = None,
+        force_create_new: bool = False,
+        shared_fields: dict[str, Any] | None = None,
+        acf_source_fields: dict[str, Any] | None = None,
     ) -> ContentSession:
         session = self.repository.get(session_id)
         self._milestone(session, "publication started")
@@ -1812,6 +1855,8 @@ class ContentSessionService:
             session.state == "published"
             and session.publication_idempotency_key == idempotency_key
             and session.wordpress_result
+            and not target_post_id
+            and not force_create_new
         ):
             return session
         if not session.approval.approved:
@@ -1825,6 +1870,19 @@ class ContentSessionService:
             session,
             overwrite_existing=True,
         )
+        if shared_fields or acf_source_fields:
+            refined = refined.model_copy(
+                update={
+                    "shared_fields": {
+                        **refined.shared_fields,
+                        **(shared_fields or {}),
+                    },
+                    "acf_source_fields": {
+                        **refined.acf_source_fields,
+                        **(acf_source_fields or {}),
+                    },
+                }
+            )
         self._milestone(refined, "publication metadata refinement finished")
         if refined.image_refs:
             payload = self.payload_builder.build(
@@ -1835,7 +1893,11 @@ class ContentSessionService:
                 media=refined.image_metadata,
             )
             refined = refined.model_copy(update={"wordpress_payload": payload.model_dump()})
-        publishing = state_machine.transition(refined, "publishing")
+        publishing = (
+            refined.model_copy(update={"state": "publishing"})
+            if refined.state == "published"
+            else state_machine.transition(refined, "publishing")
+        )
         try:
             wordpress_payload = WordPressPayload.model_validate(publishing.wordpress_payload)
             wordpress_payload = wordpress_payload.model_copy(
@@ -1850,6 +1912,8 @@ class ContentSessionService:
                 session=publishing,
                 payload=wordpress_payload,
                 idempotency_key=idempotency_key,
+                target_post_id=target_post_id,
+                force_create_new=force_create_new,
             )
         except Exception as exc:
             raise WordPressRequestError(f"WordPress publication failed: {exc}") from exc

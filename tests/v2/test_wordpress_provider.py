@@ -249,3 +249,94 @@ class WordPressProviderTests(unittest.TestCase):
         body = request_json.call_args_list[2].kwargs["json"]
         self.assertEqual(body["acf"], {"hero_h1": "Hero"})
         self.assertIn("related_links_html", result["warnings"][0])
+
+    @patch("app.v2.providers.step_03_wordpress.resolve_tag_ids", return_value=[])
+    @patch("app.v2.providers.step_03_wordpress.find_term", return_value={"id": 10})
+    @patch("app.v2.providers.step_03_wordpress.request_json")
+    def test_publish_updates_explicit_linked_post_id(
+        self,
+        request_json,
+        _find_term,
+        _resolve_tags,
+    ) -> None:
+        request_json.side_effect = [
+            {"schema": {"properties": {"acf": {"properties": {}}, "meta": {"properties": {}}}}},
+            {
+                "id": 777,
+                "status": "draft",
+                "link": "https://staging.example/linked-post/",
+            },
+        ]
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            wordpress_post_type="post",
+            state="publishing",
+            workbook_hash="hash",
+            language="de-DE",
+            approval=Approval(approved=True),
+        )
+        payload = WordPressPayload(
+            wordpress=WordPressFields(title="Updated", slug="updated", status="draft"),
+        )
+
+        result = ExistingWordPressProvider().publish(
+            session=session,
+            payload=payload,
+            idempotency_key="key-1",
+            target_post_id=777,
+        )
+
+        self.assertEqual(result["post_id"], 777)
+        self.assertEqual(result["write_mode"], "updated_linked_post")
+        self.assertEqual(
+            request_json.call_args_list[1].args[:2],
+            ("POST", "/wp-json/wp/v2/posts/777"),
+        )
+
+    @patch("app.v2.providers.step_03_wordpress.resolve_tag_ids", return_value=[])
+    @patch("app.v2.providers.step_03_wordpress.find_term", return_value={"id": 10})
+    @patch("app.v2.providers.step_03_wordpress.request_json")
+    def test_publish_can_force_create_new_post(
+        self,
+        request_json,
+        _find_term,
+        _resolve_tags,
+    ) -> None:
+        request_json.side_effect = [
+            {"schema": {"properties": {"acf": {"properties": {}}, "meta": {"properties": {}}}}},
+            {
+                "id": 778,
+                "status": "draft",
+                "link": "https://staging.example/new-post/",
+            },
+        ]
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            wordpress_post_type="post",
+            state="publishing",
+            workbook_hash="hash",
+            language="de-DE",
+            approval=Approval(approved=True),
+        )
+        payload = WordPressPayload(
+            wordpress=WordPressFields(title="New", slug="new-post", status="draft"),
+        )
+
+        result = ExistingWordPressProvider().publish(
+            session=session,
+            payload=payload,
+            idempotency_key="key-1",
+            force_create_new=True,
+        )
+
+        self.assertEqual(result["post_id"], 778)
+        self.assertEqual(result["write_mode"], "created")
+        self.assertEqual(len(request_json.call_args_list), 2)
+        self.assertEqual(
+            request_json.call_args_list[1].args[:2],
+            ("POST", "/wp-json/wp/v2/posts"),
+        )

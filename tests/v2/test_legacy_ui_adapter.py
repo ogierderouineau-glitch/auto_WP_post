@@ -19,10 +19,10 @@ class LegacyUiAdapterTests(unittest.TestCase):
         self.assertIn('if CONTENT_PIPELINE_VERSION == "v2":', source)
         self.assertIn("v2UseVisionOnUpload", source)
         self.assertIn("Metadata mit Vision nach dem ersten Entwurf generieren lassen", source)
-        self.assertIn("Testaufnahme: Wir waren mit FLAIRLAB", source)
-        self.assertIn("Das besondere Highlight", source)
-        self.assertIn("Der Fokus lag", source)
-        self.assertIn("Die größte Herausforderung war", source)
+        self.assertIn('id="startRecordingButton"', source)
+        self.assertIn('title="Aufnahme starten"', source)
+        self.assertIn('id="voiceInstructions"', source)
+        self.assertNotIn("Empfohlene Struktur fuer Sprachnachrichten", source)
         self.assertIn("function formatElapsedDuration(ms)", source)
         self.assertIn("function appendElapsedDuration(text, startedAt)", source)
         self.assertIn("promptTraceModal", source)
@@ -167,6 +167,9 @@ class LegacyUiAdapterTests(unittest.TestCase):
         self.assertNotIn("unterstützt derzeit den Beitragstyp Event", create_session)
         self.assertNotIn('option.disabled = option.textContent.trim().toLowerCase() !== "event"', source)
         self.assertIn("function renderPostTypeOptions(version)", source)
+        self.assertIn("function renderVoiceInstructionsForSelectedPostType()", source)
+        self.assertIn("option.dataset.voiceInstructions = postType.voice_instructions || \"\";", source)
+        self.assertIn("target.innerHTML = html.trim()", source)
 
     def test_workbook_upload_remains_available_in_v2_adapter(self) -> None:
         source = ADAPTER.read_text(encoding="utf-8")
@@ -179,6 +182,42 @@ class LegacyUiAdapterTests(unittest.TestCase):
         self.assertIn('v2Api("/api/content-sessions/_workbook/reload"', uploader)
         self.assertIn('document.getElementById("uploadKnowledgeButton").disabled = false', source)
         self.assertNotIn("während eines Tests nicht ersetzt", uploader)
+
+    def test_wordpress_buttons_create_new_or_update_linked_post(self) -> None:
+        adapter = ADAPTER.read_text(encoding="utf-8")
+        app = APP_MAIN.read_text(encoding="utf-8")
+        self.assertIn("Neuen WordPress-Beitrag erstellen", app)
+        self.assertIn("Verknüpften Beitrag aktualisieren", app)
+        self.assertIn("async function publishV2ToWordPress", adapter)
+        self.assertIn("force_create_new: forceCreateNew", adapter)
+        self.assertIn("target_post_id: targetPostId", adapter)
+        self.assertIn("shared_fields: edits.shared", adapter)
+        self.assertIn("acf_source_fields: edits.acf", adapter)
+        create_post = adapter.split("createWordPressPost = async function createWordPressPost()", 1)[1].split(
+            "updateExistingWordPressPost = async function updateExistingWordPressPost()", 1
+        )[0]
+        update_post = adapter.split("updateExistingWordPressPost = async function updateExistingWordPressPost()", 1)[1].split(
+            "uploadWordPressMediaLibrary = async function uploadWordPressMediaLibrary()", 1
+        )[0]
+        self.assertIn("forceCreateNew: true", create_post)
+        self.assertIn("targetPostId: Number(post.post_id)", update_post)
+        self.assertNotIn("window.open(post.edit_url", update_post)
+
+    def test_manual_draft_save_is_available_after_publication(self) -> None:
+        source = ADAPTER.read_text(encoding="utf-8")
+        save_draft = source.split("saveDraft = async function saveDraft()", 1)[1].split(
+            "sendDraftChat = async function sendDraftChat()", 1
+        )[0]
+        self.assertIn("!hasV2DraftReadyForWordPress()", save_draft)
+        self.assertIn("/draft-fields", save_draft)
+        self.assertIn('method: "PUT"', save_draft)
+        self.assertNotIn('v2Session.state !== "needs_review"', save_draft)
+        update_buttons = source.split(
+            "updateButtons = function updateButtons()", 1
+        )[1].split(
+            'document.querySelector("header p").textContent', 1
+        )[0]
+        self.assertIn('document.getElementById("saveDraftButton").disabled = !hasDraft;', update_buttons)
 
     def test_transcribe_recovers_from_stale_session_version(self) -> None:
         source = ADAPTER.read_text(encoding="utf-8")
@@ -299,16 +338,19 @@ class LegacyUiAdapterTests(unittest.TestCase):
         source = ADAPTER.read_text(encoding="utf-8")
         self.assertIn("function hasV2DraftReadyForWordPress()", source)
         self.assertIn('"ready_to_publish"', source)
-        create_post = source.split(
-            "createWordPressPost = async function createWordPressPost()", 1
+        publish_helper = source.split(
+            "async function publishV2ToWordPress", 1
         )[1].split(
             "updateExistingWordPressPost = async function updateExistingWordPressPost()", 1
         )[0]
-        self.assertIn("await loadActiveV2Session();", create_post)
-        self.assertIn('v2Session.state === "needs_review"', create_post)
-        self.assertIn("/approve", create_post)
-        self.assertIn("/publish", create_post)
-        self.assertLess(create_post.index('v2Session.state === "needs_review"'), create_post.index("/approve"))
+        self.assertIn("if (!v2Session) await loadActiveV2Session();", publish_helper)
+        self.assertIn("const edits = editedFieldMaps();", publish_helper)
+        self.assertIn('v2Session.state === "needs_review"', publish_helper)
+        self.assertIn("await saveDraft();", publish_helper)
+        self.assertIn("await approveV2SessionIfNeeded();", publish_helper)
+        self.assertIn("publish-job", publish_helper)
+        self.assertIn("target_post_id: targetPostId", publish_helper)
+        self.assertIn("force_create_new: forceCreateNew", publish_helper)
         update_buttons = source.split(
             "updateButtons = function updateButtons()", 1
         )[1].split(

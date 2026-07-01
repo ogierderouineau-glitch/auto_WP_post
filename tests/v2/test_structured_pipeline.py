@@ -216,7 +216,10 @@ class CaptureWordPressProvider(WordPressProvider):
         session: ContentSession,
         payload: WordPressPayload,
         idempotency_key: str,
+        target_post_id: int | None = None,
+        force_create_new: bool = False,
     ) -> dict[str, Any]:
+        del target_post_id, force_create_new
         self.payloads.append(payload)
         return {
             "post_id": 456,

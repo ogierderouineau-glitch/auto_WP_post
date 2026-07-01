@@ -28,6 +28,7 @@ class PostTypeConfig(WorkbookRow):
     seo_profile: str
     description_de: str
     user_selectable: bool
+    voice_instructions: str | None = None
 
 
 class SharedFieldSchema(WorkbookRow):

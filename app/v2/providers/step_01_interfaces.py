@@ -49,4 +49,6 @@ class WordPressProvider(ABC):
         session: ContentSession,
         payload: WordPressPayload,
         idempotency_key: str,
+        target_post_id: int | None = None,
+        force_create_new: bool = False,
     ) -> dict[str, Any]: ...

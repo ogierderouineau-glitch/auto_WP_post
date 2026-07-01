@@ -19,6 +19,16 @@
     return (document.getElementById("postType").value || "").trim().toLowerCase();
   }
 
+  function renderVoiceInstructionsForSelectedPostType() {
+    const target = document.getElementById("voiceInstructions");
+    const select = document.getElementById("postType");
+    if (!target || !select) return;
+    const html = select.selectedOptions[0]?.dataset.voiceInstructions || "";
+    target.innerHTML = html.trim()
+      ? html
+      : "Für diesen Beitragstyp sind keine Aufnahmehinweise in der Database Datei hinterlegt.";
+  }
+
   function renderPostTypeOptions(version) {
     const select = document.getElementById("postType");
     if (!select || !Array.isArray(version.post_types) || !version.post_types.length) return;
@@ -31,6 +41,7 @@
       option.value = key;
       option.textContent = postType.display_name_de || key;
       option.dataset.category = postType.wp_category_name || "";
+      option.dataset.voiceInstructions = postType.voice_instructions || "";
       select.appendChild(option);
     }
     const selected = version.selected_post_type_key || previous || select.options[0]?.value || "";
@@ -42,6 +53,7 @@
       const category = document.getElementById("category");
       if (category && !category.value.trim()) category.value = selectedOption.dataset.category;
     }
+    renderVoiceInstructionsForSelectedPostType();
   }
 
   function v2Headers(json = true) {
@@ -1220,22 +1232,19 @@
   };
 
   saveDraft = async function saveDraft() {
-    if (!v2Session || v2Session.state !== "needs_review") {
+    if (!v2Session || !hasV2DraftReadyForWordPress()) {
       throw new Error("Bitte zuerst einen Entwurf erstellen.");
     }
     const {shared, acf} = editedFieldMaps();
     const data = await v2Api(
-      `/api/content-sessions/${v2Session.session_id}/generate`,
+      `/api/content-sessions/${v2Session.session_id}/draft-fields`,
       {
-        method: "POST",
+        method: "PUT",
         headers: v2Headers(),
         body: JSON.stringify({
           expected_version: v2Session.version,
           shared_fields: shared,
           acf_source_fields: acf,
-          selected_links: v2Session.selected_links || [],
-          current_url: null,
-          use_vision_for_image_metadata: useVisionOnUpload(),
         }),
       }
     );
@@ -1281,48 +1290,69 @@
     status("Entwurf bereit. Vor dem WordPress-Schritt Änderungen mit „Entwurf speichern“ übernehmen.");
   };
 
-  createWordPressPost = async function createWordPressPost() {
-    await loadActiveV2Session();
+  async function approveV2SessionIfNeeded() {
+    if (v2Session.state !== "needs_review") return;
+    const approved = await v2Api(
+      `/api/content-sessions/${v2Session.session_id}/approve`,
+      {
+        method: "POST",
+        headers: v2Headers(),
+        body: JSON.stringify({
+          expected_version: v2Session.version,
+          user_id: v2UserId(),
+        }),
+      }
+    );
+    v2Session = approved.session;
+  }
+
+  async function publishV2ToWordPress({
+    targetPostId = null,
+    forceCreateNew = false,
+    statusText = "WordPress-Beitrag wird im Hintergrund verarbeitet. Bitte Seite möglichst offen lassen; bei Mobile-Sleep wird danach weiter gepollt.",
+  } = {}) {
+    if (!v2Session) await loadActiveV2Session();
     if (!v2Session || !hasV2DraftReadyForWordPress()) {
       throw new Error("Bitte zuerst einen Entwurf erstellen.");
     }
-    if (v2Session.state === "published") {
-      await renderV2(v2Session, {statusText: "Beitrag wurde bereits veröffentlicht."});
-      showResultModal(adaptSession(v2Session).wordpress_post);
-      return;
-    }
+    const edits = editedFieldMaps();
     if (v2Session.state === "needs_review") {
       await saveDraft();
-      const approved = await v2Api(
-        `/api/content-sessions/${v2Session.session_id}/approve`,
-        {
-          method: "POST",
-          headers: v2Headers(),
-          body: JSON.stringify({
-            expected_version: v2Session.version,
-            user_id: v2UserId(),
-          }),
-        }
-      );
-      v2Session = approved.session;
+      await approveV2SessionIfNeeded();
     }
+    const postIdPart = targetPostId ? `update-${targetPostId}` : "create";
+    const modePart = forceCreateNew ? "new" : "idempotent";
     const published = await startV2SessionJob(
       `/api/content-sessions/${v2Session.session_id}/publish-job`,
       {
         expected_version: v2Session.version,
-        idempotency_key: `${v2Session.session_id}-publish`,
+        idempotency_key: `${v2Session.session_id}-${postIdPart}-${modePart}-${Date.now()}`,
+        target_post_id: targetPostId,
+        force_create_new: forceCreateNew,
+        shared_fields: edits.shared,
+        acf_source_fields: edits.acf,
       },
-      "WordPress-Beitrag wird im Hintergrund erstellt. Bitte Seite möglichst offen lassen; bei Mobile-Sleep wird danach weiter gepollt."
+      statusText
     );
     await renderV2(published, {statusText: "WordPress-Schritt abgeschlossen."});
     showResultModal(adaptSession(published).wordpress_post);
+  }
+
+  createWordPressPost = async function createWordPressPost() {
+    await publishV2ToWordPress({
+      forceCreateNew: true,
+      statusText: "Neuer WordPress-Beitrag wird im Hintergrund erstellt. Bitte Seite möglichst offen lassen; bei Mobile-Sleep wird danach weiter gepollt.",
+    });
   };
 
   updateExistingWordPressPost = async function updateExistingWordPressPost() {
     await loadActiveV2Session();
     const post = adaptSession(v2Session).wordpress_post || {};
-    if (!post.edit_url) throw new Error("Es gibt noch keinen erstellten WordPress-Beitrag zum Bearbeiten.");
-    window.open(post.edit_url, "_blank", "noopener");
+    if (!post.post_id) throw new Error("Es gibt noch keinen zuvor erstellten WordPress-Beitrag in dieser Session.");
+    await publishV2ToWordPress({
+      targetPostId: Number(post.post_id),
+      statusText: `Verknüpfter WordPress-Beitrag ${post.post_id} wird mit dem aktuellen Session-Inhalt aktualisiert.`,
+    });
   };
 
   uploadWordPressMediaLibrary = async function uploadWordPressMediaLibrary() {
@@ -1335,7 +1365,6 @@
     const hasSession = !!v2Session;
     const hasText = !!document.getElementById("transcript").value.trim();
     const hasDraft = hasV2DraftReadyForWordPress();
-    const canEditDraft = v2Session?.state === "needs_review";
     const hasDraftMessage = !!document.getElementById("draftChatInput").value.trim();
     const hasPending = !!queuedRecordedVoiceFiles().length
       || !!document.getElementById("voice").files.length
@@ -1349,7 +1378,7 @@
     document.getElementById("generateFactsButton").disabled = !hasSession || !hasText;
     document.getElementById("generateDraftButton").disabled = !hasSession || !hasText;
     document.getElementById("transcriptNextButton").disabled = !hasSession || !hasText;
-    document.getElementById("saveDraftButton").disabled = !canEditDraft;
+    document.getElementById("saveDraftButton").disabled = !hasDraft;
     document.getElementById("sendDraftChatButton").disabled = !hasDraft || !hasDraftMessage;
     document.getElementById("createPostButton").disabled = !hasDraft;
     document.getElementById("updatePostButton").disabled = !(v2Session?.wordpress_result?.edit_url);
@@ -1498,6 +1527,7 @@
   document.getElementById("transcriptNextButton").textContent = "Weiter: Entwurf erstellen";
   document.getElementById("sendDraftChatButton").title =
     "Sprachnachrichten können transkribiert werden; der Agent kann den Entwurf strukturiert überarbeiten.";
+  document.getElementById("postType").addEventListener("change", renderVoiceInstructionsForSelectedPostType);
   document.getElementById("uploadKnowledgeButton").disabled = false;
   document.getElementById("uploadKnowledgeButton").title =
     "Neue Database Datei hochladen, validieren und für neue Sessions aktivieren.";

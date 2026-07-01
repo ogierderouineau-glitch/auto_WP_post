@@ -39,12 +39,21 @@ class DraftChatRequest(GenerateRequest):
     message: str
 
 
+class DraftFieldsUpdateRequest(VersionedRequest):
+    shared_fields: dict[str, Any] = Field(default_factory=dict)
+    acf_source_fields: dict[str, Any] = Field(default_factory=dict)
+
+
 class ApproveRequest(VersionedRequest):
     user_id: str
 
 
 class PublishRequest(VersionedRequest):
     idempotency_key: str
+    target_post_id: int | None = None
+    force_create_new: bool = False
+    shared_fields: dict[str, Any] = Field(default_factory=dict)
+    acf_source_fields: dict[str, Any] = Field(default_factory=dict)
 
 
 class ImageMetadataUpdateRequest(VersionedRequest):

@@ -2557,17 +2557,9 @@ APP_HTML = """
     <input id="videos" type="file" accept="video/*" onchange="renderVideoChoices()">
     <div id="videoPreviews" class="image-preview-grid"></div>
     <label for="voice">Sprachnachrichten</label>
-    <div class="summary">
-      <strong>Empfohlene Struktur fuer Sprachnachrichten</strong><br>
-      1. <strong>Kontext in 1 Satz:</strong> Was fuer ein Event war es und fuer welchen Anlass?<br>
-      2. <strong>Faktenblock:</strong> Datum, Ort, Eventtyp, Gaestezahl, Dauer, gebuchte Leistung.<br>
-      3. <strong>Ablauf:</strong> Kurz erklaeren, was vor Ort passiert ist (Setup, Service, besondere Momente).<br>
-      4. <strong>Highlights & Wirkung:</strong> Reaktionen der Gaeste, besondere Drinks, Teamleistung, Ergebnis.<br>
-      5. <strong>Herausforderung + Loesung:</strong> Was war anspruchsvoll und wie wurde es geloest?<br>
-      6. <strong>Ton:</strong> Konkret, sachlich, mit echten Details statt allgemeinen Werbesaetzen.
-    </div>
+    <div id="voiceInstructions" class="summary">Wähle einen Beitragstyp, um die passenden Aufnahmehinweise aus der Database Datei zu laden.</div>
     <div class="recording-controls">
-      <button id="startRecordingButton" class="secondary icon-button" onclick="run(startRecording)" type="button" title="Testaufnahme: Wir waren mit FLAIRLAB am 24.06.2026 beim Sommerfest von Beispielkunde im Spreespeicher Berlin im Einsatz. Es handelte sich um eine Firmenveranstaltung mit rund 180 Gästen. Gebucht waren eine hochwertige mobile Cocktailbar, Cocktailcatering und Show-Bartending. Vor Ort waren Barkeeper Max und Barkeeperin Sofia im Einsatz. Serviert wurden drei Signature Drinks: Basil Smash, Espresso Martini und ein alkoholfreier Berry Mule. Zusätzlich gab es eine alkoholfreie Auswahl für Gäste, die keinen Alkohol trinken wollten. Das besondere Highlight des Events war die Kombination aus schneller Premium-Bar, hochwertiger Präsentation und einer sichtbaren Flair-Show direkt an der Bar. Die Gäste wurden aktiv in das Bar-Erlebnis einbezogen, und viele von ihnen haben die Showeinlage gefilmt. Der Fokus lag auf kurzen Wartezeiten, einem professionellen und hochwertigen Auftritt sowie einem reibungslosen Ablauf trotz des hohen Gästeaufkommens. Gleichzeitig sollte die Bar nicht nur Getränke ausgeben, sondern als sichtbares Erlebnis und Treffpunkt der Veranstaltung funktionieren. Die größte Herausforderung war der enge Aufbau im Spreespeicher. Hinter der Bar stand nur wenig Arbeitsfläche zur Verfügung, das Zeitfenster für den Aufbau war knapp, und direkt nach der Begrüßung kamen sehr viele Gäste gleichzeitig zur Bar. Dadurch bestand das Risiko langer Wartezeiten und unübersichtlicher Arbeitswege. Die Lösung war eine klare Aufteilung in zwei Arbeitsstationen. Eine Station war hauptsächlich für die schnelle Ausgabe der vorbereiteten Signature Drinks zuständig, während die zweite Station individuellere Bestellungen und den Show-Moment übernommen hat. Das Mise en Place wurde vollständig vorbereitet, die Zutaten wurden nach Arbeitsablauf sortiert und die Laufwege hinter der Bar wurden klar festgelegt. Während der stärksten Stoßzeit wurde zusätzlich ein kurzer Flair-Moment eingesetzt, um die wartenden Gäste zu unterhalten. Die Atmosphäre war sommerlich, lebendig, hochwertig und sehr positiv. Die Gäste waren neugierig, haben viele Fragen zu den Drinks gestellt und die Flair-Einlage aufmerksam verfolgt. Besonders positiv wurde auch der alkoholfreie Berry Mule aufgenommen. Mehrere Gäste haben ausdrücklich gelobt, dass die alkoholfreie Option genauso hochwertig präsentiert wurde wie die alkoholischen Cocktails. Als zusätzliche Leistungen wurden die mobile Bar, das komplette Bar-Equipment, Gläser, Eis, Zutaten, Dekoration und die Showeinlage von FLAIRLAB gestellt. Der Ablauf war insgesamt schnell, professionell und gut organisiert. Bitte erstelle aus diesen Informationen einen sachlichen, hochwertigen und konkreten Eventbeitrag. Erfinde keine zusätzlichen Fakten. Verwende alle bestätigten Informationen passend in den vorgesehenen Feldern, insbesondere für Herausforderung, Lösung, Highlight, Atmosphäre und Fokus."><span class="icon-symbol icon-record" aria-hidden="true"></span><span>Aufnahme starten</span></button>
+      <button id="startRecordingButton" class="secondary icon-button" onclick="run(startRecording)" type="button" title="Aufnahme starten"><span class="icon-symbol icon-record" aria-hidden="true"></span><span>Aufnahme starten</span></button>
       <button id="stopRecordingButton" class="secondary icon-button" onclick="stopRecording()" disabled type="button"><span class="icon-symbol icon-stop" aria-hidden="true"></span><span>Stoppen und hochladen</span></button>
     </div>
     <div id="recordingIndicator" class="recording-indicator">Aufnahme läuft</div>
@@ -2627,8 +2619,8 @@ APP_HTML = """
       <option value="private">private</option>
     </select>
     <div class="step-actions">
-      <button id="createPostButton" onclick="run(createWordPressPost)" disabled>Weiter: WordPress-Beitrag erstellen</button>
-      <button id="updatePostButton" class="secondary" onclick="run(updateExistingWordPressPost)" disabled>Bereits erstellten Beitrag aktualisieren</button>
+      <button id="createPostButton" onclick="run(createWordPressPost)" disabled>Neuen WordPress-Beitrag erstellen</button>
+      <button id="updatePostButton" class="secondary" onclick="run(updateExistingWordPressPost)" disabled>Verknüpften Beitrag aktualisieren</button>
     </div>
     <div id="updateTargetInfo" class="summary">Update-Ziel: noch kein zuvor erstellter Beitrag in dieser Session.</div>
     <div id="postLinks" class="links"></div>
