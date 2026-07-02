@@ -71,7 +71,71 @@
     return v2Headers(json);
   };
 
+  function v2LogTimestamp() {
+    return new Date().toISOString();
+  }
+
+  function v2ApiLogsEnabled() {
+    const stored = String(localStorage.getItem("v2ApiLogs") || "1").toLowerCase();
+    return !["0", "false", "off", "no"].includes(stored);
+  }
+
+  function v2BodyForLog(body) {
+    if (!body) return null;
+    if (body instanceof FormData) {
+      return [...body.entries()].reduce((items, [key, value]) => {
+        items[key] = value instanceof File
+          ? {name: value.name, size: value.size, type: value.type}
+          : value;
+        return items;
+      }, {});
+    }
+    if (typeof body === "string") {
+      try {
+        return JSON.parse(body);
+      } catch {
+        return body;
+      }
+    }
+    return body;
+  }
+
+  function v2LogGroup(title, rows) {
+    if (!v2ApiLogsEnabled() || !window.console) return;
+    const heading = `[${v2LogTimestamp()}] ${title}`;
+    if (console.groupCollapsed) console.groupCollapsed(heading);
+    else console.log(heading);
+    for (const [label, value] of Object.entries(rows)) {
+      console.log(label, value);
+    }
+    if (console.groupEnd) console.groupEnd();
+  }
+
+  function v2ApiLogTitle(method, path, statusCode) {
+    let section = "V2 API request";
+    if (method === "POST" && path === "/api/content-sessions") {
+      section = "session created";
+    } else if (path.includes("/_workbook")) {
+      section = "rules retrieved";
+    } else if (path.includes("/publish-job")) {
+      section = "publish payload queued";
+    } else if (path.includes("/draft-fields")) {
+      section = "draft fields saved";
+    }
+    return `${section} | ${method} ${path} -> ${statusCode}`;
+  }
+
+  function shouldLogV2Api(method, path, response) {
+    if (method === "GET" && path.includes("/api/content-sessions/jobs/") && response.ok) {
+      return false;
+    }
+    return true;
+  }
+
   async function v2Api(path, options = {}) {
+    const startedAt = performance.now();
+    const method = String(options.method || "GET").toUpperCase();
+    const requestBody = v2BodyForLog(options.body);
     const response = await fetch(path, options);
     const text = await response.text();
     let data;
@@ -79,6 +143,16 @@
       data = JSON.parse(text);
     } catch {
       data = text;
+    }
+    if (shouldLogV2Api(method, path, response)) {
+      v2LogGroup(v2ApiLogTitle(method, path, response.status), {
+        method,
+        path,
+        status: response.status,
+        duration_ms: Math.round(performance.now() - startedAt),
+        request_payload: requestBody,
+        response_payload: data,
+      });
     }
     if (!response.ok) {
       const message = data && typeof data === "object"
@@ -146,6 +220,16 @@
       }
       if (!current.session) {
         throw new Error(`Job ${current.job_id} lieferte keine Session zurück.`);
+      }
+      if (current.operation === "publish" && current.session?.wordpress_result) {
+        v2LogGroup(`publish completed | job ${current.job_id}`, {
+          job_id: current.job_id,
+          session_id: current.session.session_id,
+          status: current.status,
+          wordpress_result: current.session.wordpress_result,
+          sent_fields: current.session.wordpress_result.sent_fields || {},
+          sent_body: current.session.wordpress_result.sent_body || {},
+        });
       }
       return current.session;
     } finally {
@@ -290,6 +374,8 @@
         view_url: result.link || result.view_url,
         edit_url: result.edit_url,
         post_write_mode: "v2",
+        sent_fields: result.sent_fields || {},
+        sent_body: result.sent_body || {},
       } : {},
       image_processing: {
         status: imageProcessingStatus,
@@ -501,8 +587,8 @@
 
   function imageUploadActionLabel() {
     return useVisionOnUpload()
-      ? "mit späterer Vision-Metadatenanalyse und direkt mit Pillow verarbeitet"
-      : "ohne Vision direkt mit Pillow verarbeitet";
+      ? "mit Vision-Crop-Analyse, Pillow-Verarbeitung und späterer Vision-Metadatenanalyse"
+      : "mit Vision-Crop-Analyse und Pillow-Verarbeitung";
   }
 
   function rememberLocalImagePreview(file) {
@@ -590,7 +676,6 @@
     const form = new FormData();
     form.append("expected_version", String(Number(v2Session.version)));
     form.append("kind", kind);
-    if (kind === "image") form.append("use_vision", "0");
     form.append("upload", file);
     const data = await v2Api(
       `/api/content-sessions/${v2Session.session_id}/uploads`,
@@ -783,7 +868,12 @@
     return value;
   }
 
-  function editedFieldMaps() {
+  function editedValueChanged(next, previous) {
+    return JSON.stringify(next ?? null) !== JSON.stringify(previous ?? null);
+  }
+
+  function editedFieldMaps(options = {}) {
+    const onlyChanged = !!options.onlyChanged;
     syncDraftCsvFromTable();
     const rows = parseCsv(document.getElementById("draftCsv").value || "");
     const headers = rows[0] || [];
@@ -792,12 +882,21 @@
     const acf = {};
     headers.forEach((field, index) => {
       if (Object.prototype.hasOwnProperty.call(v2Session.shared_fields || {}, field)) {
-        shared[field] = decodeEditedValue(values[index] || "", v2Session.shared_fields[field]);
+        const decoded = decodeEditedValue(values[index] || "", v2Session.shared_fields[field]);
+        if (!onlyChanged || editedValueChanged(decoded, v2Session.shared_fields[field])) {
+          shared[field] = decoded;
+        }
       } else if (Object.prototype.hasOwnProperty.call(v2Session.acf_source_fields || {}, field)) {
-        acf[field] = decodeEditedValue(values[index] || "", v2Session.acf_source_fields[field]);
+        const decoded = decodeEditedValue(values[index] || "", v2Session.acf_source_fields[field]);
+        if (!onlyChanged || editedValueChanged(decoded, v2Session.acf_source_fields[field])) {
+          acf[field] = decoded;
+        }
       }
     });
-    shared.status = document.getElementById("postStatus").value || shared.status || "draft";
+    const status = document.getElementById("postStatus").value || shared.status || "draft";
+    if (!onlyChanged || editedValueChanged(status, (v2Session.shared_fields || {}).status)) {
+      shared.status = status;
+    }
     return {shared, acf};
   }
 
@@ -1335,13 +1434,14 @@
   async function publishV2ToWordPress({
     targetPostId = null,
     forceCreateNew = false,
+    partialUpdate = false,
     statusText = "WordPress-Beitrag wird im Hintergrund verarbeitet. Bitte Seite möglichst offen lassen; bei Mobile-Sleep wird danach weiter gepollt.",
   } = {}) {
     if (!v2Session) await loadActiveV2Session();
     if (!v2Session || !hasV2DraftReadyForWordPress()) {
       throw new Error("Bitte zuerst einen Entwurf erstellen.");
     }
-    const edits = editedFieldMaps();
+    const edits = editedFieldMaps({onlyChanged: partialUpdate});
     if (v2Session.state === "needs_review") {
       await saveDraft();
       await approveV2SessionIfNeeded();
@@ -1355,6 +1455,7 @@
         idempotency_key: `${v2Session.session_id}-${postIdPart}-${modePart}-${Date.now()}`,
         target_post_id: targetPostId,
         force_create_new: forceCreateNew,
+        partial_update: partialUpdate,
         shared_fields: edits.shared,
         acf_source_fields: edits.acf,
       },
@@ -1377,6 +1478,7 @@
     if (!post.post_id) throw new Error("Es gibt noch keinen zuvor erstellten WordPress-Beitrag in dieser Session.");
     await publishV2ToWordPress({
       targetPostId: Number(post.post_id),
+      partialUpdate: true,
       statusText: `Verknüpfter WordPress-Beitrag ${post.post_id} wird mit dem aktuellen Session-Inhalt aktualisiert.`,
     });
   };

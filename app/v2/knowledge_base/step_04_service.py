@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 from threading import RLock
 
 from app.v2.knowledge_base.step_01_models import WorkbookSnapshot
@@ -38,6 +39,19 @@ class KnowledgeBaseService:
         if snapshot is None:
             current = self.current()
             if current.version.sha256 == workbook_hash:
+                return current
+            if os.getenv("V2_ALLOW_CURRENT_WORKBOOK_FALLBACK", "1").lower() not in {
+                "0",
+                "false",
+                "off",
+                "no",
+            }:
+                print(
+                    "[pipeline warning] "
+                    f"Workbook snapshot is not loaded: {workbook_hash}. "
+                    f"Using current workbook snapshot: {current.version.sha256}",
+                    flush=True,
+                )
                 return current
         if snapshot is None:
             raise KeyError(f"Workbook snapshot is not loaded: {workbook_hash}")

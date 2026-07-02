@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from openpyxl import load_workbook
 
 from app.v2.errors import InvalidWorkbookError
+from app.v2.knowledge_base.step_01_models import WorkbookSnapshot, WorkbookVersion
 from app.v2.knowledge_base.step_02_loader import WorkbookLoader
 from app.v2.knowledge_base.step_03_validator import WorkbookValidator
+from app.v2.knowledge_base.step_04_service import KnowledgeBaseService
 from app.v2.workflow.step_03_registry import WORKFLOW_HANDLER_METHODS
 
 WORKBOOK = Path(
@@ -18,6 +22,56 @@ WORKBOOK = Path(
         "/home/ogier-derouineau/Documents/FLAIRLAB_Knowledge_Base_Revised_V6.xlsm",
     )
 )
+
+
+class KnowledgeBaseServiceTests(unittest.TestCase):
+    def _snapshot(self, sha256: str) -> WorkbookSnapshot:
+        return WorkbookSnapshot(
+            version=WorkbookVersion(
+                filename="test.xlsm",
+                sha256=sha256,
+                loaded_at=datetime.now(timezone.utc),
+                schema_version=None,
+            ),
+            post_types=(),
+            shared_fields=(),
+            acf_fields=(),
+            blueprint=(),
+            seo_rules=(),
+            style_rules=(),
+            story_patterns=(),
+            image_analysis_rules=(),
+            pillow_rules=(),
+            image_metadata_fields=(),
+            image_metadata_rules=(),
+            internal_links=(),
+            internal_link_rules=(),
+            workflow_steps=(),
+            application_states=(),
+            agent_instructions=(),
+            context_manifest=(),
+            validation_values=(),
+            post_examples=(),
+            output_specifications=(),
+        )
+
+    def test_missing_workbook_hash_falls_back_to_current_snapshot(self) -> None:
+        service = KnowledgeBaseService("unused.xlsm")
+        current = self._snapshot("current-hash")
+        service._snapshots[current.version.sha256] = current
+        service._current_hash = current.version.sha256
+
+        self.assertIs(service.by_hash("missing-hash"), current)
+
+    def test_missing_workbook_hash_fallback_can_be_disabled(self) -> None:
+        service = KnowledgeBaseService("unused.xlsm")
+        current = self._snapshot("current-hash")
+        service._snapshots[current.version.sha256] = current
+        service._current_hash = current.version.sha256
+
+        with patch.dict(os.environ, {"V2_ALLOW_CURRENT_WORKBOOK_FALLBACK": "0"}):
+            with self.assertRaises(KeyError):
+                service.by_hash("missing-hash")
 
 
 @unittest.skipUnless(WORKBOOK.is_file(), f"V2 test workbook not found: {WORKBOOK}")

@@ -24,6 +24,8 @@ WORKBOOK = Path(
 class FakeWordPressProvider(WordPressProvider):
     def __init__(self) -> None:
         self.calls = 0
+        self.payloads: list[WordPressPayload] = []
+        self.partial_update_fields: list[dict[str, set[str]] | None] = []
 
     def publish(
         self,
@@ -31,8 +33,14 @@ class FakeWordPressProvider(WordPressProvider):
         session: ContentSession,
         payload: WordPressPayload,
         idempotency_key: str,
+        target_post_id: int | None = None,
+        force_create_new: bool = False,
+        partial_update_fields: dict[str, set[str]] | None = None,
     ) -> dict[str, Any]:
+        del target_post_id, force_create_new
         self.calls += 1
+        self.payloads.append(payload)
+        self.partial_update_fields.append(partial_update_fields)
         return {
             "post_id": 123,
             "status": payload.wordpress.status,
@@ -157,6 +165,59 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(revised.state, "needs_review")
         self.assertFalse(revised.approval.approved)
         self.assertIsNone(revised.publication_idempotency_key)
+
+    def test_partial_update_rebuilds_text_payload_without_previous_publish_snapshot(self) -> None:
+        session = self.service.create(user_id="user-1", post_type_key="event")
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        shared = {
+            row.field_key: self._value(
+                row.value_type,
+                row.min_words,
+                row.min_characters,
+            )
+            for row in snapshot.shared_fields
+            if row.enabled and row.include_in_ai_schema
+        }
+        acf = {
+            row.field_key: self._value(row.value_type, row.min_words)
+            for row in snapshot.acf_fields
+            if row.enabled
+            and row.post_type_key == "event"
+            and row.field_role != "input_fact"
+            and row.required_for_output
+        }
+        session = session.model_copy(
+            update={
+                "state": "ready_to_publish",
+                "approval": session.approval.model_copy(update={"approved": True}),
+                "shared_fields": shared,
+                "acf_source_fields": acf,
+                "wordpress_payload": self.service.payload_builder.build(
+                    snapshot,
+                    post_type_key=session.post_type_key,
+                    shared_values=shared,
+                    acf_source_values=acf,
+                ).model_dump(),
+                "wordpress_result": {"post_id": 123},
+                "published_wordpress_payload": {},
+            }
+        )
+        session = self.service.repository.save(session, expected_version=session.version)
+        updated_title = "Updated WordPress title"
+
+        published = self.service.publish(
+            session.session_id,
+            idempotency_key="partial-update-no-baseline",
+            expected_version=session.version,
+            target_post_id=123,
+            partial_update=True,
+            shared_fields={"post_title": updated_title},
+            acf_source_fields={},
+        )
+
+        self.assertEqual(published.state, "published")
+        self.assertEqual(self.wordpress.payloads[-1].wordpress.title, updated_title)
+        self.assertIn("title", self.wordpress.partial_update_fields[-1]["wordpress"])
 
     def test_generation_caps_selected_internal_links_to_workbook_maximum(self) -> None:
         session = self.service.create(user_id="user-1", post_type_key="event")

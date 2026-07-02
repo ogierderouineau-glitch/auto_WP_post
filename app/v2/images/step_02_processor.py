@@ -16,6 +16,8 @@ from app.v2.knowledge_base.step_01_models import PillowRule, WorkbookSnapshot
 class PillowProcessor:
     """Apply configured Pillow rules; numeric behavior comes from the workbook."""
 
+    DEFAULT_CROP_MIN_RETAINED_AREA = 0.60
+
     def process(
         self,
         snapshot: WorkbookSnapshot,
@@ -46,10 +48,13 @@ class PillowProcessor:
             )
             for rule in rules:
                 if image_condition_matches(rule.condition, context, rule.value):
+                    values.pop("_crop_skip_reason", None)
                     before = image
                     image = self._apply(image, rule, values)
                     if self._operation_is_visible(rule.rule_key) and image is not before:
                         operations.append(self._operation_label(rule, values))
+                    elif self._operation_is_visible(rule.rule_key) and values.get("_crop_skip_reason"):
+                        operations.append(str(values["_crop_skip_reason"]))
                     context = ImageConditionContext(
                         width=image.width,
                         height=image.height,
@@ -170,14 +175,64 @@ class PillowProcessor:
             focal_y = float(values.get("crop.focal_y", 0.5))
             if current_ratio > target_ratio:
                 crop_width = round(image.height * target_ratio)
-                left = round((image.width - crop_width) * focal_x)
-                left = max(0, min(left, image.width - crop_width))
+                if not PillowProcessor._crop_retains_enough_area(
+                    image.width,
+                    image.height,
+                    crop_width,
+                    image.height,
+                    values,
+                ):
+                    values["_crop_skip_reason"] = (
+                        f"{rule.rule_key} skipped; crop would retain less than "
+                        f"{float(values.get('crop.min_retained_area', PillowProcessor.DEFAULT_CROP_MIN_RETAINED_AREA)):.0%} "
+                        "of the original image"
+                    )
+                    return image
+                left = PillowProcessor._crop_start_for_focal(
+                    image.width,
+                    crop_width,
+                    focal_x,
+                )
                 return image.crop((left, 0, left + crop_width, image.height))
             crop_height = round(image.width / target_ratio)
-            top = round((image.height - crop_height) * focal_y)
-            top = max(0, min(top, image.height - crop_height))
+            if not PillowProcessor._crop_retains_enough_area(
+                image.width,
+                image.height,
+                image.width,
+                crop_height,
+                values,
+            ):
+                values["_crop_skip_reason"] = (
+                    f"{rule.rule_key} skipped; crop would retain less than "
+                    f"{float(values.get('crop.min_retained_area', PillowProcessor.DEFAULT_CROP_MIN_RETAINED_AREA)):.0%} "
+                    "of the original image"
+                )
+                return image
+            top = PillowProcessor._crop_start_for_focal(
+                image.height,
+                crop_height,
+                focal_y,
+            )
             return image.crop((0, top, image.width, top + crop_height))
         return image
+
+    @classmethod
+    def _crop_retains_enough_area(
+        cls,
+        width: int,
+        height: int,
+        crop_width: int,
+        crop_height: int,
+        values: dict[str, Any],
+    ) -> bool:
+        minimum = float(values.get("crop.min_retained_area", cls.DEFAULT_CROP_MIN_RETAINED_AREA))
+        retained = (crop_width * crop_height) / (width * height)
+        return retained >= minimum
+
+    @staticmethod
+    def _crop_start_for_focal(length: int, crop_length: int, focal: float) -> int:
+        start = round((length * focal) - (crop_length / 2))
+        return max(0, min(start, length - crop_length))
 
     @staticmethod
     def _save_to_target(

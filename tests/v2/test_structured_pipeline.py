@@ -218,8 +218,9 @@ class CaptureWordPressProvider(WordPressProvider):
         idempotency_key: str,
         target_post_id: int | None = None,
         force_create_new: bool = False,
+        partial_update_fields: dict[str, set[str]] | None = None,
     ) -> dict[str, Any]:
-        del target_post_id, force_create_new
+        del target_post_id, force_create_new, partial_update_fields
         self.payloads.append(payload)
         return {
             "post_id": 456,
@@ -343,6 +344,13 @@ class StructuredPipelineTests(unittest.TestCase):
             self.assertTrue(story_trace["rules"])
             self.assertTrue(any(rule["shared"] for rule in story_trace["rules"]))
             self.assertTrue(any(not rule["shared"] for rule in story_trace["rules"]))
+            acf_context = next(
+                item["context"]
+                for item in model.contexts
+                if item["task"] == "acf_field_generation"
+            )
+            self.assertEqual(acf_context["current_shared_fields"], session.shared_fields)
+            self.assertIn("post_title", acf_context["current_shared_fields"])
             self.assertEqual(session.ai_usage["call_count"], 4)
             self.assertEqual(session.ai_usage["total_tokens"], 60)
             self.assertEqual(session.ai_usage["services"]["openai_text"]["call_count"], 4)

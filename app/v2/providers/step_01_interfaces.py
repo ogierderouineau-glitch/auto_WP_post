@@ -51,4 +51,5 @@ class WordPressProvider(ABC):
         idempotency_key: str,
         target_post_id: int | None = None,
         force_create_new: bool = False,
+        partial_update_fields: dict[str, set[str]] | None = None,
     ) -> dict[str, Any]: ...

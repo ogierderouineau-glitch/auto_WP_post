@@ -13,6 +13,7 @@ from app.v2.content_generation.step_01_schema_factory import (
     build_image_analysis_model,
 )
 from app.v2.images.step_02_processor import PillowProcessor
+from app.v2.knowledge_base.step_01_models import PillowRule
 from app.v2.knowledge_base.step_02_loader import WorkbookLoader
 from app.v2.knowledge_base.step_03_validator import WorkbookValidator
 
@@ -22,6 +23,79 @@ WORKBOOK = Path(
         "/home/ogier-derouineau/Documents/FLAIRLAB_Knowledge_Base_Revised_V6.xlsm",
     )
 )
+
+
+def _crop_rule() -> PillowRule:
+    return PillowRule(
+        sheet_row=1,
+        rule_key="crop.aspect_ratio",
+        enabled=True,
+        engine="pillow",
+        stage="processing",
+        operation="crop",
+        parameter="aspect_ratio",
+        value="4:3",
+        value_type="ratio",
+        condition="crop_mode_equals_cover",
+        priority="normal",
+        numeric_priority=1,
+        fallback_engine="none",
+    )
+
+
+class PillowCropFocalPointTests(unittest.TestCase):
+    def test_wide_crop_places_vision_subject_as_close_to_center_as_possible(self) -> None:
+        image = Image.new("RGB", (1200, 600), "black")
+        subject_x = round(1200 * 0.82)
+        for y in range(image.height):
+            image.putpixel((subject_x, y), (255, 0, 0))
+
+        cropped = PillowProcessor._apply(
+            image,
+            _crop_rule(),
+            {"crop.mode": "cover", "crop.focal_x": 0.82, "crop.focal_y": 0.5},
+        )
+
+        red_columns = [
+            x
+            for x in range(cropped.width)
+            if cropped.getpixel((x, cropped.height // 2)) == (255, 0, 0)
+        ]
+        self.assertEqual(cropped.size, (800, 600))
+        self.assertEqual(red_columns, [584])
+
+    def test_tall_crop_is_skipped_when_it_would_discard_too_much_image(self) -> None:
+        image = Image.new("RGB", (600, 1200), "black")
+        subject_y = round(1200 * 0.82)
+        for x in range(image.width):
+            image.putpixel((x, subject_y), (255, 0, 0))
+
+        values = {"crop.mode": "cover", "crop.focal_x": 0.5, "crop.focal_y": 0.82}
+        cropped = PillowProcessor._apply(
+            image,
+            _crop_rule(),
+            values,
+        )
+
+        self.assertIs(cropped, image)
+        self.assertEqual(cropped.size, (600, 1200))
+        self.assertIn("crop.aspect_ratio skipped", values["_crop_skip_reason"])
+
+    def test_tall_crop_can_be_allowed_with_workbook_threshold_override(self) -> None:
+        image = Image.new("RGB", (600, 1200), "black")
+
+        cropped = PillowProcessor._apply(
+            image,
+            _crop_rule(),
+            {
+                "crop.mode": "cover",
+                "crop.focal_x": 0.5,
+                "crop.focal_y": 0.82,
+                "crop.min_retained_area": 0.30,
+            },
+        )
+
+        self.assertEqual(cropped.size, (600, 450))
 
 
 @unittest.skipUnless(WORKBOOK.is_file(), f"V2 test workbook not found: {WORKBOOK}")

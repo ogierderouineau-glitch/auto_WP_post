@@ -103,6 +103,7 @@ class ContentSessionService:
         if os.getenv("V2_MILESTONE_LOGS", "1").lower() in {"0", "false", "off", "no"}:
             return
         print(
+            f"[{datetime.now(timezone.utc).isoformat()}] "
             f"[pipeline milestone] session={session.session_id[:8]} state={session.state} {message}",
             flush=True,
         )
@@ -869,6 +870,7 @@ class ContentSessionService:
                     field_keys=[row.field_key for row in rows],
                 )
                 context_payload = context.model_dump(by_alias=True)
+                context_payload["current_shared_fields"] = shared_fields
                 generation_trace.update(
                     self._generation_trace_from_context(
                         context,
@@ -879,7 +881,7 @@ class ContentSessionService:
                 if revision_instruction:
                     context_payload["draft_revision"] = {
                         "instruction": revision_instruction,
-                        "current_shared_fields": session.shared_fields,
+                        "current_shared_fields": shared_fields,
                         "current_acf_source_fields": session.acf_source_fields,
                     }
                 model = build_generation_model(
@@ -1855,6 +1857,7 @@ class ContentSessionService:
         expected_version: int,
         target_post_id: int | None = None,
         force_create_new: bool = False,
+        partial_update: bool = False,
         shared_fields: dict[str, Any] | None = None,
         acf_source_fields: dict[str, Any] | None = None,
     ) -> ContentSession:
@@ -1873,6 +1876,19 @@ class ContentSessionService:
         if self.wordpress is None:
             raise RuntimeError("A WordPressProvider is not configured.")
         snapshot = self.knowledge.by_hash(session.workbook_hash)
+        partial_update = bool(partial_update and target_post_id and not force_create_new)
+        changed_shared = dict(shared_fields or {})
+        changed_acf = dict(acf_source_fields or {})
+        partial_update_fields = (
+            self._wordpress_partial_update_fields(
+                snapshot,
+                session.post_type_key,
+                shared_fields=changed_shared,
+                acf_source_fields=changed_acf,
+            )
+            if partial_update
+            else None
+        )
         state_machine = SessionStateMachine(snapshot)
         refined = self._generate_missing_image_metadata(
             snapshot,
@@ -1893,7 +1909,7 @@ class ContentSessionService:
                 }
             )
         self._milestone(refined, "publication metadata refinement finished")
-        if refined.image_refs:
+        if shared_fields or acf_source_fields or refined.image_refs:
             payload = self.payload_builder.build(
                 snapshot,
                 post_type_key=refined.post_type_key,
@@ -1909,6 +1925,19 @@ class ContentSessionService:
         )
         try:
             wordpress_payload = WordPressPayload.model_validate(publishing.wordpress_payload)
+            if partial_update:
+                if publishing.published_wordpress_payload:
+                    payload_diff_fields = self._wordpress_payload_diff_fields(
+                        wordpress_payload.model_dump(),
+                        publishing.published_wordpress_payload,
+                    )
+                    partial_update_fields = self._merge_partial_update_fields(
+                        partial_update_fields or {},
+                        payload_diff_fields,
+                    )
+                if not any(partial_update_fields.values()):
+                    self._milestone(session, "publication skipped; no changed WordPress fields")
+                    return session
             wordpress_payload = wordpress_payload.model_copy(
                 update={
                     "media": self._materialize_publication_media(
@@ -1923,6 +1952,7 @@ class ContentSessionService:
                 idempotency_key=idempotency_key,
                 target_post_id=target_post_id,
                 force_create_new=force_create_new,
+                partial_update_fields=partial_update_fields,
             )
         except Exception as exc:
             raise WordPressRequestError(f"WordPress publication failed: {exc}") from exc
@@ -1930,11 +1960,96 @@ class ContentSessionService:
             update={
                 "wordpress_result": result,
                 "publication_idempotency_key": idempotency_key,
+                "published_wordpress_payload": wordpress_payload.model_dump(),
             }
         )
         published = state_machine.transition(published, "published")
         self._milestone(published, "publication finished")
         return self.repository.save(published, expected_version=expected_version)
+
+    @staticmethod
+    def _merge_partial_update_fields(
+        *items: dict[str, set[str]],
+    ) -> dict[str, set[str]]:
+        merged: dict[str, set[str]] = {
+            "wordpress": set(),
+            "meta": set(),
+            "acf": set(),
+        }
+        for item in items:
+            for group in merged:
+                merged[group].update(item.get(group, set()))
+        return merged
+
+    @staticmethod
+    def _wordpress_payload_diff_fields(
+        current: dict[str, Any],
+        previous: dict[str, Any],
+    ) -> dict[str, set[str]]:
+        fields: dict[str, set[str]] = {
+            "wordpress": set(),
+            "meta": set(),
+            "acf": set(),
+        }
+        if not previous:
+            return fields
+        for key, value in dict(current.get("wordpress") or {}).items():
+            if value != dict(previous.get("wordpress") or {}).get(key):
+                fields["wordpress"].add(key)
+        for key, value in dict(current.get("meta") or {}).items():
+            if value != dict(previous.get("meta") or {}).get(key):
+                fields["meta"].add(key)
+        for key, value in dict(current.get("acf") or {}).items():
+            if value != dict(previous.get("acf") or {}).get(key):
+                fields["acf"].add(key)
+        return fields
+
+    @staticmethod
+    def _wordpress_partial_update_fields(
+        snapshot: Any,
+        post_type_key: str,
+        *,
+        shared_fields: dict[str, Any],
+        acf_source_fields: dict[str, Any],
+    ) -> dict[str, set[str]]:
+        fields: dict[str, set[str]] = {
+            "wordpress": set(),
+            "meta": set(),
+            "acf": set(),
+        }
+        shared_by_key = {
+            row.field_key: row
+            for row in snapshot.shared_fields
+            if row.enabled and row.include_in_payload
+        }
+        for field_key in shared_fields:
+            row = shared_by_key.get(field_key)
+            if row is None:
+                continue
+            if row.destination_type == "wordpress":
+                fields["wordpress"].add(row.destination_key)
+            elif row.destination_type == "yoast":
+                fields["meta"].add(row.destination_key)
+            elif row.destination_type == "acf":
+                fields["acf"].add(row.destination_key)
+
+        acf_rows = [
+            row
+            for row in snapshot.acf_fields
+            if row.enabled and row.post_type_key == post_type_key
+        ]
+        acf_by_key = {row.field_key: row for row in acf_rows}
+        for field_key in acf_source_fields:
+            row = acf_by_key.get(field_key)
+            if row is None:
+                continue
+            if row.field_role == "direct_acf":
+                fields["acf"].add(row.acf_field_name or field_key)
+            elif row.field_role == "aggregation_source" and row.aggregation_group:
+                for group_row in acf_rows:
+                    if group_row.aggregation_group == row.aggregation_group and group_row.acf_field_name:
+                        fields["acf"].add(group_row.acf_field_name)
+        return fields
 
     def _materialize_publication_media(
         self,

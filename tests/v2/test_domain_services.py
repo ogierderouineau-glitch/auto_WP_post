@@ -76,6 +76,57 @@ class FakeObjectStorage:
         return destination
 
 
+class PartialUpdateDiffTests(unittest.TestCase):
+    def test_post_title_edit_maps_to_wordpress_title_only(self) -> None:
+        snapshot = SimpleNamespace(
+            shared_fields=(
+                SimpleNamespace(
+                    field_key="post_title",
+                    enabled=True,
+                    include_in_payload=True,
+                    destination_type="wordpress",
+                    destination_key="title",
+                ),
+                SimpleNamespace(
+                    field_key="seo_title",
+                    enabled=True,
+                    include_in_payload=True,
+                    destination_type="yoast",
+                    destination_key="_yoast_wpseo_title",
+                ),
+            ),
+            acf_fields=(),
+        )
+
+        fields = ContentSessionService._wordpress_partial_update_fields(
+            snapshot,
+            "event",
+            shared_fields={"post_title": "Updated title"},
+            acf_source_fields={},
+        )
+
+        self.assertEqual(fields["wordpress"], {"title"})
+        self.assertEqual(fields["meta"], set())
+        self.assertEqual(fields["acf"], set())
+
+    def test_missing_previous_payload_does_not_infer_all_fields_changed(self) -> None:
+        fields = ContentSessionService._wordpress_payload_diff_fields(
+            {
+                "wordpress": {
+                    "title": "Updated title",
+                    "status": "draft",
+                },
+                "meta": {"yoast_wpseo_title": "SEO"},
+                "acf": {"hero_h1": "Hero"},
+            },
+            {},
+        )
+
+        self.assertEqual(fields["wordpress"], set())
+        self.assertEqual(fields["meta"], set())
+        self.assertEqual(fields["acf"], set())
+
+
 class FeaturedImageMetadataRegressionTests(unittest.TestCase):
     def test_metadata_overwrite_preserves_selected_featured_image(self) -> None:
         snapshot = SimpleNamespace(

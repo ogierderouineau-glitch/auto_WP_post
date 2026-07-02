@@ -191,8 +191,14 @@ class LegacyUiAdapterTests(unittest.TestCase):
         self.assertIn("async function publishV2ToWordPress", adapter)
         self.assertIn("force_create_new: forceCreateNew", adapter)
         self.assertIn("target_post_id: targetPostId", adapter)
+        self.assertIn("partial_update: partialUpdate", adapter)
         self.assertIn("shared_fields: edits.shared", adapter)
         self.assertIn("acf_source_fields: edits.acf", adapter)
+        self.assertIn("publish completed | job", adapter)
+        self.assertIn("sent_fields", adapter)
+        self.assertIn("sent_body", adapter)
+        self.assertIn("function shouldLogV2Api", adapter)
+        self.assertIn('path.includes("/api/content-sessions/jobs/") && response.ok', adapter)
         create_post = adapter.split("createWordPressPost = async function createWordPressPost()", 1)[1].split(
             "updateExistingWordPressPost = async function updateExistingWordPressPost()", 1
         )[0]
@@ -201,6 +207,7 @@ class LegacyUiAdapterTests(unittest.TestCase):
         )[0]
         self.assertIn("forceCreateNew: true", create_post)
         self.assertIn("targetPostId: Number(post.post_id)", update_post)
+        self.assertIn("partialUpdate: true", update_post)
         self.assertNotIn("window.open(post.edit_url", update_post)
 
     def test_manual_draft_save_is_available_after_publication(self) -> None:
@@ -251,7 +258,7 @@ class LegacyUiAdapterTests(unittest.TestCase):
         self.assertIn("checkbox.checked", source)
         self.assertNotIn("checkbox.unchecked", source)
         self.assertNotIn("unchecked>", APP_MAIN.read_text(encoding="utf-8"))
-        self.assertIn('form.append("use_vision", "0")', source)
+        self.assertNotIn('form.append("use_vision", "0")', source)
         self.assertIn("use_vision_for_image_metadata: useVisionOnUpload()", source)
         upload_v2_file = source.split(
             "async function uploadV2File(file, kind)", 1
@@ -264,6 +271,7 @@ class LegacyUiAdapterTests(unittest.TestCase):
         self.assertIn("v2LocalImagePreviewUrls", source)
         self.assertIn("rememberLocalImagePreview(file)", source)
         self.assertIn("imageUploadActionLabel", source)
+        self.assertIn("mit Vision-Crop-Analyse und Pillow-Verarbeitung", source)
         self.assertIn("Wird optimiert", source)
         self.assertIn("status: imageProcessingStatus", source)
         self.assertIn("hasOriginal: true", source)
@@ -358,13 +366,14 @@ class LegacyUiAdapterTests(unittest.TestCase):
             "updateExistingWordPressPost = async function updateExistingWordPressPost()", 1
         )[0]
         self.assertIn("if (!v2Session) await loadActiveV2Session();", publish_helper)
-        self.assertIn("const edits = editedFieldMaps();", publish_helper)
+        self.assertIn("const edits = editedFieldMaps({onlyChanged: partialUpdate});", publish_helper)
         self.assertIn('v2Session.state === "needs_review"', publish_helper)
         self.assertIn("await saveDraft();", publish_helper)
         self.assertIn("await approveV2SessionIfNeeded();", publish_helper)
         self.assertIn("publish-job", publish_helper)
         self.assertIn("target_post_id: targetPostId", publish_helper)
         self.assertIn("force_create_new: forceCreateNew", publish_helper)
+        self.assertIn("partial_update: partialUpdate", publish_helper)
         update_buttons = source.split(
             "updateButtons = function updateButtons()", 1
         )[1].split(

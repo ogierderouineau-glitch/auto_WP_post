@@ -64,6 +64,7 @@ class ContentSession(BaseModel):
     processed_images: list[dict[str, Any]] = Field(default_factory=list)
     image_metadata: list[dict[str, Any]] = Field(default_factory=list)
     wordpress_payload: dict[str, Any] = Field(default_factory=dict)
+    published_wordpress_payload: dict[str, Any] = Field(default_factory=dict)
     validation_report: dict[str, Any] = Field(default_factory=dict)
     generation_trace: dict[str, Any] = Field(default_factory=dict)
     draft_chat: list[dict[str, str]] = Field(default_factory=list)

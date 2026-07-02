@@ -295,6 +295,78 @@ class WordPressProviderTests(unittest.TestCase):
             ("POST", "/wp-json/wp/v2/posts/777"),
         )
 
+    @patch("app.v2.providers.step_03_wordpress.upload_media")
+    @patch("app.v2.providers.step_03_wordpress.resolve_tag_ids")
+    @patch("app.v2.providers.step_03_wordpress.find_term")
+    @patch("app.v2.providers.step_03_wordpress.request_json")
+    def test_partial_linked_update_sends_only_changed_destinations(
+        self,
+        request_json,
+        find_term,
+        resolve_tag_ids,
+        upload_media,
+    ) -> None:
+        request_json.side_effect = [
+            {
+                "schema": {
+                    "properties": {
+                        "acf": {"properties": {"hero_h1": {}, "verlauf": {}}},
+                        "meta": {"properties": {"_yoast_wpseo_title": {}}},
+                    }
+                }
+            },
+            {
+                "id": 777,
+                "status": "draft",
+                "link": "https://staging.example/linked-post/",
+            },
+        ]
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            wordpress_post_type="post",
+            state="publishing",
+            workbook_hash="hash",
+            language="de-DE",
+            approval=Approval(approved=True),
+        )
+        payload = WordPressPayload(
+            wordpress=WordPressFields(
+                title="Updated",
+                slug="updated",
+                status="draft",
+                categories=["Events"],
+                tags=["Berlin"],
+            ),
+            meta={"yoast_wpseo_title": "SEO title"},
+            acf={"hero_h1": "Updated hero", "verlauf": "<ul><li>Full list</li></ul>"},
+            media=[{"path": "/tmp/image.webp", "image_usage": "featured"}],
+        )
+
+        result = ExistingWordPressProvider().publish(
+            session=session,
+            payload=payload,
+            idempotency_key="key-1",
+            target_post_id=777,
+            partial_update_fields={
+                "wordpress": {"title"},
+                "meta": set(),
+                "acf": {"hero_h1"},
+            },
+        )
+
+        body = request_json.call_args_list[1].kwargs["json"]
+        self.assertEqual(body, {"title": "Updated", "acf": {"hero_h1": "Updated hero"}})
+        self.assertEqual(
+            result["sent_fields"],
+            {"wordpress": ["title"], "meta": [], "acf": ["hero_h1"]},
+        )
+        self.assertEqual(result["sent_body"], body)
+        find_term.assert_not_called()
+        resolve_tag_ids.assert_not_called()
+        upload_media.assert_not_called()
+
     @patch("app.v2.providers.step_03_wordpress.resolve_tag_ids", return_value=[])
     @patch("app.v2.providers.step_03_wordpress.find_term", return_value={"id": 10})
     @patch("app.v2.providers.step_03_wordpress.request_json")
