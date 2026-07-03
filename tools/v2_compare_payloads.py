@@ -42,10 +42,6 @@ def compare(v1: dict[str, Any], v2: dict[str, Any]) -> dict[str, Any]:
             nested(v1, "acf", "verlauf_h2"),
             nested(v2, "acf", "verlauf_h2"),
         ),
-        "acf.related_links_html": (
-            nested(v1, "acf", "related_links_html"),
-            nested(v2, "acf", "related_links_html"),
-        ),
         "meta.yoast_wpseo_title": (
             nested(v1, "meta", "yoast_wpseo_title"),
             nested(v2, "meta", "yoast_wpseo_title"),
@@ -68,7 +64,7 @@ def compare(v1: dict[str, Any], v2: dict[str, Any]) -> dict[str, Any]:
     required_v2 = [
         row["field"]
         for row in rows
-        if row["field"] not in {"acf.related_links_html"} and not row["v2_present"]
+        if not row["v2_present"]
     ]
     return {
         "required_v2_fields_missing": required_v2,

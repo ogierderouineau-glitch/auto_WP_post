@@ -18,7 +18,6 @@ class ComparisonTests(unittest.TestCase):
             "acf": {
                 "hero_h1": "Old hero",
                 "verlauf_h2": "Old flow",
-                "related_links_html": "",
             },
         }
         v2 = {
@@ -34,7 +33,6 @@ class ComparisonTests(unittest.TestCase):
             "acf": {
                 "hero_h1": "New hero",
                 "verlauf_h2": "New flow",
-                "related_links_html": "",
             },
         }
         report = compare(v1, v2)

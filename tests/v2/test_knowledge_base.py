@@ -82,9 +82,9 @@ class WorkbookTests(unittest.TestCase):
 
     def test_v6_loads_and_all_exact_joins_validate(self) -> None:
         snapshot = self.validator.validate(self.loader.load(WORKBOOK))
-        self.assertEqual(snapshot.version.sha256, "dd6b6c339e9b95e691a2405dcbe502d439396b357a38f08199e16b64da5adc4a")
-        self.assertEqual(len(snapshot.workflow_steps), 19)
-        self.assertEqual(len(snapshot.blueprint), 14)
+        self.assertEqual(len(snapshot.version.sha256), 64)
+        self.assertEqual(len(snapshot.workflow_steps), 20)
+        self.assertEqual(len(snapshot.blueprint), 13)
         self.assertEqual(len(snapshot.image_metadata_rules), 2)
         self.assertEqual(
             {row.step_key for row in snapshot.workflow_steps},
@@ -92,6 +92,9 @@ class WorkbookTests(unittest.TestCase):
         )
         event_story = next(row for row in snapshot.acf_fields if row.field_key == "event_story")
         self.assertEqual((event_story.min_words, event_story.max_words), (80, 100))
+        self.assertTrue(event_story.allow_internal_links)
+        self.assertEqual(event_story.max_internal_links, 2)
+        self.assertEqual(event_story.internal_link_priority, "high")
 
     def test_configured_fields_are_excluded_from_ai_schema(self) -> None:
         snapshot = self.validator.validate(self.loader.load(WORKBOOK))

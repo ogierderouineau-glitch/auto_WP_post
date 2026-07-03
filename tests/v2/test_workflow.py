@@ -153,14 +153,37 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(repeated.version, session.version)
         self.assertEqual(self.wordpress.calls, 1)
 
-        revised = self.service.generate(
+        regenerated = self.service.generate(
             session.session_id,
             shared_fields=session.shared_fields,
             acf_source_fields=session.acf_source_fields,
             selected_links=session.selected_links,
             current_url=None,
-            revision_instruction="Bitte den Entwurf aktualisieren.",
             expected_version=session.version,
+        )
+        self.assertEqual(regenerated.state, "needs_review")
+        self.assertFalse(regenerated.approval.approved)
+        self.assertIsNone(regenerated.publication_idempotency_key)
+
+        republished = self.service.approve(
+            regenerated.session_id,
+            user_id="user-1",
+            expected_version=regenerated.version,
+        )
+        republished = self.service.publish(
+            republished.session_id,
+            idempotency_key="publish-2",
+            expected_version=republished.version,
+        )
+
+        revised = self.service.generate(
+            republished.session_id,
+            shared_fields=republished.shared_fields,
+            acf_source_fields=republished.acf_source_fields,
+            selected_links=republished.selected_links,
+            current_url=None,
+            revision_instruction="Bitte den Entwurf aktualisieren.",
+            expected_version=republished.version,
         )
         self.assertEqual(revised.state, "needs_review")
         self.assertFalse(revised.approval.approved)

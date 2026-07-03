@@ -146,8 +146,8 @@ comparison tests and staging publication succeed.
 
 - `gpt-5.5` is the current configured default; representative production-content
   quality and cost still require acceptance evaluation.
-- Staging WordPress does not yet expose `related_links_html` or the two Yoast
-  Open Graph destination keys required by V5.
+- Staging WordPress does not yet expose the two Yoast Open Graph destination
+  keys required by V5.
 - A staging publication has not been performed because it creates external state.
 - GCS IAM and object-generation preconditions require deployment-environment testing.
 - V1/V2 representative comparison remains required before changing the default switch.

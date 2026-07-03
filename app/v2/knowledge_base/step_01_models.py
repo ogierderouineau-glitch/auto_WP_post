@@ -81,6 +81,9 @@ class ACFFieldSchema(WorkbookRow):
     include_in_ai_schema: bool
     include_in_payload: bool
     enabled: bool
+    allow_internal_links: bool | None = False
+    max_internal_links: int | None = None
+    internal_link_priority: str | None = None
 
 
 class BlueprintRow(WorkbookRow):

@@ -1,9 +1,8 @@
 # FLAIRLAB V2 REST Compatibility
 
-This WordPress plugin resolves the three staging preflight blockers without
-weakening the workbook contract:
+This WordPress plugin resolves staging Yoast/Open Graph REST compatibility
+without weakening the workbook contract:
 
-- adds the real ACF field `related_links_html`;
 - exposes `yoast_wpseo_opengraph_title` through REST;
 - exposes `yoast_wpseo_opengraph_description` through REST;
 - synchronizes the friendly REST keys to Yoast native Open Graph meta keys.
@@ -13,7 +12,7 @@ weakening the workbook contract:
 1. Copy `flairlab-v2-rest-compat` into `wp-content/plugins/`.
    Alternatively upload `dist/flairlab-v2-rest-compat.zip` in WordPress Admin.
 2. Activate **FLAIRLAB V2 REST Compatibility**.
-3. Confirm ACF Pro and Yoast SEO are active.
+3. Confirm Yoast SEO is active.
 4. Run the read-only preflight:
 
 ```bash
@@ -35,7 +34,4 @@ Running the command without `--activate` is read-only.
 
 ## Notes
 
-- The ACF field is registered as local PHP configuration so its name and REST
-  exposure cannot drift from the V2 workbook.
-- `related_links_html` is intentionally separate from `gallery_html`.
 - No WordPress installation or activation is performed automatically by this repository.

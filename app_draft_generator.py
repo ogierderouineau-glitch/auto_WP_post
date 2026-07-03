@@ -960,35 +960,12 @@ def generate_ai_field_row(
                                 if guidance_data else
                                 []
                             ),
-                            "internal_links_context": (
-                                {
-                                    "rules": list((internal_links_context or {}).get("rules") or []),
-                                    "candidate_links": list((internal_links_context or {}).get("database") or [])[:20],
-                                    "target_field": "related_links_html",
-                                    "target_field_html_template": (
-                                        "<div class=\"post-tags\"><span class=\"tag-links\">Related: "
-                                        "<a href=\"...\">...</a>, <a href=\"...\">...</a></span></div>"
-                                    ),
-                                    "requirements": [
-                                        "Use only internal_links_database entries with active=true.",
-                                        "Follow internal_link_rules with applies_to=internal_links.",
-                                        "Avoid self-linking by considering avoid_if_current_slug.",
-                                        "Render 2-4 links unless rules specify another range.",
-                                    ],
-                                }
-                                if "related_links_html" in fieldnames
-                                else None
-                            ),
                             "user_message": user_message
                             or (
                                 "Generate the best complete draft. Pay special attention to: "
                                 "event_story (must be a polished narrative summary of at least 100 words from the transcript), "
                                 "hero fields, CTA title/text, FAQ content, facts/fakten fields, and SEO fields "
                                 "(focus_keyword, seo_title, meta_description, social_title, social_description)."
-                                + (
-                                    " Fill related_links_html with valid internal links HTML using the candidate_links provided."
-                                    if "related_links_html" in fieldnames else ""
-                                )
                             ),
                         },
                         ensure_ascii=False,
@@ -1363,26 +1340,6 @@ def pick_internal_links_for_row(
     return selected[:max_links]
 
 
-def build_related_links_html(links: list[dict[str, Any]]) -> str:
-    if not links:
-        return ""
-    anchors = [
-        f'<a href="{html.escape(str(item.get("target_url") or ""), quote=True)}">{html.escape(str(item.get("anchor_text") or ""))}</a>'
-        for item in links
-        if str(item.get("target_url") or "").strip() and str(item.get("anchor_text") or "").strip()
-    ]
-    if not anchors:
-        return ""
-    return (
-        '<div class="post-tags">\n'
-        '  <span class="tag-links">\n'
-        '    Related:\n'
-        f"    {', '.join(anchors)}\n"
-        '  </span>\n'
-        '</div>'
-    )
-
-
 def build_event_csv(
     specs: list[ColumnSpec],
     transcript: str,
@@ -1472,12 +1429,6 @@ def build_event_csv(
 
     row = clean_row_repetition(row)
     row = enforce_heading_brace_formatting(row, specs)
-
-    if "related_links_html" in fieldnames and not str(row.get("related_links_html") or "").strip():
-        selected_links = pick_internal_links_for_row(row, transcript, internal_links_context)
-        generated_html = build_related_links_html(selected_links)
-        if generated_html:
-            row["related_links_html"] = generated_html
 
     row["category"] = normalize_category(row.get("category") or category)
     row["slug"] = smart_slug(row.get("post_title") or row.get("title") or values.get("post_title") or "", transcript, post_type)
@@ -1751,12 +1702,6 @@ def revise_session_draft(
         current_row["category"] = normalize_category(current_row.get("category") or draft.get("category") or REQUIRED_CATEGORY)
     if "featured_image" in headers:
         current_row["featured_image"] = featured
-    if "related_links_html" in headers and not str(current_row.get("related_links_html") or "").strip():
-        selected_links = pick_internal_links_for_row(current_row, transcript, internal_links_context)
-        generated_html = build_related_links_html(selected_links)
-        if generated_html:
-            current_row["related_links_html"] = generated_html
-
     csv_text = write_single_row_csv(headers, current_row)
     zip_path = rebuild_session_package(session_dir, csv_text, state)
     length_audit = build_length_audit(current_row, specs)

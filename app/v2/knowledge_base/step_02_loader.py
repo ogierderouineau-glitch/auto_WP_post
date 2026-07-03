@@ -88,6 +88,7 @@ BOOLEAN_COLUMNS = {
     "include_in_ai_schema",
     "include_in_payload",
     "include_in_image_metadata_context",
+    "allow_internal_links",
     "terminal",
 }
 
@@ -208,7 +209,11 @@ class WorkbookLoader:
 
     def _models(self, worksheet: Any, model: type[ModelT]) -> tuple[ModelT, ...]:
         headers = [str(cell.value).strip() if cell.value is not None else None for cell in worksheet[1]]
-        required_headers = set(model.model_fields).difference({"sheet_row"})
+        required_headers = {
+            name
+            for name, field in model.model_fields.items()
+            if name != "sheet_row" and field.is_required()
+        }
         missing_headers = sorted(required_headers.difference(header for header in headers if header))
         if missing_headers:
             raise InvalidWorkbookError(

@@ -105,7 +105,7 @@ class WordPressProviderTests(unittest.TestCase):
             },
             acf={
                 "hero_h1": "Hero",
-                "related_links_html": "",
+                "unknown_acf": "",
             },
         )
         report = ExistingWordPressProvider().contract_report(
@@ -113,7 +113,7 @@ class WordPressProviderTests(unittest.TestCase):
             payload=payload,
         )
         self.assertFalse(report["ready"])
-        self.assertEqual(report["missing_acf_fields"], ["related_links_html"])
+        self.assertEqual(report["missing_acf_fields"], ["unknown_acf"])
         self.assertEqual(
             report["meta_resolution"]["yoast_wpseo_title"],
             "_yoast_wpseo_title",
@@ -195,7 +195,7 @@ class WordPressProviderTests(unittest.TestCase):
     @patch("app.v2.providers.step_03_wordpress.resolve_tag_ids", return_value=[])
     @patch("app.v2.providers.step_03_wordpress.find_term", return_value={"id": 10})
     @patch("app.v2.providers.step_03_wordpress.request_json")
-    def test_publish_omits_non_blocking_related_links_when_rest_schema_lacks_field(
+    def test_publish_blocks_unexposed_acf_fields(
         self,
         request_json,
         _find_term,
@@ -236,19 +236,16 @@ class WordPressProviderTests(unittest.TestCase):
             ),
             acf={
                 "hero_h1": "Hero",
-                "related_links_html": "<div>Links</div>",
+                "unknown_acf": "<div>Links</div>",
             },
         )
 
-        result = ExistingWordPressProvider().publish(
-            session=session,
-            payload=payload,
-            idempotency_key="key-1",
-        )
-
-        body = request_json.call_args_list[2].kwargs["json"]
-        self.assertEqual(body["acf"], {"hero_h1": "Hero"})
-        self.assertIn("related_links_html", result["warnings"][0])
+        with self.assertRaisesRegex(ValueError, "unknown_acf"):
+            ExistingWordPressProvider().publish(
+                session=session,
+                payload=payload,
+                idempotency_key="key-1",
+            )
 
     @patch("app.v2.providers.step_03_wordpress.resolve_tag_ids", return_value=[])
     @patch("app.v2.providers.step_03_wordpress.find_term", return_value={"id": 10})

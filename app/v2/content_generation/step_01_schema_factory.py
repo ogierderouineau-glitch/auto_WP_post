@@ -172,6 +172,24 @@ class LinkSelectionResponse(BaseModel):
     selections: list[LinkSelection] = Field(default_factory=list)
 
 
+class LinkPlacement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    link_id: str
+    field_key: str
+    match_text: str
+    anchor_text: str
+    placement_mode: Literal["wrap_existing_text", "rewrite_single_sentence"] = "wrap_existing_text"
+    sentence_index: int | None = None
+    replacement_sentence: str | None = None
+
+
+class LinkPlacementResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    placements: list[LinkPlacement] = Field(default_factory=list)
+
+
 def build_image_analysis_model(
     rows: list[ImageAnalysisRule],
     *,

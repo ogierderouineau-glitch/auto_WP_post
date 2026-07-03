@@ -8,8 +8,8 @@ from types import SimpleNamespace
 from typing import Any
 
 from app.v2.context.step_01_builder import GenerationContextBuilder
-from app.v2.internal_links.step_01_service import InternalLinkService
-from app.v2.knowledge_base.step_01_models import ImageMetadataField
+from app.v2.internal_links.step_01_service import EligibleLinks, InternalLinkService
+from app.v2.knowledge_base.step_01_models import ImageMetadataField, InternalLinkRecord
 from app.v2.knowledge_base.step_02_loader import WorkbookLoader
 from app.v2.knowledge_base.step_03_validator import WorkbookValidator
 from app.v2.models.step_01_session import ContentSession, FactValue, MediaReference
@@ -125,6 +125,124 @@ class PartialUpdateDiffTests(unittest.TestCase):
         self.assertEqual(fields["wordpress"], set())
         self.assertEqual(fields["meta"], set())
         self.assertEqual(fields["acf"], set())
+
+class InternalLinkInjectionTests(unittest.TestCase):
+    def test_internal_links_are_injected_once_into_body_copy(self) -> None:
+        first = InternalLinkRecord(
+            sheet_row=1,
+            link_id="mobile-bar",
+            post_type_key="event",
+            keyword="mobile Cocktailbar",
+            anchor_text="mobile Cocktailbar",
+            anchor_variants=("mobiler Cocktailbar",),
+            target_url="https://staging.flairlab.de/mobile-cocktailbar/",
+            link_role="service",
+            category="bar",
+            priority="high",
+            active=True,
+            usage_context="Use when mobile bars are mentioned.",
+            language="de-DE",
+        )
+        second = InternalLinkRecord(
+            sheet_row=2,
+            link_id="smoothie-bike",
+            post_type_key="event",
+            keyword="Smoothie-Fahrrad",
+            anchor_text="Smoothie-Fahrrad",
+            anchor_variants=(),
+            target_url="https://staging.flairlab.de/smoothie-fahrrad/",
+            link_role="service",
+            category="smoothie",
+            priority="medium",
+            active=True,
+            usage_context="Use when smoothie bikes are mentioned.",
+            language="de-DE",
+        )
+        eligible = EligibleLinks(candidates=(first, second))
+
+        result = InternalLinkService().inject(
+            eligible,
+            [
+                {"link_id": "mobile-bar", "anchor_text": "mobile Cocktailbar"},
+                {"link_id": "smoothie-bike", "anchor_text": "Smoothie-Fahrrad"},
+            ],
+            shared_fields={"post_title": "mobile Cocktailbar Berlin"},
+            acf_source_fields={
+                "hero_h1": "mobile Cocktailbar Berlin",
+                "event_story": "Unsere mobile Cocktailbar passte gut zum Sommerfest.",
+                "verlauf_text": 'Bereits <a href="/x/">mobile Cocktailbar</a> erwähnt.',
+            },
+        )
+
+        self.assertIn(
+            '<a href="https://staging.flairlab.de/mobile-cocktailbar/">mobile Cocktailbar</a>',
+            result.acf_source_fields["event_story"],
+        )
+        self.assertNotIn("<a", result.shared_fields["post_title"])
+        self.assertNotIn("<a", result.acf_source_fields["hero_h1"])
+        self.assertEqual(len(result.injected), 1)
+
+    def test_internal_link_placements_respect_linkable_fields_and_budgets(self) -> None:
+        first = InternalLinkRecord(
+            sheet_row=1,
+            link_id="mobile-bar",
+            post_type_key="event",
+            keyword="mobile Cocktailbar",
+            anchor_text="mobile Cocktailbar",
+            anchor_variants=(),
+            target_url="https://staging.flairlab.de/mobile-cocktailbar/",
+            link_role="service",
+            category="bar",
+            priority="high",
+            active=True,
+            usage_context="Use when mobile bars are mentioned.",
+            language="de-DE",
+        )
+        second = InternalLinkRecord(
+            sheet_row=2,
+            link_id="show-barkeeper",
+            post_type_key="event",
+            keyword="Showbarkeeper Berlin",
+            anchor_text="Showbarkeeper Berlin",
+            anchor_variants=(),
+            target_url="https://staging.flairlab.de/showbarkeeper-berlin/",
+            link_role="service",
+            category="bar",
+            priority="medium",
+            active=True,
+            usage_context="Use when show bartenders are relevant.",
+            language="de-DE",
+        )
+        eligible = EligibleLinks(candidates=(first, second))
+        field_schema = SimpleNamespace(max_internal_links=1)
+
+        result = InternalLinkService().inject_placements(
+            eligible,
+            [
+                {
+                    "link_id": "mobile-bar",
+                    "field_key": "cta_text",
+                    "match_text": "mobile Cocktailbar",
+                    "anchor_text": "mobile Cocktailbar",
+                    "placement_mode": "wrap_existing_text",
+                },
+                {
+                    "link_id": "show-barkeeper",
+                    "field_key": "cta_text",
+                    "match_text": "Showbarkeeper Berlin",
+                    "anchor_text": "Showbarkeeper Berlin",
+                    "placement_mode": "wrap_existing_text",
+                },
+            ],
+            acf_source_fields={
+                "cta_text": "Jetzt mobile Cocktailbar und Showbarkeeper Berlin anfragen.",
+            },
+            linkable_fields={"cta_text": field_schema},
+        )
+
+        self.assertIn("<a", result.acf_source_fields["cta_text"])
+        self.assertEqual(len(result.injected), 1)
+        self.assertEqual(result.skipped[0]["reason"], "field_link_budget_exceeded")
 
 
 class FeaturedImageMetadataRegressionTests(unittest.TestCase):
@@ -477,14 +595,9 @@ class DomainServiceTests(unittest.TestCase):
             "https://staging.flairlab.de/mobile-cocktailbar/",
             {row.target_url for row in eligible.candidates},
         )
-        first = eligible.candidates[0]
-        rendered = service.render(
-            eligible,
-            [{"link_id": first.link_id, "anchor_text": first.anchor_text}],
-        )
-        self.assertIn(first.target_url, rendered)
+        self.assertGreater(len(eligible.candidates), 0)
 
-    def test_zero_internal_link_candidates_produces_empty_html_with_evidence(self) -> None:
+    def test_zero_internal_link_candidates_keeps_evidence(self) -> None:
         eligible = InternalLinkService().eligible(
             self.snapshot,
             post_type_key="event",
@@ -493,7 +606,6 @@ class DomainServiceTests(unittest.TestCase):
         )
         self.assertEqual(eligible.candidates, ())
         self.assertIsNotNone(eligible.empty_reason)
-        self.assertEqual(InternalLinkService().render(eligible, []), "")
 
     def test_payload_routes_workbook_destinations_and_aggregations(self) -> None:
         shared = {
@@ -508,7 +620,6 @@ class DomainServiceTests(unittest.TestCase):
             "meta_description": "Event in Berlin",
             "social_title": "Event Berlin",
             "social_description": "Event in Berlin",
-            "related_links_html": "",
         }
         acf = {
             "hero_h1": "Event Berlin",

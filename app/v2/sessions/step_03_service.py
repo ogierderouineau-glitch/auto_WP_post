@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from app.v2.context.step_01_builder import GenerationContextBuilder
 from app.v2.content_generation.step_01_schema_factory import (
+    LinkPlacementResponse,
     LinkSelectionResponse,
     build_fact_extraction_model,
     build_generation_model,
@@ -997,19 +998,45 @@ class ContentSessionService:
             minimum_links=minimum_links,
             maximum_links=maximum_links,
         )
-        try:
-            related_links_html = self.internal_links.render(
-                eligible,
-                selected_links,
-                minimum_links=minimum_links,
-                maximum_links=maximum_links,
+        routed_shared = dict(shared_fields)
+        routed_acf = dict(acf_source_fields)
+        plain_acf_source_fields = dict(routed_acf)
+        linkable_fields = self._linkable_acf_fields(snapshot, session)
+        minimum_words_between_links = self._minimum_words_between_internal_links(snapshot)
+        if self.language_model is not None and selected_links and linkable_fields:
+            self._milestone(session, "internal link placement planning started")
+            placements = self._plan_internal_link_placements(
+                snapshot,
+                session,
+                eligible=eligible,
+                selected_links=selected_links,
+                acf_source_fields=routed_acf,
+                linkable_fields=linkable_fields,
+                minimum_words_between_links=minimum_words_between_links,
             )
-        except ValueError as exc:
-            raise InvalidInternalLinksError(str(exc)) from exc
+            session = self._record_provider_usage(session, self.language_model)
+            self._milestone(session, "internal link placement planning finished")
+            injected_links = self.internal_links.inject_placements(
+                eligible,
+                placements,
+                acf_source_fields=routed_acf,
+                linkable_fields=linkable_fields,
+                minimum_words_between_links=minimum_words_between_links,
+            )
+        else:
+            try:
+                injected_links = self.internal_links.inject(
+                    eligible,
+                    selected_links,
+                    shared_fields=routed_shared,
+                    acf_source_fields=routed_acf,
+                )
+            except ValueError as exc:
+                raise InvalidInternalLinksError(str(exc)) from exc
+        routed_shared = injected_links.shared_fields or routed_shared
+        routed_acf = injected_links.acf_source_fields
         session = self._process_missing_images(snapshot, session)
         processed_images = list(session.processed_images)
-        routed_shared = dict(shared_fields)
-        routed_shared["related_links_html"] = related_links_html
         post_type = snapshot.post_type(session.post_type_key)
         if post_type is None:
             raise UnknownPostTypeError(session.post_type_key)
@@ -1019,7 +1046,7 @@ class ContentSessionService:
             snapshot,
             post_type_key=session.post_type_key,
             shared_values=routed_shared,
-            acf_source_values=acf_source_fields,
+            acf_source_values=routed_acf,
             no_eligible_links=not eligible.candidates,
             session=session,
         )
@@ -1027,17 +1054,16 @@ class ContentSessionService:
             snapshot,
             post_type_key=session.post_type_key,
             shared_values=routed_shared,
-            acf_source_values=acf_source_fields,
+            acf_source_values=routed_acf,
             media=session.image_metadata,
         )
         if session.image_refs:
             session = session.model_copy(
                 update={
                     "shared_fields": routed_shared,
-                    "acf_source_fields": acf_source_fields,
+                    "acf_source_fields": routed_acf,
                     "selected_links": selected_links,
                     "eligible_link_ids": [row.link_id for row in eligible.candidates],
-                    "related_links_html": related_links_html,
                     "wordpress_payload": payload.model_dump(),
                 }
             )
@@ -1056,7 +1082,7 @@ class ContentSessionService:
                 snapshot,
                 post_type_key=session.post_type_key,
                 shared_values=routed_shared,
-                acf_source_values=acf_source_fields,
+                acf_source_values=routed_acf,
                 media=session.image_metadata,
             )
         image_metadata = list(session.image_metadata)
@@ -1064,24 +1090,30 @@ class ContentSessionService:
             snapshot,
             post_type_key=session.post_type_key,
             shared_values=routed_shared,
-            acf_source_values=acf_source_fields,
+            acf_source_values=routed_acf,
             media=image_metadata,
         )
         session = session.model_copy(
             update={
                 "shared_fields": routed_shared,
-                "acf_source_fields": acf_source_fields,
+                "acf_source_fields": routed_acf,
                 "selected_links": selected_links,
                 "eligible_link_ids": [row.link_id for row in eligible.candidates],
-                "related_links_html": related_links_html,
                 "wordpress_payload": payload.model_dump(),
                 "processed_images": processed_images,
                 "image_metadata": image_metadata,
                 "validation_report": validation_report,
-                "generation_trace": generation_trace,
+                "generation_trace": {
+                    **generation_trace,
+                    "internal_links": {
+                        "plain_acf_source_fields": plain_acf_source_fields,
+                        "linked_fields": injected_links.injected,
+                        "skipped_placements": injected_links.skipped,
+                    },
+                },
             }
         )
-        if session.state in {"ready_to_publish", "published"} and revision_instruction:
+        if session.state in {"ready_to_publish", "published"}:
             session = session.model_copy(
                 update={
                     "state": "needs_review",
@@ -1749,6 +1781,106 @@ class ContentSessionService:
                 if len(values) == 2:
                     return values[0], values[1]
         return 0, None
+
+    @staticmethod
+    def _minimum_words_between_internal_links(snapshot: Any) -> int:
+        for row in snapshot.internal_link_rules:
+            if (
+                row.enabled
+                and row.applies_to == "internal_links"
+                and row.operator == "min"
+                and row.value_type == "integer"
+            ):
+                return max(0, int(row.value or 0))
+        return 0
+
+    @classmethod
+    def _linkable_acf_fields(cls, snapshot: Any, session: ContentSession) -> dict[str, Any]:
+        fields: dict[str, Any] = {}
+        for row in snapshot.acf_fields:
+            if (
+                row.enabled
+                and row.post_type_key == session.post_type_key
+                and getattr(row, "allow_internal_links", False)
+                and cls._acf_field_is_eligible(row, session)
+            ):
+                fields[row.field_key] = row
+        priority = {"high": 0, "medium": 1, "low": 2}
+        return dict(
+            sorted(
+                fields.items(),
+                key=lambda item: (
+                    priority.get(str(getattr(item[1], "internal_link_priority", "") or "").lower(), 9),
+                    item[0],
+                ),
+            )
+        )
+
+    def _plan_internal_link_placements(
+        self,
+        snapshot: Any,
+        session: ContentSession,
+        *,
+        eligible: Any,
+        selected_links: list[dict[str, str]],
+        acf_source_fields: dict[str, Any],
+        linkable_fields: dict[str, Any],
+        minimum_words_between_links: int,
+    ) -> list[dict[str, Any]]:
+        records = {row.link_id: row for row in eligible.candidates}
+        context = self.context_builder.build(
+            snapshot=snapshot,
+            task="internal_links",
+            post_type_key=session.post_type_key,
+            session=session,
+        )
+        messages = structured_task_input(
+            task="internal_link_placement_planning",
+            instructions=context.instructions,
+            context={
+                "confirmed_facts": context.confirmed_facts,
+                "rules": [
+                    row.model_dump(exclude={"sheet_row"})
+                    for row in snapshot.internal_link_rules
+                    if row.enabled and row.applies_to == "internal_links"
+                ],
+                "minimum_words_between_links": minimum_words_between_links,
+                "selected_links": [
+                    {
+                        "link_id": selection.get("link_id"),
+                        "anchor_text": selection.get("anchor_text"),
+                        "anchor_variants": records[selection.get("link_id")].anchor_variants
+                        if selection.get("link_id") in records else (),
+                        "usage_context": records[selection.get("link_id")].usage_context
+                        if selection.get("link_id") in records else "",
+                    }
+                    for selection in selected_links
+                    if selection.get("link_id") in records
+                ],
+                "eligible_acf_fields": [
+                    {
+                        "field_key": field_key,
+                        "value": acf_source_fields.get(field_key, ""),
+                        "max_internal_links": getattr(row, "max_internal_links", None),
+                        "internal_link_priority": getattr(row, "internal_link_priority", None),
+                    }
+                    for field_key, row in linkable_fields.items()
+                    if isinstance(acf_source_fields.get(field_key), str)
+                    and str(acf_source_fields.get(field_key) or "").strip()
+                ],
+                "output_contract": (
+                    "Return only precise placement instructions. Prefer placement_mode=wrap_existing_text. "
+                    "Do not return URLs or HTML. Use only field_key values from eligible_acf_fields and "
+                    "link_id values from selected_links. match_text must appear exactly once in the field."
+                ),
+            },
+        )
+        planned = self._structured(
+            task="internal_link_placement_planning",
+            messages=messages,
+            schema=LinkPlacementResponse,
+        )
+        return [row.model_dump(exclude_none=True) for row in planned.placements]
 
     @staticmethod
     def _complete_internal_link_selection(

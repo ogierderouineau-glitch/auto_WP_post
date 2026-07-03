@@ -125,12 +125,24 @@ class LegacyUiAdapterTests(unittest.TestCase):
         source = ADAPTER.read_text(encoding="utf-8")
         generate_draft = source.split("generateDraft = async function generateDraft()", 1)[1]
         needs_input_branch = generate_draft.split('if (v2Session.state === "needs_input")', 1)[1].split(
-            'if (v2Session.state !== "ready_to_generate")', 1
+            'if (!["ready_to_generate", "needs_review", "ready_to_publish", "published"].includes(v2Session.state))',
+            1,
         )[0]
         self.assertIn("renderV2Clarifications(v2Session);", needs_input_branch)
         self.assertIn("status(", needs_input_branch)
         self.assertIn("return;", needs_input_branch)
         self.assertNotIn("throw new Error", needs_input_branch)
+
+    def test_generate_draft_is_available_after_publication(self) -> None:
+        source = ADAPTER.read_text(encoding="utf-8")
+        generate_draft = source.split("generateDraft = async function generateDraft()", 1)[1].split(
+            "const generated = await startV2SessionJob", 1
+        )[0]
+        self.assertIn('"ready_to_generate"', generate_draft)
+        self.assertIn('"needs_review"', generate_draft)
+        self.assertIn('"ready_to_publish"', generate_draft)
+        self.assertIn('"published"', generate_draft)
+        self.assertNotIn('v2Session.state !== "ready_to_generate"', generate_draft)
 
     def test_workbook_status_waits_for_api_key(self) -> None:
         source = ADAPTER.read_text(encoding="utf-8")
@@ -343,8 +355,14 @@ class LegacyUiAdapterTests(unittest.TestCase):
     def test_archive_and_long_running_actions_use_v2_endpoints(self) -> None:
         source = ADAPTER.read_text(encoding="utf-8")
         self.assertIn("/api/content-sessions/recent", source)
+        self.assertIn("/app/sessions/recent", source)
+        self.assertIn("mergeArchiveSessions", source)
+        self.assertIn("Promise.allSettled", source)
         self.assertIn("/api/content-sessions/delete", source)
+        self.assertIn("/app/sessions/delete", source)
         self.assertIn("renderRecentSessions(data)", source)
+        self.assertIn("legacyOpenSessionLogsById", source)
+        self.assertIn("loadLegacySessionById", source)
         self.assertIn("openSessionLogsById = async function", source)
         self.assertIn("openSessionLogs = async function", source)
         self.assertIn("await openSessionLogsById(id)", source)

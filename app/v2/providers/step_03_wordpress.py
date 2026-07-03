@@ -37,7 +37,7 @@ class ExistingWordPressProvider(WordPressProvider):
         *,
         client_id: str = "flairlab",
         create_missing_tags: bool = True,
-        non_blocking_missing_acf_fields: tuple[str, ...] = ("related_links_html",),
+        non_blocking_missing_acf_fields: tuple[str, ...] = (),
     ) -> None:
         self.client_id = client_id
         self.create_missing_tags = create_missing_tags

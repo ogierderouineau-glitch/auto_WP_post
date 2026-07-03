@@ -10,6 +10,7 @@
   let v2WakeLock = null;
   let v2RecordedVoiceQueue = [];
   const v2LocalImagePreviewUrls = new Map();
+  const legacyOpenSessionLogsById = window.openSessionLogsById;
 
   function v2UserId() {
     return (document.getElementById("clientId").value || "flairlab").trim();
@@ -65,6 +66,50 @@
       "X-User-ID": v2UserId(),
       ...(json ? {"Content-Type": "application/json"} : {}),
     };
+  }
+
+  function archiveSessionUpdatedAt(item) {
+    const value = String((item && (item.updated_at || item.created_at)) || "").trim();
+    const timestamp = value ? Date.parse(value) : 0;
+    return Number.isNaN(timestamp) ? 0 : timestamp;
+  }
+
+  function mergeArchiveSessions(v2Payload, legacyPayload) {
+    const merged = [];
+    const seen = new Set();
+    const append = (item, fallbackStorage) => {
+      const sessionId = String((item && item.session_id) || "").trim();
+      if (!sessionId || seen.has(sessionId)) return;
+      seen.add(sessionId);
+      merged.push({
+        ...item,
+        storage: item.storage || fallbackStorage,
+      });
+    };
+    ((v2Payload && v2Payload.sessions) || []).forEach(item => append(item, "v2"));
+    ((legacyPayload && legacyPayload.sessions) || []).forEach(item => append(item, "legacy"));
+    merged.sort((a, b) => archiveSessionUpdatedAt(b) - archiveSessionUpdatedAt(a));
+    const limit = Math.max(1, Math.min(200, Number(document.getElementById("recentLimit").value || 20)));
+    return {
+      source: "combined",
+      count: Math.min(merged.length, limit),
+      sessions: merged.slice(0, limit),
+    };
+  }
+
+  async function loadLegacySessionById(id) {
+    const data = await api(`/app/sessions/${encodeURIComponent(id)}`, {
+      headers: v2Headers(false),
+    });
+    sessionId = id;
+    v2Session = null;
+    sessionStorage.setItem("flairlab_session_id", sessionId);
+    if (typeof clearSessionRecoveryBanner === "function") clearSessionRecoveryBanner();
+    renderSession(data);
+    status(data);
+    if (typeof closeSectionsMenu === "function") closeSectionsMenu();
+    closePanel("panelSession");
+    updateButtons();
   }
 
   window.headers = function headers(json = true) {
@@ -940,9 +985,22 @@
 
   loadRecentSessions = async function loadRecentSessions() {
     if (!key()) throw new Error("Bitte zuerst API-Schlüssel eingeben.");
-    const data = await v2Api(`/api/content-sessions/recent?${recentSessionsQueryString()}`, {
-      headers: v2Headers(false),
-    });
+    const queryString = recentSessionsQueryString();
+    const [v2Result, legacyResult] = await Promise.allSettled([
+      v2Api(`/api/content-sessions/recent?${queryString}`, {
+        headers: v2Headers(false),
+      }),
+      api(`/app/sessions/recent?${queryString}`, {
+        headers: v2Headers(false),
+      }),
+    ]);
+    if (v2Result.status === "rejected" && legacyResult.status === "rejected") {
+      throw v2Result.reason;
+    }
+    const data = mergeArchiveSessions(
+      v2Result.status === "fulfilled" ? v2Result.value : null,
+      legacyResult.status === "fulfilled" ? legacyResult.value : null,
+    );
     renderRecentSessions(data);
     if (typeof renderRecentStatusOptionsFromSessions === "function") {
       renderRecentStatusOptionsFromSessions((data && data.sessions) || []);
@@ -953,11 +1011,28 @@
     if (!key()) throw new Error("Bitte zuerst API-Schlüssel eingeben.");
     const sessionIds = [...recentSelectedSessionIds];
     if (!sessionIds.length) throw new Error("Bitte zuerst mindestens eine Session auswählen.");
-    const data = await v2Api("/api/content-sessions/delete", {
-      method: "POST",
-      headers: v2Headers(),
-      body: JSON.stringify({session_ids: sessionIds}),
-    });
+    const body = JSON.stringify({session_ids: sessionIds});
+    const [v2Result, legacyResult] = await Promise.allSettled([
+      v2Api("/api/content-sessions/delete", {
+        method: "POST",
+        headers: v2Headers(),
+        body,
+      }),
+      api("/app/sessions/delete", {
+        method: "POST",
+        headers: v2Headers(),
+        body,
+      }),
+    ]);
+    if (v2Result.status === "rejected" && legacyResult.status === "rejected") {
+      throw v2Result.reason;
+    }
+    const v2Data = v2Result.status === "fulfilled" ? v2Result.value : {};
+    const legacyData = legacyResult.status === "fulfilled" ? legacyResult.value : {};
+    const deletedIds = new Set([
+      ...((v2Data && v2Data.deleted_ids) || []),
+      ...((legacyData && legacyData.deleted_ids) || []),
+    ]);
     if (sessionIds.includes(sessionId)) {
       sessionId = "";
       v2Session = null;
@@ -967,20 +1042,25 @@
     }
     recentSelectedSessionIds = new Set();
     await loadRecentSessions();
-    status(`${Number(data.deleted || 0)} Session(s) gelöscht.`);
+    status(`${deletedIds.size} Session(s) gelöscht.`);
   };
 
   openSessionLogsById = async function openSessionLogsById(targetSessionId) {
     const id = String(targetSessionId || "").trim();
     if (!id) throw new Error("Session-ID fehlt.");
-    const data = await v2Api(`/api/content-sessions/${encodeURIComponent(id)}`, {
-      headers: v2Headers(false),
-    });
-    renderSessionLogsWindow(id, {
-      session_state: data.session,
-      v2_session: data.session,
-      wordpress_import_logs: [],
-    });
+    try {
+      const data = await v2Api(`/api/content-sessions/${encodeURIComponent(id)}`, {
+        headers: v2Headers(false),
+      });
+      renderSessionLogsWindow(id, {
+        session_state: data.session,
+        v2_session: data.session,
+        wordpress_import_logs: [],
+      });
+    } catch (error) {
+      if (![403, 404].includes(error.status) || typeof legacyOpenSessionLogsById !== "function") throw error;
+      await legacyOpenSessionLogsById(id);
+    }
   };
 
   openSessionLogs = async function openSessionLogs() {
@@ -995,12 +1075,17 @@
     v2Session = null;
     sessionId = id;
     sessionStorage.setItem("flairlab_session_id", sessionId);
-    const data = await v2Api(`/api/content-sessions/${encodeURIComponent(id)}`, {
-      headers: v2Headers(false),
-    });
-    await renderV2(data.session, {statusText: "Session geladen."});
-    if (typeof closeSectionsMenu === "function") closeSectionsMenu();
-    openPanel("panelUpload", true);
+    try {
+      const data = await v2Api(`/api/content-sessions/${encodeURIComponent(id)}`, {
+        headers: v2Headers(false),
+      });
+      await renderV2(data.session, {statusText: "Session geladen."});
+      if (typeof closeSectionsMenu === "function") closeSectionsMenu();
+      openPanel("panelUpload", true);
+    } catch (error) {
+      if (![403, 404].includes(error.status)) throw error;
+      await loadLegacySessionById(id);
+    }
   };
 
   loadKnowledgeStatus = async function loadKnowledgeStatus() {
@@ -1337,7 +1422,7 @@
       );
       return;
     }
-    if (v2Session.state !== "ready_to_generate") {
+    if (!["ready_to_generate", "needs_review", "ready_to_publish", "published"].includes(v2Session.state)) {
       throw new Error(`Der Workflow kann aus dem Status „${v2Session.state}“ keinen neuen Entwurf starten.`);
     }
     const generated = await startV2SessionJob(

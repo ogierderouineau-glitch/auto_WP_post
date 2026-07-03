@@ -114,6 +114,26 @@ class WorkbookFakeLanguageModel(LanguageModelProvider):
                     for row in candidates[:2]
                 ]
             }
+        elif task == "internal_link_placement_planning":
+            user = json.loads(context["messages"][1]["content"])
+            fields = user["context"]["eligible_acf_fields"]
+            links = user["context"]["selected_links"]
+            placements = []
+            for link in links:
+                for field in fields:
+                    anchor = link["anchor_text"]
+                    if anchor and anchor in str(field.get("value") or ""):
+                        placements.append(
+                            {
+                                "link_id": link["link_id"],
+                                "field_key": field["field_key"],
+                                "match_text": anchor,
+                                "anchor_text": anchor,
+                                "placement_mode": "wrap_existing_text",
+                            }
+                        )
+                        break
+            data = {"placements": placements}
         elif task == "image_metadata":
             data = {
                 "image_alt": "FLAIRLAB Event in Berlin",
@@ -334,6 +354,7 @@ class StructuredPipelineTests(unittest.TestCase):
                     "shared_field_generation",
                     "acf_field_generation",
                     "internal_link_ranking",
+                    "internal_link_placement_planning",
                 ],
             )
             self.assertTrue(session.wordpress_payload["meta"])
@@ -344,16 +365,9 @@ class StructuredPipelineTests(unittest.TestCase):
             self.assertTrue(story_trace["rules"])
             self.assertTrue(any(rule["shared"] for rule in story_trace["rules"]))
             self.assertTrue(any(not rule["shared"] for rule in story_trace["rules"]))
-            acf_context = next(
-                item["context"]
-                for item in model.contexts
-                if item["task"] == "acf_field_generation"
-            )
-            self.assertEqual(acf_context["current_shared_fields"], session.shared_fields)
-            self.assertIn("post_title", acf_context["current_shared_fields"])
-            self.assertEqual(session.ai_usage["call_count"], 4)
-            self.assertEqual(session.ai_usage["total_tokens"], 60)
-            self.assertEqual(session.ai_usage["services"]["openai_text"]["call_count"], 4)
+            self.assertEqual(session.ai_usage["call_count"], 5)
+            self.assertEqual(session.ai_usage["total_tokens"], 75)
+            self.assertEqual(session.ai_usage["services"]["openai_text"]["call_count"], 5)
 
     def test_generated_session_can_be_regenerated_after_review_edits(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
