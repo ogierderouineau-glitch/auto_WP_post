@@ -76,6 +76,22 @@ class FakeObjectStorage:
         return destination
 
 
+class FakeImageEditor:
+    last_usage = {
+        "service": "openai_images",
+        "call_name": "image_optimization",
+        "model": "fake-image",
+        "prompt_tokens": 1,
+        "completion_tokens": 1,
+        "total_tokens": 2,
+        "estimated_cost_usd": None,
+    }
+
+    def edit(self, source: Path, destination: Path, instructions: dict[str, Any]) -> Path:
+        destination.write_bytes(source.read_bytes() + b"-edited")
+        return destination
+
+
 class PartialUpdateDiffTests(unittest.TestCase):
     def test_post_title_edit_maps_to_wordpress_title_only(self) -> None:
         snapshot = SimpleNamespace(
@@ -403,6 +419,54 @@ class FeaturedImageMetadataRegressionTests(unittest.TestCase):
         self.assertFalse(media[0]["path"].startswith("gs:"))
         self.assertEqual(media[0]["output"], media[0]["path"])
         self.assertEqual(storage.downloads[0][0], "gs://bucket/session/processed/first.webp")
+
+    def test_optimize_image_uses_edited_file_size_before_remote_put(self) -> None:
+        storage = FakeObjectStorage()
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            state="uploading",
+            workbook_hash="hash",
+            language="de-DE",
+            image_refs=[
+                MediaReference(
+                    media_id="image-1",
+                    filename="first.png",
+                    storage_uri="gs://bucket/session/images/first.png",
+                    content_type="image/png",
+                    size_bytes=5,
+                ),
+            ],
+            processed_images=[
+                {
+                    "media_id": "image-1",
+                    "filename": "first.webp",
+                    "path": "gs://bucket/session/processed/first.webp",
+                    "operations": [],
+                },
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = FileSessionRepository(temporary)
+            repository.create(session)
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(SimpleNamespace()),
+                repository=repository,
+                object_storage=storage,
+                image_editor=FakeImageEditor(),
+            )
+
+            updated = service.optimize_image(
+                session.session_id,
+                filename="first.png",
+                prompt="Make it brighter.",
+                expected_version=session.version,
+            )
+
+        self.assertEqual(updated.processed_images[0]["size_bytes"], len(b"image-edited"))
+        self.assertEqual(updated.processed_images[0]["path"], "gs://bucket/session-1/processed/first.webp")
+        self.assertIn("openai_image_optimization", updated.processed_images[0]["operations"])
 
 
 @unittest.skipUnless(WORKBOOK.is_file(), f"V2 test workbook not found: {WORKBOOK}")

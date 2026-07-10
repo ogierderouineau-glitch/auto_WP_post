@@ -66,7 +66,7 @@ Implemented:
 ## Local run
 
 ```bash
-export V2_KNOWLEDGE_WORKBOOK_PATH=/absolute/path/FLAIRLAB_Knowledge_Base_Revised_V5.xlsm
+export V2_KNOWLEDGE_WORKBOOK_PATH=/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V6.xlsm
 export V2_LANGUAGE_MODEL=YOUR_STRUCTURED_OUTPUT_MODEL
 export V2_VISION_MODEL=YOUR_VISION_MODEL
 export CONTENT_PIPELINE_VERSION=v1
@@ -80,11 +80,20 @@ to `/api/content-sessions`; the small `/v2` page remains a developer-only fallba
 ## Test command
 
 ```bash
-V2_TEST_WORKBOOK=/absolute/path/FLAIRLAB_Knowledge_Base_Revised_V5.xlsm \
+V2_TEST_WORKBOOK=/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V6.xlsm \
   myenv/bin/python -m unittest discover -s tests/v2 -v
 ```
 
 Current result: **77 tests passed** on June 29, 2026.
+
+Focused API/workflow regression command:
+
+```bash
+V2_TEST_WORKBOOK=/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V6.xlsm \
+  myenv/bin/python -m pytest -rs tests/v2/test_api.py tests/v2/test_workflow.py
+```
+
+Current focused result: **18 tests passed** on July 4, 2026.
 
 Old-UI/V2 browser smoke command:
 

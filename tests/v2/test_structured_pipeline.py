@@ -545,6 +545,7 @@ class StructuredPipelineTests(unittest.TestCase):
                 acf_source_fields={},
                 selected_links=[],
                 current_url=None,
+                use_vision_for_image_metadata=False,
                 expected_version=session.version,
             )
             self.assertEqual(session.state, "needs_review")
@@ -555,6 +556,13 @@ class StructuredPipelineTests(unittest.TestCase):
             self.assertTrue(Path(session.image_metadata[0]["path"]).is_file())
             self.assertEqual(session.image_metadata[0]["image_usage"], "featured")
             self.assertGreaterEqual(session.ai_usage["services"]["openai_vision"]["call_count"], 1)
+            image_context = next(
+                item["context"]
+                for item in reversed(model.contexts)
+                if item["task"] == "image_metadata"
+            )
+            self.assertEqual(image_context["image_analysis"], {})
+            self.assertFalse(session.image_metadata_vision)
 
     def test_image_upload_can_skip_immediate_vision(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -648,6 +656,19 @@ class StructuredPipelineTests(unittest.TestCase):
                 content_type="image/png",
                 expected_version=session.version,
             )
+            session = service.update_image_context_transcript(
+                session.session_id,
+                filename="bartender-show.png",
+                transcript="Nahaufnahme von Barkeeper Max mit leuchtenden Cocktailgläsern.",
+                expected_version=session.version,
+            )
+            session = service.update_image_metadata(
+                session.session_id,
+                filename="bartender-show.png",
+                metadata={},
+                use_vision_for_metadata=True,
+                expected_version=session.version,
+            )
             self.assertEqual(model.calls.count("image_metadata"), 0)
 
             session = service.analyze(session.session_id, expected_version=session.version)
@@ -657,6 +678,7 @@ class StructuredPipelineTests(unittest.TestCase):
                 acf_source_fields={},
                 selected_links=[],
                 current_url=None,
+                use_vision_for_image_metadata=False,
                 expected_version=session.version,
             )
             session = service.approve(
@@ -678,21 +700,16 @@ class StructuredPipelineTests(unittest.TestCase):
                 if item["task"] == "image_metadata"
             ]
             final_context = image_contexts[-1]
+            self.assertNotIn("base_confirmed_facts", final_context)
+            self.assertNotIn("shared_fields", final_context)
+            self.assertNotIn("acf_source_fields", final_context)
+            self.assertNotIn("wordpress_payload", final_context)
+            self.assertTrue(final_context["image_analysis"])
+            self.assertTrue(published.image_metadata_vision[published.image_refs[0].media_id])
             self.assertEqual(
-                final_context["base_confirmed_facts"]["bartender"]["value"],
-                "Barkeeper Max",
+                final_context["image_context_transcript"],
+                "Nahaufnahme von Barkeeper Max mit leuchtenden Cocktailgläsern.",
             )
-            self.assertEqual(
-                final_context["base_confirmed_facts"]["service_type"]["value"],
-                "Cocktailshow",
-            )
-            self.assertEqual(
-                final_context["base_confirmed_facts"]["additional_services"]["value"],
-                "Show-Bartending mit Flair-Einlage",
-            )
-            self.assertIn("shared_fields", final_context)
-            self.assertIn("acf_source_fields", final_context)
-            self.assertIn("wordpress_payload", final_context)
             caption_context = final_context["fields"]["image_caption"]
             self.assertEqual(
                 caption_context["priority_facts"]["bartender"]["value"],

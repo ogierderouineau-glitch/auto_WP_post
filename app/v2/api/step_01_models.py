@@ -60,6 +60,12 @@ class PublishRequest(VersionedRequest):
 class ImageMetadataUpdateRequest(VersionedRequest):
     filename: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+    use_vision_for_metadata: bool | None = None
+
+
+class ImageContextTranscriptUpdateRequest(VersionedRequest):
+    filename: str
+    transcript: str = ""
 
 
 class FeaturedImageRequest(VersionedRequest):

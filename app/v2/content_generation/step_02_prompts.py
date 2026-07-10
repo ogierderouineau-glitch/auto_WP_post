@@ -26,8 +26,13 @@ def structured_task_input(
         ],
     }
     if task == "image_metadata":
-        system["constraints"].append(
-            "If context.must_use_when_natural contains matching rules with confirmed_source_facts, apply those workbook rules in the target fields whenever the wording remains natural."
+        system["constraints"].extend(
+            [
+                "Treat image_context_transcript as the primary description of the selected picture.",
+                "Use only transcript statements that describe the picture; ignore surrounding event, article, or logistical context unless a supplied workbook rule explicitly requires it.",
+                "Use image_analysis only when it is present and do not invent visible details.",
+                "If context.must_use_when_natural contains matching rules with confirmed_source_facts, apply those workbook rules in the target fields whenever the wording remains natural.",
+            ]
         )
     user = {
         "context": context,

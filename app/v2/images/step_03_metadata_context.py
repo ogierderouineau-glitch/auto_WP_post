@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.v2.knowledge_base.step_01_models import ACFFieldSchema, ImageMetadataField, ImageMetadataRule
+from app.v2.knowledge_base.step_01_models import ImageMetadataField, ImageMetadataRule
 from app.v2.models.step_01_session import ContentSession
 from app.v2.workflow.step_04_generation_conditions import fact_is_usable
 
@@ -14,30 +14,6 @@ USAGE_MODE_ORDER = {
     "prefer_when_natural": 2,
     "allow": 3,
 }
-
-
-class ImageMetadataFactContextBuilder:
-    """Expose only workbook-approved input facts to image metadata generation."""
-
-    def build_base_facts(
-        self,
-        *,
-        session: ContentSession,
-        acf_schema: list[ACFFieldSchema],
-    ) -> dict[str, Any]:
-        allowed_keys = {
-            row.field_key
-            for row in acf_schema
-            if row.enabled
-            and row.post_type_key == session.post_type_key
-            and row.field_role == "input_fact"
-            and row.include_in_image_metadata_context is True
-        }
-        return {
-            key: fact.model_dump()
-            for key, fact in session.confirmed_facts.items()
-            if key in allowed_keys and fact_is_usable(session, key)
-        }
 
 
 class ImageMetadataRuleMatcher:

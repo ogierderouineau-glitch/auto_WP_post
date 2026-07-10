@@ -3,11 +3,18 @@ from __future__ import annotations
 import base64
 import mimetypes
 import json
+import tempfile
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
 from openai import OpenAI
+
+try:
+    from PIL import Image
+except Exception:
+    Image = None
 
 from app.v2.providers.step_01_interfaces import (
     ImageEditingProvider,
@@ -90,6 +97,7 @@ class OpenAIVisionProvider(VisionProvider):
                         {
                             "type": "input_image",
                             "image_url": f"data:{mime_type};base64,{encoded}",
+                            "detail": "high",
                         },
                     ],
                 }
@@ -113,12 +121,31 @@ class OpenAIImageEditingProvider(ImageEditingProvider):
         if not prompt:
             raise ValueError("Image edit prompt is required.")
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with source.open("rb") as image_file:
-            response = self.client.images.edit(
-                model=self.model,
-                image=image_file,
-                prompt=prompt,
-            )
+        edit_input = source
+        temporary_input: Path | None = None
+        if Image is not None:
+            try:
+                with Image.open(source) as opened:
+                    source_image = opened.convert("RGB") if opened.mode != "RGB" else opened.copy()
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temporary:
+                    temporary_input = Path(temporary.name)
+                source_image.save(temporary_input, format="JPEG", quality=95)
+                edit_input = temporary_input
+            except Exception:
+                edit_input = source
+        try:
+            with edit_input.open("rb") as image_file:
+                response = self.client.images.edit(
+                    model=self.model,
+                    image=image_file,
+                    prompt=prompt,
+                )
+        finally:
+            if temporary_input and temporary_input.exists():
+                try:
+                    temporary_input.unlink()
+                except Exception:
+                    pass
         self.last_usage = _usage_event(
             response,
             model=self.model,
@@ -136,13 +163,31 @@ class OpenAIImageEditingProvider(ImageEditingProvider):
         if not image_url and isinstance(first_item, dict):
             image_url = first_item.get("url")
         if b64_data:
-            destination.write_bytes(base64.b64decode(b64_data))
+            _write_image_bytes(destination, base64.b64decode(b64_data))
             return destination
         if image_url:
             with urlopen(str(image_url), timeout=60) as response_stream:
-                destination.write_bytes(response_stream.read())
+                _write_image_bytes(destination, response_stream.read())
             return destination
         raise ValueError("OpenAI image edit response did not include image content.")
+
+
+def _write_image_bytes(destination: Path, image_bytes: bytes) -> None:
+    if Image is None:
+        destination.write_bytes(image_bytes)
+        return
+    image = Image.open(BytesIO(image_bytes))
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    suffix = destination.suffix.lower()
+    if suffix == ".webp":
+        image.save(destination, format="WEBP", quality=90, method=6)
+    elif suffix in {".jpg", ".jpeg"}:
+        image.save(destination, format="JPEG", quality=92, optimize=True, progressive=True)
+    elif suffix == ".png":
+        image.save(destination, format="PNG", optimize=True)
+    else:
+        image.save(destination, format="WEBP", quality=90, method=6)
 
 
 def _usage_event(

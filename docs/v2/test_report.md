@@ -3,11 +3,20 @@
 Command:
 
 ```bash
-V2_TEST_WORKBOOK=/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V5.xlsm \
+V2_TEST_WORKBOOK=/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V6.xlsm \
   myenv/bin/python -m unittest discover -s tests/v2 -q
 ```
 
 Result: **77 tests passed** on June 29, 2026.
+
+Focused API/workflow regression command:
+
+```bash
+V2_TEST_WORKBOOK=/home/ogier-derouineau/Downloads/FLAIRLAB_Knowledge_Base_Revised_V6.xlsm \
+  myenv/bin/python -m pytest -rs tests/v2/test_api.py tests/v2/test_workflow.py
+```
+
+Focused result: **18 tests passed** on July 4, 2026.
 
 Covered:
 

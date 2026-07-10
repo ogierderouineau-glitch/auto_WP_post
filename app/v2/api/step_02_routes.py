@@ -22,6 +22,7 @@ from app.v2.api.step_01_models import (
     FeaturedImageRequest,
     GenerateRequest,
     ImageOptimizationRequest,
+    ImageContextTranscriptUpdateRequest,
     ImageMetadataUpdateRequest,
     InputsRequest,
     PublishRequest,
@@ -432,6 +433,17 @@ def create_router(
         service_provider().require_owner(session_id, x_user_id)
         return SessionResponse(
             session=service_provider().update_image_metadata(session_id, **payload.model_dump())
+        )
+
+    @router.put("/{session_id}/image-context-transcript", response_model=SessionResponse)
+    async def update_image_context_transcript(
+        session_id: str,
+        payload: ImageContextTranscriptUpdateRequest,
+        x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    ) -> SessionResponse:
+        service_provider().require_owner(session_id, x_user_id)
+        return SessionResponse(
+            session=service_provider().update_image_context_transcript(session_id, **payload.model_dump())
         )
 
     @router.put("/{session_id}/featured-image", response_model=SessionResponse)

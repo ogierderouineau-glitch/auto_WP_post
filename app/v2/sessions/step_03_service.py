@@ -10,6 +10,11 @@ import tempfile
 
 from pydantic import ValidationError
 
+try:
+    from PIL import Image
+except Exception:
+    Image = None
+
 from app.v2.context.step_01_builder import GenerationContextBuilder
 from app.v2.content_generation.step_01_schema_factory import (
     LinkPlacementResponse,
@@ -37,7 +42,6 @@ from app.v2.errors import (
 from app.v2.internal_links.step_01_service import InternalLinkService
 from app.v2.images.step_02_processor import PillowProcessor
 from app.v2.images.step_03_metadata_context import (
-    ImageMetadataFactContextBuilder,
     ImageMetadataFieldContextBuilder,
     ImageMetadataRuleMatcher,
 )
@@ -95,7 +99,6 @@ class ContentSessionService:
         self.internal_links = InternalLinkService()
         self.draft_validator = DraftValidator()
         self.generation_condition_evaluator = GenerationConditionEvaluator()
-        self.image_metadata_fact_context_builder = ImageMetadataFactContextBuilder()
         self.image_metadata_rule_matcher = ImageMetadataRuleMatcher()
         self.image_metadata_field_context_builder = ImageMetadataFieldContextBuilder()
 
@@ -452,6 +455,7 @@ class ContentSessionService:
         *,
         filename: str,
         metadata: dict[str, Any],
+        use_vision_for_metadata: bool | None = None,
         expected_version: int,
     ) -> ContentSession:
         session = self.repository.get(session_id)
@@ -507,7 +511,7 @@ class ContentSessionService:
                 **existing,
                 "media_id": reference.media_id,
                 "image_number": existing.get("image_number") or len(image_metadata) + 1,
-                "image_usage": existing.get("image_usage") or "gallery",
+                "image_usage": metadata.get("image_usage") or existing.get("image_usage") or "gallery",
                 "image_priority": existing.get("image_priority") or len(image_metadata) + 1,
                 "path": existing.get("path") or processed.get("path") or reference.storage_uri,
                 "image_alt": metadata.get("alt_text") or metadata.get("image_alt") or "",
@@ -526,12 +530,43 @@ class ContentSessionService:
                 ),
             }
         )
+        image_metadata_vision = dict(session.image_metadata_vision)
+        if use_vision_for_metadata is not None:
+            if use_vision_for_metadata:
+                image_metadata_vision[reference.media_id] = True
+            else:
+                image_metadata_vision.pop(reference.media_id, None)
         updated = session.model_copy(
             update={
                 "image_metadata": sorted(
                     image_metadata,
                     key=lambda row: int(row.get("image_priority") or 999),
                 ),
+                "image_metadata_vision": image_metadata_vision,
+                "updated_at": datetime.now(timezone.utc),
+            }
+        )
+        return self.repository.save(updated, expected_version=expected_version)
+
+    def update_image_context_transcript(
+        self,
+        session_id: str,
+        *,
+        filename: str,
+        transcript: str,
+        expected_version: int,
+    ) -> ContentSession:
+        session = self.repository.get(session_id)
+        reference, _ = self._find_image_reference_and_processed(session, filename)
+        image_context_transcripts = dict(session.image_context_transcripts)
+        cleaned = str(transcript or "").strip()
+        if cleaned:
+            image_context_transcripts[reference.media_id] = cleaned
+        else:
+            image_context_transcripts.pop(reference.media_id, None)
+        updated = session.model_copy(
+            update={
+                "image_context_transcripts": image_context_transcripts,
                 "updated_at": datetime.now(timezone.utc),
             }
         )
@@ -699,6 +734,12 @@ class ContentSessionService:
             image_analysis = dict(session.image_analysis)
             image_analysis.pop(media_id, None)
             updates["image_analysis"] = image_analysis
+            image_context_transcripts = dict(session.image_context_transcripts)
+            image_context_transcripts.pop(media_id, None)
+            updates["image_context_transcripts"] = image_context_transcripts
+            image_metadata_vision = dict(session.image_metadata_vision)
+            image_metadata_vision.pop(media_id, None)
+            updates["image_metadata_vision"] = image_metadata_vision
         elif kind == "voices":
             reference = next((ref for ref in session.audio_refs if ref.filename == filename), None)
             if reference is None:
@@ -721,7 +762,7 @@ class ContentSessionService:
         expected_version: int,
     ) -> ContentSession:
         if self.image_editor is None or self.object_storage is None:
-            raise RuntimeError("An ImageEditingProvider and ObjectStorageProvider are required.")
+            raise ImageProcessingError("Image editing is not configured.")
         session = self.repository.get(session_id)
         reference, processed = self._find_image_reference_and_processed(session, filename)
         if processed is None:
@@ -733,11 +774,15 @@ class ContentSessionService:
                 root / reference.filename,
             )
             edited = root / str(processed.get("filename") or f"{Path(reference.filename).stem}.png")
-            self.image_editor.edit(source, edited, {"prompt": prompt})
+            try:
+                edited = self.image_editor.edit(source, edited, {"prompt": prompt})
+            except Exception as exc:
+                raise ImageProcessingError(f"Image edit failed: {exc}") from exc
             storage_uri = self.object_storage.put(
                 edited,
                 f"{session.session_id}/processed/{edited.name}",
             )
+            edited_size = edited.stat().st_size
         session = self._record_provider_usage(session, self.image_editor)
         processed_images = []
         for item in session.processed_images:
@@ -755,7 +800,7 @@ class ContentSessionService:
                     **item,
                     "path": storage_uri,
                     "output": storage_uri,
-                    "size_bytes": Path(storage_uri).stat().st_size if not storage_uri.startswith("gs://") else item.get("size_bytes"),
+                    "size_bytes": edited_size,
                     "operations": operations[-20:],
                     "image_optimization": {
                         "prompt": prompt,
@@ -790,10 +835,12 @@ class ContentSessionService:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             original = self.object_storage.get(reference.storage_uri, root / reference.filename)
+            restored = self._copy_image_for_output_name(original, root / output_name)
             storage_uri = self.object_storage.put(
-                original,
+                restored,
                 f"{session.session_id}/processed/{output_name}",
             )
+            restored_size = restored.stat().st_size
         processed_images = []
         for item in session.processed_images:
             if item.get("media_id") != reference.media_id:
@@ -811,7 +858,7 @@ class ContentSessionService:
                     "path": storage_uri,
                     "output": storage_uri,
                     "original_uri": reference.storage_uri,
-                    "size_bytes": reference.size_bytes,
+                    "size_bytes": restored_size,
                     "operations": operations[-20:],
                     "image_optimization": {
                         "restored_from_original": True,
@@ -828,6 +875,30 @@ class ContentSessionService:
             ),
             expected_version=expected_version,
         )
+
+    @staticmethod
+    def _copy_image_for_output_name(source: Path, destination: Path) -> Path:
+        if source == destination:
+            return source
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if Image is None:
+            destination.write_bytes(source.read_bytes())
+            return destination
+        try:
+            with Image.open(source) as opened:
+                image = opened.convert("RGB") if opened.mode != "RGB" else opened.copy()
+            suffix = destination.suffix.lower()
+            if suffix == ".webp":
+                image.save(destination, format="WEBP", quality=90, method=6)
+            elif suffix in {".jpg", ".jpeg"}:
+                image.save(destination, format="JPEG", quality=92, optimize=True, progressive=True)
+            elif suffix == ".png":
+                image.save(destination, format="PNG", optimize=True)
+            else:
+                image.save(destination, format="WEBP", quality=90, method=6)
+        except Exception:
+            destination.write_bytes(source.read_bytes())
+        return destination
 
     def generate(
         self,
@@ -1058,6 +1129,20 @@ class ContentSessionService:
             media=session.image_metadata,
         )
         if session.image_refs:
+            if use_vision_for_image_metadata:
+                session = session.model_copy(
+                    update={
+                        "image_metadata_vision": {
+                            **session.image_metadata_vision,
+                            **{reference.media_id: True for reference in session.image_refs},
+                        }
+                    }
+                )
+            metadata_vision_media_ids = {
+                reference.media_id
+                for reference in session.image_refs
+                if session.image_metadata_vision.get(reference.media_id) is True
+            }
             session = session.model_copy(
                 update={
                     "shared_fields": routed_shared,
@@ -1067,15 +1152,20 @@ class ContentSessionService:
                     "wordpress_payload": payload.model_dump(),
                 }
             )
-            if use_vision_for_image_metadata:
+            if metadata_vision_media_ids:
                 self._milestone(session, "contextual image Vision analysis started")
-                session = self._analyze_missing_images(snapshot, session)
+                session = self._analyze_missing_images(
+                    snapshot,
+                    session,
+                    media_ids=metadata_vision_media_ids,
+                )
                 self._milestone(session, "contextual image Vision analysis finished")
             self._milestone(session, "image metadata generation started")
             session = self._generate_missing_image_metadata(
                 snapshot,
                 session,
                 overwrite_existing=True,
+                metadata_vision_media_ids=metadata_vision_media_ids,
             )
             self._milestone(session, "image metadata generation finished")
             payload = self.payload_builder.build(
@@ -1253,6 +1343,8 @@ class ContentSessionService:
         self,
         snapshot: Any,
         session: ContentSession,
+        *,
+        media_ids: set[str] | None = None,
     ) -> ContentSession:
         if self.vision is None or self.object_storage is None or not session.image_refs:
             return session
@@ -1261,6 +1353,7 @@ class ContentSessionService:
             reference
             for reference in session.image_refs
             if reference.media_id not in image_analysis
+            and (media_ids is None or reference.media_id in media_ids)
         ]
         if not missing_refs:
             return session
@@ -1385,6 +1478,7 @@ class ContentSessionService:
         session: ContentSession,
         *,
         overwrite_existing: bool = False,
+        metadata_vision_media_ids: set[str] | None = None,
     ) -> ContentSession:
         if self.language_model is None or not session.image_refs:
             return session
@@ -1432,6 +1526,15 @@ class ContentSessionService:
             and row.workflow_stage in {"all", "image_metadata"}
         ]
         processed_images = list(session.processed_images)
+        metadata_vision_media_ids = (
+            metadata_vision_media_ids
+            if metadata_vision_media_ids is not None
+            else {
+                media_id
+                for media_id, enabled in session.image_metadata_vision.items()
+                if enabled
+            }
+        )
         for index, reference in enumerate(session.image_refs, 1):
             if not overwrite_existing and reference.media_id in metadata_media_ids:
                 continue
@@ -1456,6 +1559,7 @@ class ContentSessionService:
                     session,
                     reference.media_id,
                     metadata_rows,
+                    use_vision=reference.media_id in metadata_vision_media_ids,
                 ),
             )
             generated = self._structured(
@@ -1528,8 +1632,10 @@ class ContentSessionService:
         session: ContentSession,
         media_id: str,
         metadata_rows: list[Any],
+        *,
+        use_vision: bool = False,
     ) -> dict[str, Any]:
-        image_analysis = session.image_analysis.get(media_id, {})
+        image_analysis = session.image_analysis.get(media_id, {}) if use_vision else {}
         matching_rules = self.image_metadata_rule_matcher.match(
             rules=list(snapshot.image_metadata_rules),
             post_type_key=session.post_type_key,
@@ -1561,17 +1667,7 @@ class ContentSessionService:
             if rule.usage_mode != "exclude"
         ]
         return {
-            "confirmed_facts": {
-                key: value.model_dump()
-                for key, value in session.confirmed_facts.items()
-            },
-            "base_confirmed_facts": self.image_metadata_fact_context_builder.build_base_facts(
-                session=session,
-                acf_schema=list(snapshot.acf_fields),
-            ),
-            "shared_fields": session.shared_fields,
-            "acf_source_fields": session.acf_source_fields,
-            "wordpress_payload": session.wordpress_payload,
+            "image_context_transcript": session.image_context_transcripts.get(media_id, ""),
             "image_analysis": image_analysis,
             "must_use_when_natural": must_use_when_natural,
             "fields": rule_fact_context,

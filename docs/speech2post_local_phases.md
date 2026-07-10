@@ -1,0 +1,567 @@
+# SPEECH2POST Local Implementation Phases
+
+This document keeps the new Next frontend work separate from the current live
+FastAPI UI. The current `/app` UI remains the stable working version while the
+new SPEECH2POST interface is built locally and connected to the existing V2
+services one slice at a time.
+
+## Local Development Shape
+
+- Current backend remains FastAPI: `main.py` / `app_main.py`.
+- Current live UI remains available at `/app`.
+- New frontend lives in `speech-2-post-ui/` and should become the future
+  product UI.
+- The folder is tracked by git; generated Next files and dependencies remain
+  ignored by `speech-2-post-ui/.gitignore`.
+- During local development, run FastAPI and Next as separate dev servers.
+- The Next app should call the existing backend API routes instead of creating a
+  parallel backend.
+- The V0-generated app currently uses Next 16, which requires Node `>=20.9.0`.
+- On a machine where system Node is still 18, the frontend can be run with a
+  temporary toolchain:
+  - `npx -y -p node@20 -p pnpm@10 pnpm install --frozen-lockfile`
+  - `npx -y -p node@20 -p pnpm@10 pnpm run typecheck`
+  - `npx -y -p node@20 -p pnpm@10 pnpm run build`
+  - `npx -y -p node@20 -p pnpm@10 pnpm run dev`
+- Production routing/deployment should wait until the local workflow is proven.
+
+## Future Storage And Secret Direction
+
+These are not part of the first local UI slices, but they should guide later
+backend work.
+
+### Secret Manager
+
+- The project already has Google Secret Manager usage. Extend that existing
+  pattern instead of adding a separate secret system.
+- Use Secret Manager for credentials and signing secrets:
+  - client import-key hashes or equivalent login secrets
+  - WordPress usernames and app passwords
+  - OpenAI/API provider keys
+  - auth cookie/session signing secret
+  - webhook or integration secrets
+- Do not expose Secret Manager values to the browser. The frontend should only
+  receive safe client metadata such as `client_id`, display name, status, and
+  enabled post types.
+- For the future 24-hour login, prefer:
+  - browser submits import key once
+  - backend validates against Secret Manager-backed client config
+  - backend sets an `HttpOnly`, `Secure`, `SameSite=Lax` cookie
+  - frontend stops storing or sending the raw import key
+- Keep the current `X-API-Key` flow temporarily for local and legacy
+  compatibility until the cookie auth path is proven.
+
+### Supabase
+
+- Supabase is a candidate for future structured session storage, especially for
+  the new SPEECH2POST workflow.
+- Good fit for Supabase Postgres:
+  - session records
+  - workflow step state
+  - transcripts
+  - extracted and confirmed facts
+  - generated content fields
+  - WordPress sync history
+  - job status
+  - operation logs
+- Media files need a careful decision. Supabase Storage may be enough for the
+  current expected sizes, but phone photos/audio can grow quickly. Keep media
+  as object-storage references in session rows rather than embedding file data
+  in Postgres.
+- Do not migrate session storage in one jump. Safer path:
+  1. keep current local/GCS storage working;
+  2. preserve or introduce a repository abstraction;
+  3. add a Supabase-backed repository;
+  4. use it locally for the new UI;
+  5. keep local/GCS fallback until Supabase is proven.
+- Supabase credentials belong in Secret Manager or environment variables on the
+  backend, never in browser-visible code unless using intentionally public
+  anon-key flows with strict Row Level Security.
+
+## Existing Backend Contracts To Reuse
+
+### Authentication And Client Context
+
+- Current auth is header based: `X-API-Key`.
+- V2 ownership context is header based: `X-User-ID`.
+- Existing validation is the FastAPI dependency used by `/api/content-sessions`.
+- Existing client/config helper routes:
+  - `GET /clients`
+  - `GET /app/wordpress/preflight`
+  - `GET /app/knowledge/status`
+  - `GET /app/knowledge/workbook`
+  - `POST /app/knowledge/workbook`
+
+Known gap:
+
+- There is no secure backend session/cookie that remembers an import key for 24
+  hours. Do not emulate this by storing the raw key in `localStorage`.
+- When this is implemented, build from the existing Secret Manager integration
+  rather than adding a parallel secrets source.
+
+### Workbook And Post Types
+
+- `GET /api/content-sessions/_workbook`
+- `GET /api/content-sessions/_workbook?post_type_key=...`
+- `POST /api/content-sessions/_workbook/reload`
+
+The workbook response provides selectable post types and the fact schema for the
+selected post type. The Next UI should render facts dynamically from this data.
+
+### Sessions
+
+- `POST /api/content-sessions`
+  - body: `{ "user_id": string, "post_type_key": string }`
+- `GET /api/content-sessions/{session_id}`
+- `GET /api/content-sessions/recent`
+- `POST /api/content-sessions/delete`
+- legacy fallback currently exists through:
+  - `GET /app/sessions/recent`
+  - `GET /app/sessions/{session_id}`
+  - `POST /app/sessions/delete`
+
+Known gap:
+
+- The old UI merges V2 and legacy archives. The first Next version can focus on
+  V2 sessions, then add legacy archive fallback if still needed.
+
+### Media
+
+- `POST /api/content-sessions/{session_id}/uploads`
+  - multipart form:
+    - `expected_version`
+    - `kind`: `audio` or `image`
+    - `use_vision`
+    - `upload`
+- `GET /api/content-sessions/{session_id}/media/images/{filename}`
+- `GET /api/content-sessions/{session_id}/media/images/{filename}/original`
+- `DELETE /api/content-sessions/{session_id}/media/{kind}/{filename}`
+- `PUT /api/content-sessions/{session_id}/featured-image`
+- `PUT /api/content-sessions/{session_id}/image-metadata`
+- `POST /api/content-sessions/{session_id}/images/optimize`
+- `POST /api/content-sessions/{session_id}/images/restore-original?filename=...`
+
+Known gaps:
+
+- V2 upload supports `audio` and `image`, not video. Show video UI as disabled
+  or unsupported until the backend contract exists.
+- Reordering media is not exposed as a clear V2 endpoint.
+- Upload progress is a frontend feature, but final processing progress depends
+  on session/job state exposed by the backend.
+
+### Recording And Transcription
+
+- Browser recording is frontend side using `MediaRecorder`.
+- General audio files are uploaded through `/uploads` with `kind=audio`.
+- Draft-chat style one-off transcription:
+  - `POST /api/content-sessions/{session_id}/draft-chat/transcribe`
+- Fact extraction / transcription flow is currently driven by:
+  - `POST /api/content-sessions/{session_id}/analyze`
+
+Known gaps:
+
+- TR #001 asks for every stopped recording to be transcribed immediately and
+  appended to a shared text area. The existing V2 flow can support this with the
+  draft-chat transcription endpoint, but the exact saved interaction history
+  model should be checked before treating it as durable session data.
+
+### Facts
+
+- Current fact extraction:
+  - `POST /api/content-sessions/{session_id}/analyze`
+- Correct and confirm facts:
+  - `POST /api/content-sessions/{session_id}/answers`
+  - body includes `expected_version` and `corrections`
+- Session fields:
+  - `extracted_facts`
+  - `confirmed_facts`
+  - `clarification_questions`
+
+Known gap:
+
+- UI grouping into missing required, missing optional, and AI-populated is a
+  frontend adapter concern based on workbook schema plus session fact values.
+
+### Content Generation
+
+- Start durable-ish generation job:
+  - `POST /api/content-sessions/{session_id}/generate-job`
+- Poll job:
+  - `GET /api/content-sessions/jobs/{job_id}`
+- Save edited generated fields:
+  - `PUT /api/content-sessions/{session_id}/draft-fields`
+- Agent-directed regeneration:
+  - `POST /api/content-sessions/{session_id}/draft-chat`
+- Approve content:
+  - `POST /api/content-sessions/{session_id}/approve`
+
+Known gaps:
+
+- Existing jobs are in-process memory jobs. They can be polled and survive a
+  browser reload if the server process still has them, but they are not a fully
+  durable queue.
+- Supabase could later hold durable job status rows for the new workflow, while
+  long-running work still executes server-side.
+- Targeted regeneration is not guaranteed as a fine-grained backend operation.
+  The UI can submit an instruction, but it must not claim only one field changed
+  unless the returned session proves that.
+
+### WordPress
+
+- Publish immediately:
+  - `POST /api/content-sessions/{session_id}/publish`
+- Publish as job:
+  - `POST /api/content-sessions/{session_id}/publish-job`
+- Poll job:
+  - `GET /api/content-sessions/jobs/{job_id}`
+- Request body supports:
+  - `idempotency_key`
+  - `target_post_id`
+  - `force_create_new`
+  - `partial_update`
+  - `shared_fields`
+  - `acf_source_fields`
+- Session fields:
+  - `wordpress_result`
+  - `published_wordpress_payload`
+  - `wordpress_payload`
+
+Known gap:
+
+- The V2 model stores one `wordpress_result`, not a list of previous WordPress
+  targets. "Create another post from the same session and preserve all previous
+  targets" likely needs a backend model extension.
+
+## Phase Plan
+
+### Phase 1: Contract Map And Local Strategy
+
+Outcome:
+
+- This document exists and is kept updated.
+- We agree the new Next app is the future frontend, but the current `/app` UI
+  remains untouched and usable.
+
+### Phase 2: Local Next/FastAPI Bridge
+
+Outcome:
+
+- Next dev server runs locally.
+- FastAPI backend runs locally.
+- Next has a single API client module:
+  - `speech-2-post-ui/lib/api.ts`
+- Local API base URL is environment-driven:
+  - `SPEECH2POST_BACKEND_URL`
+- The Next dev server proxies backend requests through:
+  - `/backend/:path*`
+- No component should call `fetch` directly except through the API client.
+- TypeScript build errors are no longer ignored in `next.config.mjs`.
+- Local Node must be upgraded from the current Node 18 runtime before `next
+  build` or `next dev` can run.
+- The local dev script uses `WATCHPACK_POLLING=true next dev --webpack` because
+  Turbopack and default Webpack watching hit the OS file-watch limit in this
+  workspace.
+
+Risk:
+
+- This adds frontend build/dependency complexity, but contains it inside
+  `speech-2-post-ui/`.
+
+### Phase 3: App Shell With Real Auth, Workbook, And Session
+
+Outcome:
+
+- Auth popup validates the key against a real backend route.
+- Key is not stored in `localStorage`.
+- Workbook/post types load from `_workbook`.
+- User can create a V2 session.
+- User can load a recent V2 session.
+- Top bar displays real client/session/post type/state.
+- Four workflow screens are navigable, even if some screen bodies still show
+  supported/unsupported states.
+
+Implemented frontend files:
+
+- `speech-2-post-ui/lib/content-sessions.ts`
+- `speech-2-post-ui/components/auth-modal.tsx`
+- `speech-2-post-ui/components/session-modal.tsx`
+- `speech-2-post-ui/app/page.tsx`
+
+Current behavior:
+
+- The access key is kept in `sessionStorage`, matching the current browser-only
+  behavior without using `localStorage`.
+- Stored sessions are restored from `sessionStorage` when possible.
+- The WordPress step is now reachable in the V0 shell.
+- The screen bodies still contain V0 mock data until their individual phases are
+  implemented.
+
+Risk:
+
+- Secure 24-hour auth remains a backend gap unless implemented deliberately.
+
+### Phase 4: Media Slice
+
+Outcome:
+
+- Upload images to the active session.
+- Display uploaded images from backend URLs.
+- Show original vs processed where available.
+- Save featured image.
+- Save image metadata.
+- Trigger image optimize/restore where supported.
+- Show videos as unsupported instead of faking processing.
+
+Implemented frontend files:
+
+- `speech-2-post-ui/lib/content-sessions.ts`
+- `speech-2-post-ui/app/page.tsx`
+- `speech-2-post-ui/components/media-screen.tsx`
+
+Current behavior:
+
+- The Media screen uses the active V2 session and updates the parent shell after
+  each backend response so the session version stays current.
+- Image uploads call `POST /api/content-sessions/{session_id}/uploads`.
+- Images are fetched as authenticated blobs because current image routes require
+  `X-API-Key`/`X-User-ID` headers and plain `<img src>` cannot send those.
+- Original and processed images are shown side by side on desktop.
+- Featured image, metadata save, image optimize, restore original, and remove
+  image actions call the real V2 endpoints.
+- Video selection displays a clear unsupported message; no fake video endpoint
+  is used.
+- Recording/transcript controls remain disabled until Phase 5.
+
+Risk:
+
+- Media UI can expand quickly. Keep the first version to image upload, selection,
+  metadata, and existing processing actions.
+- Once cookie auth exists, media image rendering can switch away from
+  authenticated blob fetching to simpler direct URLs.
+
+### Phase 5: Recording Widget TR #001
+
+Outcome:
+
+- Shared recording widget works on supported browsers.
+- Start/stop recording.
+- Multiple recordings.
+- Immediate transcription into the editable combined transcript.
+- Screen-specific submit action routing.
+- Clear failure/retry states.
+- On the Media screen, transcript text is saved at picture level so image
+  metadata can later be generated from picture context even without Vision.
+- Media-screen fact extraction combines all saved picture transcripts and sends
+  them as the session transcript context.
+
+Implemented frontend/backend files:
+
+- `speech-2-post-ui/components/recording-widget.tsx`
+- `speech-2-post-ui/app/page.tsx`
+- `speech-2-post-ui/lib/content-sessions.ts`
+- `speech-2-post-ui/components/media-screen.tsx`
+- `app/v2/sessions/step_03_service.py`
+
+Current behavior:
+
+- The floating recording widget is present across the workflow.
+- On the Media screen, it follows the selected picture.
+- Each stopped recording is transcribed immediately through
+  `POST /api/content-sessions/{session_id}/draft-chat/transcribe`.
+- The resulting transcription is copied immediately into the visible Picture
+  transcript textarea for the selected image.
+- The Media screen shows a single selected-picture transcript editor; image
+  metadata stays separate from picture context.
+- The editable transcript is saved into a dedicated session field,
+  `image_context_transcripts`, keyed by image `media_id`. It is intentionally
+  not stored as image metadata.
+- Submitting from the Media screen saves the selected picture transcript, builds
+  a combined transcript from all picture-level transcripts, saves it through
+  `/inputs`, then calls `/analyze` and moves to the Facts screen.
+- Facts, Content, and WordPress screen-specific agent actions are present as
+  placeholders until their phases connect them.
+
+Risk:
+
+- Mobile browser recording behavior is uneven. Expect testing on actual devices.
+- `image_context_transcripts` is now preserved separately from image metadata.
+  Image metadata generation uses this picture-level context as its primary
+  description together with workbook metadata rules. Broad post fields and the
+  WordPress payload are intentionally excluded from the metadata prompt.
+- The Media screen has two independent Vision controls:
+  - The general focal-point checkbox is checked by default and applies Vision
+    before processing newly uploaded pictures.
+  - Each saved picture has an unchecked-by-default metadata Vision checkbox.
+    Only opted-in pictures may expose their stored Vision analysis to metadata
+    generation. The choice is persisted in `image_metadata_vision` by
+    `media_id`.
+
+### Phase 6: Facts Slice
+
+Outcome:
+
+- Facts render dynamically from workbook schema plus session data.
+- Required missing, optional missing, and AI-populated sections work.
+- Corrections save through `/answers`.
+- Recheck runs through `/analyze`.
+- Confirmation state follows backend validation/state.
+
+Implemented frontend files:
+
+- `speech-2-post-ui/lib/content-sessions.ts`
+- `speech-2-post-ui/app/page.tsx`
+- `speech-2-post-ui/components/facts-screen.tsx`
+
+Current behavior:
+
+- The Facts screen no longer uses V0 mock fields.
+- Fact rows are built from `_workbook.fact_schema` for the active session post
+  type.
+- Values are read from `confirmed_facts` first, then `extracted_facts`.
+- Missing required, missing optional, and populated fact sections are computed
+  dynamically from workbook schema plus current drafts.
+- Edited corrections save through
+  `POST /api/content-sessions/{session_id}/answers`.
+- Recheck saves pending corrections, then calls
+  `POST /api/content-sessions/{session_id}/analyze`.
+- Confirm facts saves all non-empty visible fact values through `/answers`,
+  reruns `/analyze`, and moves to the Content screen once required facts are
+  complete.
+- The shell reloads workbook schema when the active session post type changes.
+
+Risk:
+
+- Avoid hardcoding V0 example fields.
+
+### Phase 7: Content Slice
+
+Outcome:
+
+- Generated shared and ACF fields render from session data.
+- Edited fields autosave/debounced through `/draft-fields`.
+- Include/exclude behavior is represented only where the backend payload supports
+  it.
+- Prompt trace is shown from `generation_trace`.
+- Agent regeneration uses `/draft-chat`.
+- Approval uses `/approve`.
+
+Implemented frontend files:
+
+- `speech-2-post-ui/lib/content-sessions.ts`
+- `speech-2-post-ui/app/page.tsx`
+- `speech-2-post-ui/components/content-screen.tsx`
+
+Current behavior:
+
+- The Content screen no longer uses V0 mock generated fields.
+- Draft fields render from the active session's `shared_fields` and
+  `acf_source_fields`.
+- The Generate Draft action starts `POST /generate-job` and polls
+  `GET /jobs/{job_id}` until the backend returns the updated session.
+- Edited draft fields autosave through `PUT /draft-fields` after a short
+  debounce; a manual Save Edits button remains available.
+- The prompt trace panel reads directly from `generation_trace`.
+- The content agent saves pending edits and sends the instruction through
+  `POST /draft-chat`.
+- Approval saves pending edits, calls `POST /approve`, and moves to the
+  WordPress screen.
+- Include/exclude controls are not shown because the current backend draft
+  contract does not expose per-field include/exclude state.
+
+Risk:
+
+- Targeted regeneration may remain an honest backend limitation.
+
+### Phase 8: WordPress Slice
+
+Outcome:
+
+- Create first post through `/publish-job`.
+- Update existing post with `target_post_id` and `partial_update`.
+- Display returned post ID, view link, edit link, status, and sent fields.
+- Show no-change state when partial update returns no changed fields.
+- Show retryable errors.
+
+Implemented frontend files:
+
+- `speech-2-post-ui/lib/content-sessions.ts`
+- `speech-2-post-ui/app/page.tsx`
+- `speech-2-post-ui/components/wordpress-screen.tsx`
+
+Current behavior:
+
+- The WordPress screen no longer uses simulated post IDs or fake changed fields.
+- Create Post starts `POST /publish-job` with `force_create_new: true` and polls
+  `GET /jobs/{job_id}` until the backend returns the updated session.
+- Update Post uses the stored `wordpress_result.post_id` as `target_post_id`
+  with `partial_update: true`.
+- Returned WordPress post ID, status, view link, edit link, and idempotency key
+  are displayed from `wordpress_result`.
+- The screen compares `wordpress_payload` with `published_wordpress_payload` to
+  show pending changed payload fields or a no-change/synced state.
+- Sent and current WordPress payloads are visible for inspection.
+- Retryable errors from failed publish jobs are shown in the screen status area.
+- The screen represents the current backend model honestly: one current
+  `wordpress_result` per session, not a history of multiple targets.
+
+Risk:
+
+- Multiple WordPress targets per session likely requires backend model changes.
+
+### Phase 9: Other Functions, Status, Recovery
+
+Outcome:
+
+- Global status panel tracks concurrent frontend/backend operations.
+- Other Functions drawer connects credentials, workbook config, session archive,
+  logs, current session info, and usage.
+- Job polling can recover after reload when possible.
+- Missing durable queue is documented separately.
+
+Implemented frontend files:
+
+- `speech-2-post-ui/app/page.tsx`
+- `speech-2-post-ui/components/other-functions-drawer.tsx`
+- `speech-2-post-ui/components/content-screen.tsx`
+- `speech-2-post-ui/components/wordpress-screen.tsx`
+
+Current behavior:
+
+- The top bar has an Other Functions button that opens a right-side drawer.
+- The drawer shows global frontend/backend status, current errors, auth/client
+  context, workbook metadata, current session details, recent V2 sessions,
+  AI usage, and a compact operation log.
+- Session archive actions can refresh recent sessions and load a selected V2
+  session without leaving the workflow.
+- Current session recovery can reload the active session from the backend.
+- Generate and publish jobs store the last active job ID in `sessionStorage`.
+- The drawer can attempt to recover that last job through
+  `GET /api/content-sessions/jobs/{job_id}` and refresh the session if the job
+  completed while the same backend process was still alive.
+- The drawer documents the current in-memory job limitation directly in the UI:
+  backend restart still loses job records.
+
+Risk:
+
+- True mobile sleep resilience requires persistent job storage, not only in-memory
+  FastAPI jobs.
+
+### Phase 10: Local Verification
+
+Outcome:
+
+- Type checks pass.
+- Next production build passes.
+- Backend focused tests pass.
+- Four workflow screens work locally.
+- Current `/app` UI still works.
+
+## Decisions To Keep Code Small
+
+- Build one vertical slice at a time.
+- Prefer adapters over backend payload changes.
+- Do not duplicate existing V2 service logic in the frontend.
+- Disable unsupported UI actions with clear text rather than faking success.
+- Keep all new frontend network calls in one API client.
+- Keep the current live UI untouched until the Next version is ready to replace
+  it.
