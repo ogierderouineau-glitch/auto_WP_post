@@ -1,4 +1,4 @@
-import { apiRequest, type ApiClientOptions } from "@/lib/api"
+import { apiDownload, apiRequest, type ApiClientOptions } from "@/lib/api"
 
 export type AuthClient = {
   client_id: string
@@ -34,6 +34,28 @@ export type WorkbookStatus = {
   selected_post_type_key?: string | null
   post_types: PostTypeOption[]
   fact_schema: FactSchemaField[]
+  acf_fields?: AcfFieldOption[]
+  internal_link_candidates?: InternalLinkCandidate[]
+  internal_link_acf_fields?: InternalLinkAcfField[]
+}
+
+export type InternalLinkCandidate = {
+  link_id: string
+  anchor_text: string
+  target_url: string
+  usage_context?: string
+  priority?: string
+}
+
+export type InternalLinkAcfField = {
+  acf_field_name: string
+  label: string
+}
+
+export type AcfFieldOption = {
+  field_key: string
+  acf_field_name: string
+  label: string
 }
 
 export type FactValue = {
@@ -84,6 +106,7 @@ export type ContentSession = {
   shared_fields: Record<string, unknown>
   acf_source_fields: Record<string, unknown>
   selected_links: Record<string, string>[]
+  eligible_link_ids: string[]
   processed_images: Record<string, unknown>[]
   image_metadata: Record<string, unknown>[]
   image_context_transcripts: Record<string, string>
@@ -148,6 +171,25 @@ export async function loadWorkbook(auth: ApiClientOptions, postTypeKey?: string)
   return apiRequest<WorkbookStatus>(`/api/content-sessions/_workbook${suffix}`, auth, {
     json: false,
   })
+}
+
+export async function uploadKnowledgeWorkbook(auth: ApiClientOptions, file: File, postTypeKey = "") {
+  const form = new FormData()
+  form.append("workbook", file)
+  if (postTypeKey) form.append("post_type", postTypeKey)
+  return apiRequest<unknown>("/app/knowledge/workbook", auth, { method: "POST", body: form })
+}
+
+export async function downloadKnowledgeWorkbook(auth: ApiClientOptions) {
+  const { blob, filename } = await apiDownload("/app/knowledge/workbook", auth)
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500)
 }
 
 export async function createContentSession(auth: ApiClientOptions, postTypeKey: string) {
@@ -348,14 +390,18 @@ export async function saveSessionFactCorrections(
   })
 }
 
-export async function startSessionGeneration(auth: ApiClientOptions, session: ContentSession) {
+export async function startSessionGeneration(
+  auth: ApiClientOptions,
+  session: ContentSession,
+  selectedLinks = session.selected_links || [],
+) {
   return apiRequest<SessionJob>(`/api/content-sessions/${session.session_id}/generate-job`, auth, {
     method: "POST",
     body: {
       expected_version: session.version,
       shared_fields: {},
       acf_source_fields: {},
-      selected_links: session.selected_links || [],
+      selected_links: selectedLinks,
       current_url: null,
       use_vision_for_image_metadata: false,
     },
@@ -389,6 +435,8 @@ export async function regenerateSessionDraft(
   auth: ApiClientOptions,
   session: ContentSession,
   message: string,
+  revisionFieldIds: string[],
+  selectedLinks = session.selected_links || [],
 ) {
   return apiRequest<SessionResponse>(`/api/content-sessions/${session.session_id}/draft-chat`, auth, {
     method: "POST",
@@ -396,10 +444,11 @@ export async function regenerateSessionDraft(
       expected_version: session.version,
       shared_fields: {},
       acf_source_fields: {},
-      selected_links: session.selected_links || [],
+      selected_links: selectedLinks,
       current_url: null,
       use_vision_for_image_metadata: false,
       message,
+      revision_field_ids: revisionFieldIds,
     },
   })
 }

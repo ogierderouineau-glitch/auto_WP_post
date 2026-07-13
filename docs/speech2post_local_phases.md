@@ -420,13 +420,15 @@ Current behavior:
 - Values are read from `confirmed_facts` first, then `extracted_facts`.
 - Missing required, missing optional, and populated fact sections are computed
   dynamically from workbook schema plus current drafts.
+- Empty fact sections are collapsed by default; the first non-empty section is
+  opened automatically.
 - Edited corrections save through
   `POST /api/content-sessions/{session_id}/answers`.
 - Recheck saves pending corrections, then calls
   `POST /api/content-sessions/{session_id}/analyze`.
-- Confirm facts saves all non-empty visible fact values through `/answers`,
-  reruns `/analyze`, and moves to the Content screen once required facts are
-  complete.
+- Confirm facts saves all non-empty visible fact values through `/answers` and
+  moves directly to the Content screen once required facts are complete. It
+  does not rerun `/analyze`.
 - The shell reloads workbook schema when the active session post type changes.
 
 Risk:
@@ -439,8 +441,7 @@ Outcome:
 
 - Generated shared and ACF fields render from session data.
 - Edited fields autosave/debounced through `/draft-fields`.
-- Include/exclude behavior is represented only where the backend payload supports
-  it.
+- Draft revision supports field-level include/exclude selection.
 - Prompt trace is shown from `generation_trace`.
 - Agent regeneration uses `/draft-chat`.
 - Approval uses `/approve`.
@@ -450,6 +451,13 @@ Implemented frontend files:
 - `speech-2-post-ui/lib/content-sessions.ts`
 - `speech-2-post-ui/app/page.tsx`
 - `speech-2-post-ui/components/content-screen.tsx`
+
+Implemented backend files:
+
+- `app/v2/api/step_01_models.py`
+- `app/v2/api/step_02_routes.py`
+- `app/v2/context/step_01_builder.py`
+- `app/v2/sessions/step_03_service.py`
 
 Current behavior:
 
@@ -462,15 +470,48 @@ Current behavior:
   debounce; a manual Save Edits button remains available.
 - The prompt trace panel reads directly from `generation_trace`.
 - The content agent saves pending edits and sends the instruction through
-  `POST /draft-chat`.
+  `POST /draft-chat`, together with the selected revision field IDs.
+- All draft fields are selected for revision by default. Field checkboxes and a
+  `Select all for revision` / `Clear revision selection` control allow a smaller
+  revision scope. Revision is disabled when no fields are selected.
+- Revision selection controls what the language model regenerates; it does not
+  remove fields from the saved draft or WordPress payload.
+- Revision field IDs are sent as `revision_field_ids`, using `shared:<key>` and
+  `acf:<key>` identifiers. The backend rejects an explicitly empty selection and
+  identifiers that do not belong to the current draft.
+- Targeted revision builds prompt rules and structured output schemas only for
+  selected fields. Field, group, section, and blueprint context is filtered to
+  the selected scope; shared instructions that apply to those fields remain.
+- The model is asked to output only the selected fields. Returned values are
+  merged into the existing draft, so unselected values and generation traces
+  remain unchanged, including manual edits.
+- Targeted revision does not automatically rerank or complete internal-link
+  selections. Existing links and links explicitly queued in the Content screen
+  are preserved, and link placement is limited to selected ACF fields.
+- Omitting `revision_field_ids` preserves the previous full-draft revision
+  behavior for older callers.
 - Approval saves pending edits, calls `POST /approve`, and moves to the
   WordPress screen.
-- Include/exclude controls are not shown because the current backend draft
-  contract does not expose per-field include/exclude state.
+
+Why this is implemented in the backend:
+
+- Frontend-only checkboxes would reduce what the UI appears to select while the
+  existing `/draft-chat` service would still send every rule and regenerate both
+  complete field groups. Enforcing the selection in the existing generation
+  service reduces token usage and latency and prevents accidental changes
+  without duplicating backend logic.
+
+Verification:
+
+- A structured-pipeline regression test checks that only the selected field
+  group is generated and an unselected manual edit remains exactly unchanged.
+- The available V2 suite passes. Workbook-dependent generation tests remain
+  skipped when the configured test workbook is unavailable.
 
 Risk:
 
-- Targeted regeneration may remain an honest backend limitation.
+- Keep revision field IDs scoped (`shared:<key>` / `acf:<key>`) so equal keys in
+  different draft groups cannot collide.
 
 ### Phase 8: WordPress Slice
 
@@ -515,6 +556,16 @@ Outcome:
 - Global status panel tracks concurrent frontend/backend operations.
 - Other Functions drawer connects credentials, workbook config, session archive,
   logs, current session info, and usage.
+- The top bar uses a labeled New session button to open the Sessions menu; the
+  menu can be closed without selecting or creating a session.
+- Workbook config can upload a replacement `.xlsm`/`.xlsx` file and download
+  the active Database Datei through the existing legacy workbook endpoints.
+- Upload reloads the knowledge snapshot when the V2 service is already active;
+  it does not initialize unrelated providers merely to refresh the workbook.
+- A failure while rendering optional legacy workbook-status details does not
+  turn a validated, committed upload into a false HTTP 500 response.
+- Local GCS-backed development requires Application Default Credentials plus
+  `GOOGLE_CLOUD_PROJECT`; `gcs_required` prevents silent local-only updates.
 - Job polling can recover after reload when possible.
 - Missing durable queue is documented separately.
 

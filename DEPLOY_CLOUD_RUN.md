@@ -8,7 +8,7 @@ For the first FLAIRLAB deployment, set these variables on the Cloud Run service:
 gcloud run services update SERVICE_NAME \
   --region REGION \
   --set-env-vars IMPORT_API_KEY="YOUR_INTERFACE_API_KEY" \
-  --set-env-vars OPENAI_API_KEY="YOUR_OPENAI_API_KEY" \
+  --set-secrets OPENAI_API_KEY=projects/1082635308061/secrets/auto-wp-post-openai-key:latest \
   --set-env-vars WP_BASE_URL="https://staging.flairlab.de" \
   --set-env-vars WP_USERNAME="YOUR_WORDPRESS_USERNAME" \
   --set-env-vars WP_APP_PASSWORD="YOUR_WORDPRESS_APPLICATION_PASSWORD" \
@@ -20,6 +20,13 @@ gcloud run services update SERVICE_NAME \
 ```
 
 `IMPORT_API_KEY` is the key the interface/custom action sends as the `X-API-Key` header.
+
+`OPENAI_API_KEY` is shared across all clients and must be injected from Google
+Secret Manager. Do not set it as a plain Cloud Run environment-variable value.
+The Cloud Run service account needs `roles/secretmanager.secretAccessor` on
+`projects/1082635308061/secrets/auto-wp-post-openai-key`. The deployment script
+binds the `latest` secret version by default; override `OPENAI_API_KEY_SECRET`
+only when intentionally deploying against another secret resource.
 
 `SESSION_STATE_GCS_PREFIX` is optional but recommended on Cloud Run. When set, each session state is written to and read from GCS (`<prefix>/<session_id>/state.json`), so sessions survive instance switches.
 

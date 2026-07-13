@@ -148,6 +148,9 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_workbook_status_exposes_legacy_acf_mapping(self) -> None:
         response = await self.client.get("/api/content-sessions/_workbook?post_type_key=event")
         self.assertEqual(response.status_code, 200)
+        link_destinations = response.json()["internal_link_acf_fields"]
+        destination_names = [item["acf_field_name"] for item in link_destinations]
+        self.assertEqual(len(destination_names), len(set(destination_names)))
         mapping = response.json()["acf_guidance_list"]
         hero = next(item for item in mapping if item["user_field"] == "hero_h1")
         self.assertEqual(hero["acf_field"], "hero_h1")

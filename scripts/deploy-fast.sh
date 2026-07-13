@@ -8,6 +8,7 @@ REPO="${REPO:-cloud-run-source-deploy}"
 IMAGE_NAME="${IMAGE_NAME:-auto-wp-post}"
 TAG="${TAG:-quick}"
 ALLOW_UNAUTH="${ALLOW_UNAUTH:-1}"
+OPENAI_API_KEY_SECRET="${OPENAI_API_KEY_SECRET:-projects/1082635308061/secrets/auto-wp-post-openai-key}"
 
 IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT}/${REPO}/${IMAGE_NAME}:${TAG}"
 
@@ -19,6 +20,7 @@ DEPLOY_CMD=(
   --image "${IMAGE_URI}"
   --project "${PROJECT}"
   --region "${REGION}"
+  --set-secrets "OPENAI_API_KEY=${OPENAI_API_KEY_SECRET}:latest"
 )
 
 if [[ "${ALLOW_UNAUTH}" == "1" ]]; then

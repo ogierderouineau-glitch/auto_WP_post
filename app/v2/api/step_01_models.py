@@ -37,6 +37,7 @@ class GenerateRequest(VersionedRequest):
 
 class DraftChatRequest(GenerateRequest):
     message: str
+    revision_field_ids: list[str] | None = None
 
 
 class DraftFieldsUpdateRequest(VersionedRequest):

@@ -145,6 +145,15 @@ def get_v2_service() -> ContentSessionService:
         return _service
 
 
+def reload_v2_knowledge_if_initialized() -> bool:
+    """Reload the workbook without constructing unrelated V2 providers."""
+    with _lock:
+        if _service is None:
+            return False
+        _service.knowledge.reload()
+        return True
+
+
 def v2_readiness() -> dict[str, object]:
     service = get_v2_service()
     snapshot = service.knowledge.current()

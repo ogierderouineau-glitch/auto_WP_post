@@ -357,18 +357,32 @@ export function MediaScreen({
   async function runAction(action: (currentSession: ContentSession) => Promise<ContentSession>, success: string) {
     const currentSession = sessionRef.current
     if (!auth || !currentSession) return
+
+    async function preserveSelectedTranscript(nextSession: ContentSession) {
+      if (!selectedOriginalFilename) return nextSession
+      const savedTranscript = nextSession.image_context_transcripts?.[selectedMediaIdRef.current] || ""
+      if (pictureTranscript === savedTranscript) return nextSession
+      const data = await saveSessionImageContextTranscript(
+        auth,
+        nextSession,
+        selectedOriginalFilename,
+        pictureTranscript,
+      )
+      return data.session
+    }
+
     setOperation("loading")
     setMessage("")
     try {
       let nextSession: ContentSession
       try {
-        nextSession = await action(currentSession)
+        nextSession = await action(await preserveSelectedTranscript(currentSession))
       } catch (error) {
         if (!(error instanceof ApiError) || error.status !== 409) throw error
         const latest = await loadContentSession(auth, currentSession.session_id)
         sessionRef.current = latest.session
         onSessionChange(latest.session)
-        nextSession = await action(latest.session)
+        nextSession = await action(await preserveSelectedTranscript(latest.session))
       }
       onSessionChange(nextSession)
       sessionRef.current = nextSession
@@ -461,13 +475,7 @@ export function MediaScreen({
         { ...metadata },
         useMetadataVision,
       )
-      const transcriptData = await saveSessionImageContextTranscript(
-        auth,
-        metadataData.session,
-        selectedOriginalFilename,
-        pictureTranscript,
-      )
-      return transcriptData.session
+      return metadataData.session
     }, "Picture data saved.")
   }
 

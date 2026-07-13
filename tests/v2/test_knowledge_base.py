@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from openpyxl import load_workbook
 
@@ -15,6 +15,7 @@ from app.v2.knowledge_base.step_02_loader import WorkbookLoader
 from app.v2.knowledge_base.step_03_validator import WorkbookValidator
 from app.v2.knowledge_base.step_04_service import KnowledgeBaseService
 from app.v2.workflow.step_03_registry import WORKFLOW_HANDLER_METHODS
+from app.v2.api import step_03_container
 
 WORKBOOK = Path(
     os.getenv(
@@ -25,6 +26,16 @@ WORKBOOK = Path(
 
 
 class KnowledgeBaseServiceTests(unittest.TestCase):
+    def test_workbook_reload_does_not_initialize_the_full_service(self) -> None:
+        with patch.object(step_03_container, "_service", None):
+            self.assertFalse(step_03_container.reload_v2_knowledge_if_initialized())
+
+    def test_workbook_reload_refreshes_an_initialized_service(self) -> None:
+        service = Mock()
+        with patch.object(step_03_container, "_service", service):
+            self.assertTrue(step_03_container.reload_v2_knowledge_if_initialized())
+        service.knowledge.reload.assert_called_once_with()
+
     def _snapshot(self, sha256: str) -> WorkbookSnapshot:
         return WorkbookSnapshot(
             version=WorkbookVersion(

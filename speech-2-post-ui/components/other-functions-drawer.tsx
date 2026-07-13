@@ -4,11 +4,13 @@ import { useEffect, useState } from "react"
 import {
   Check,
   Database,
+  Download,
   FileClock,
   FolderOpen,
   Info,
   KeyRound,
   Loader2,
+  Upload,
   RefreshCw,
   Server,
   X,
@@ -167,6 +169,8 @@ export function OtherFunctionsDrawer({
   onOpenSessionMenu,
   onLoadSession,
   onSessionChange,
+  onUploadWorkbook,
+  onDownloadWorkbook,
 }: {
   open: boolean
   auth: AuthResult | null
@@ -183,10 +187,27 @@ export function OtherFunctionsDrawer({
   onOpenSessionMenu: () => void
   onLoadSession: (sessionId: string) => void
   onSessionChange: (session: ContentSession) => void
+  onUploadWorkbook: (file: File) => Promise<void>
+  onDownloadWorkbook: () => Promise<void>
 }) {
   const [storedJob, setStoredJob] = useState<StoredJob | null>(null)
   const [jobRecovery, setJobRecovery] = useState<"idle" | "loading" | "success" | "error">("idle")
   const [jobRecoveryMessage, setJobRecoveryMessage] = useState("")
+  const [workbookOperation, setWorkbookOperation] = useState<"idle" | "uploading" | "downloading">("idle")
+  const [workbookMessage, setWorkbookMessage] = useState("")
+
+  async function runWorkbookAction(action: "uploading" | "downloading", callback: () => Promise<void>) {
+    setWorkbookOperation(action)
+    setWorkbookMessage("")
+    try {
+      await callback()
+      setWorkbookMessage(action === "uploading" ? "Database Datei aktualisiert." : "Database Datei heruntergeladen.")
+    } catch (error) {
+      setWorkbookMessage(error instanceof Error ? error.message : "Workbook operation failed.")
+    } finally {
+      setWorkbookOperation("idle")
+    }
+  }
 
   useEffect(() => {
     if (!open) return
@@ -278,6 +299,33 @@ export function OtherFunctionsDrawer({
               <InfoRow label="Post types" value={workbook?.post_types.length ?? 0} />
               <InfoRow label="Fact fields" value={workbook?.fact_schema.length ?? 0} />
             </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-center text-sm font-semibold text-foreground hover:bg-muted has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
+                {workbookOperation === "uploading" ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                Database Datei aktualisieren
+                <input
+                  type="file"
+                  accept=".xlsm,.xlsx"
+                  className="sr-only"
+                  disabled={!auth || workbookOperation !== "idle"}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    event.target.value = ""
+                    if (file) void runWorkbookAction("uploading", () => onUploadWorkbook(file))
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={!auth || workbookOperation !== "idle"}
+                onClick={() => void runWorkbookAction("downloading", onDownloadWorkbook)}
+                className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {workbookOperation === "downloading" ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+                Aktuelle Database Datei herunterladen
+              </button>
+            </div>
+            {workbookMessage && <p className="mt-2 text-xs text-muted-foreground">{workbookMessage}</p>}
           </Section>
 
           <Section title="Current session" icon={<Info className="size-4 text-gold" aria-hidden="true" />}>

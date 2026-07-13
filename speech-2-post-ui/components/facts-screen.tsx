@@ -258,11 +258,7 @@ export function FactsScreen({
 }) {
   const rows = useMemo(() => buildRows(workbook?.fact_schema || [], session), [session, workbook])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const [openSections, setOpenSections] = useState<Record<SectionId, boolean>>({
-    required: true,
-    optional: false,
-    ai: true,
-  })
+  const [openSection, setOpenSection] = useState<SectionId | null>(null)
   const [operation, setOperation] = useState<OperationState>("idle")
   const [message, setMessage] = useState("")
 
@@ -283,6 +279,17 @@ export function FactsScreen({
     required: rows.filter((row) => row.section === "required"),
     optional: rows.filter((row) => row.section === "optional"),
     ai: rows.filter((row) => row.section === "ai"),
+  }
+
+  useEffect(() => {
+    setOpenSection((current) => {
+      if (current && grouped[current].length) return current
+      return (["required", "optional", "ai"] as SectionId[]).find((id) => grouped[id].length) || null
+    })
+  }, [grouped.required.length, grouped.optional.length, grouped.ai.length])
+
+  function toggleSection(id: SectionId) {
+    setOpenSection((current) => current === id ? null : id)
   }
 
   function correctionPayload(includeAllValues: boolean) {
@@ -337,11 +344,9 @@ export function FactsScreen({
     setOperation("loading")
     setMessage("Confirming facts...")
     try {
-      const saved = await saveCorrections(true)
-      const data = await analyzeSessionInputs(auth, saved || session)
-      onSessionChange(data.session)
+      await saveCorrections(true)
       setOperation("success")
-      setMessage(data.session.state === "ready_to_generate" ? "Facts confirmed." : "Facts saved and rechecked.")
+      setMessage("Facts confirmed.")
       onContinueToContent()
     } catch (error) {
       setOperation("error")
@@ -414,24 +419,24 @@ export function FactsScreen({
 
         <div className="mt-4 rounded-xl border border-border bg-card p-4">
           <div className="grid gap-3 sm:grid-cols-3">
-            <div className="flex items-center gap-2 rounded-lg bg-destructive/5 px-3 py-2">
+            <button type="button" onClick={() => toggleSection("required")} aria-pressed={openSection === "required"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "required" ? "bg-destructive/15 ring-1 ring-destructive/30" : "bg-destructive/5 hover:bg-destructive/10"}`}>
               <CircleAlert className="size-4 shrink-0 text-destructive" aria-hidden="true" />
               <span className="text-sm text-foreground">
                 <span className="font-semibold">{missingRequired}</span> required facts missing
               </span>
-            </div>
-            <div className="flex items-center gap-2 rounded-lg bg-warn/10 px-3 py-2">
+            </button>
+            <button type="button" onClick={() => toggleSection("optional")} aria-pressed={openSection === "optional"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "optional" ? "bg-warn/25 ring-1 ring-warn/40" : "bg-warn/10 hover:bg-warn/20"}`}>
               <CircleHelp className="size-4 shrink-0 text-warn-foreground" aria-hidden="true" />
               <span className="text-sm text-foreground">
                 <span className="font-semibold">{missingOptional}</span> optional facts missing
               </span>
-            </div>
-            <div className="flex items-center gap-2 rounded-lg bg-confirm/5 px-3 py-2">
+            </button>
+            <button type="button" onClick={() => toggleSection("ai")} aria-pressed={openSection === "ai"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "ai" ? "bg-confirm/15 ring-1 ring-confirm/30" : "bg-confirm/5 hover:bg-confirm/10"}`}>
               <Sparkles className="size-4 shrink-0 text-confirm" aria-hidden="true" />
               <span className="text-sm text-foreground">
                 <span className="font-semibold">{aiRows.length}</span> populated facts
               </span>
-            </div>
+            </button>
           </div>
 
           <div className="mt-4">
@@ -461,8 +466,8 @@ export function FactsScreen({
             id="required"
             title="Missing required facts"
             count={grouped.required.length}
-            open={openSections.required}
-            onToggle={() => setOpenSections((current) => ({ ...current, required: !current.required }))}
+            open={openSection === "required"}
+            onToggle={() => toggleSection("required")}
           >
             {renderRows(grouped.required)}
           </Section>
@@ -471,8 +476,8 @@ export function FactsScreen({
             id="optional"
             title="Missing optional facts"
             count={grouped.optional.length}
-            open={openSections.optional}
-            onToggle={() => setOpenSections((current) => ({ ...current, optional: !current.optional }))}
+            open={openSection === "optional"}
+            onToggle={() => toggleSection("optional")}
           >
             {renderRows(grouped.optional)}
           </Section>
@@ -481,8 +486,8 @@ export function FactsScreen({
             id="ai"
             title="AI-populated facts"
             count={grouped.ai.length}
-            open={openSections.ai}
-            onToggle={() => setOpenSections((current) => ({ ...current, ai: !current.ai }))}
+            open={openSection === "ai"}
+            onToggle={() => toggleSection("ai")}
           >
             {renderRows(grouped.ai)}
           </Section>

@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  Menu,
   Check,
+  FilePlus2,
   Mic,
   Wifi,
   Image as ImageIcon,
@@ -25,6 +25,8 @@ import {
   loadContentSession,
   loadRecentContentSessions,
   loadWorkbook,
+  uploadKnowledgeWorkbook,
+  downloadKnowledgeWorkbook,
   validateImportKey,
   type ContentSession,
   type RecentSession,
@@ -333,6 +335,7 @@ export default function Page() {
           onCreate={handleCreateSession}
           onLoad={handleLoadSession}
           onRefresh={() => void refreshRecent()}
+          onClose={() => setSessionModalOpen(false)}
         />
       )}
       {/* ===================== TOP BAR ===================== */}
@@ -365,10 +368,10 @@ export default function Page() {
             <button
               type="button"
               onClick={() => auth && setSessionModalOpen(true)}
-              className="flex size-8 items-center justify-center rounded-md bg-white/5 transition-colors hover:bg-white/10"
-              aria-label="Open session menu"
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-white/5 px-2.5 text-xs font-semibold transition-colors hover:bg-white/10"
             >
-              <Menu className="size-4" aria-hidden="true" />
+              <FilePlus2 className="size-4" aria-hidden="true" />
+              New session
             </button>
             <button
               type="button"
@@ -467,6 +470,7 @@ export default function Page() {
           <ContentScreen
             auth={apiAuth}
             session={session}
+            workbook={workbook}
             onSessionChange={handleSessionChange}
             onBackToFacts={() => setScreen("facts")}
             onContinueToWordPress={() => setScreen("wordpress")}
@@ -507,6 +511,17 @@ export default function Page() {
           void handleLoadSession(sessionId)
         }}
         onSessionChange={handleSessionChange}
+        onUploadWorkbook={async (file) => {
+          if (!apiAuth) return
+          await uploadKnowledgeWorkbook(apiAuth, file, selectedPostType)
+          setWorkbook(await loadWorkbook(apiAuth, selectedPostType))
+          addOperation("Workbook updated", file.name, "success")
+        }}
+        onDownloadWorkbook={async () => {
+          if (!apiAuth) return
+          await downloadKnowledgeWorkbook(apiAuth)
+          addOperation("Workbook downloaded", workbook?.filename || "database-datei.xlsm", "success")
+        }}
       />
     </div>
   )

@@ -101,6 +101,27 @@ export async function apiRequest<T>(
   return payload as T
 }
 
+export async function apiDownload(
+  path: string,
+  auth: ApiClientOptions,
+): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(`${API_PREFIX}${path}`, {
+    headers: apiHeaders(auth, undefined, false),
+  })
+
+  if (!response.ok) {
+    const payload = await parseResponse(response)
+    throw new ApiError(errorMessage(payload, `HTTP ${response.status}`), response.status, payload)
+  }
+
+  const disposition = response.headers.get("Content-Disposition") || ""
+  const filename = disposition.match(/filename\*?=(?:UTF-8''|\")?([^\";]+)/i)?.[1]
+  return {
+    blob: await response.blob(),
+    filename: filename ? decodeURIComponent(filename.replace(/\"$/, "")) : "database-datei.xlsm",
+  }
+}
+
 export function backendMediaUrl(path: string) {
   return `${API_PREFIX}${path}`
 }

@@ -260,6 +260,84 @@ class InternalLinkInjectionTests(unittest.TestCase):
         self.assertEqual(len(result.injected), 1)
         self.assertEqual(result.skipped[0]["reason"], "field_link_budget_exceeded")
 
+    def test_internal_link_placement_can_rewrite_one_sentence_with_approved_anchor(self) -> None:
+        record = InternalLinkRecord(
+            sheet_row=1,
+            link_id="smoothie-bar",
+            post_type_key="event",
+            keyword="Smoothiebar Berlin",
+            anchor_text="Smoothiebar in Berlin",
+            anchor_variants=("mobile Smoothiebar",),
+            target_url="https://flairlab.de/smoothie-catering/",
+            link_role="service",
+            category="smoothie",
+            priority="high",
+            active=True,
+            usage_context="Use for smoothie events in the Berlin area.",
+            language="de-DE",
+        )
+        result = InternalLinkService().inject_placements(
+            EligibleLinks(candidates=(record,)),
+            [
+                {
+                    "link_id": "smoothie-bar",
+                    "field_key": "event_story",
+                    "match_text": "mobile Smoothiebar",
+                    "anchor_text": "mobile Smoothiebar",
+                    "placement_mode": "rewrite_single_sentence",
+                    "sentence_index": 1,
+                    "replacement_sentence": "Die mobile Smoothiebar versorgte die Gäste in Potsdam.",
+                }
+            ],
+            acf_source_fields={
+                "event_story": "Das Event fand in Potsdam statt. Eine mobile Station versorgte die Gäste. Die Stimmung war entspannt.",
+            },
+            linkable_fields={"event_story": SimpleNamespace(max_internal_links=1)},
+        )
+
+        self.assertEqual(len(result.injected), 1)
+        self.assertIn(
+            '<a href="https://flairlab.de/smoothie-catering/">mobile Smoothiebar</a>',
+            result.acf_source_fields["event_story"],
+        )
+        self.assertNotIn("Eine mobile Station", result.acf_source_fields["event_story"])
+
+    def test_internal_link_sentence_rewrite_rejects_unapproved_phrase(self) -> None:
+        record = InternalLinkRecord(
+            sheet_row=1,
+            link_id="smoothie-bar",
+            post_type_key="event",
+            keyword="Smoothiebar Berlin",
+            anchor_text="Smoothiebar in Berlin",
+            anchor_variants=(),
+            target_url="https://flairlab.de/smoothie-catering/",
+            link_role="service",
+            category="smoothie",
+            priority="high",
+            active=True,
+            usage_context="Use for smoothie events.",
+            language="de-DE",
+        )
+        result = InternalLinkService().inject_placements(
+            EligibleLinks(candidates=(record,)),
+            [
+                {
+                    "link_id": "smoothie-bar",
+                    "field_key": "event_story",
+                    "match_text": "beliebige Werbung",
+                    "anchor_text": "Smoothiebar in Berlin",
+                    "placement_mode": "rewrite_single_sentence",
+                    "sentence_index": 0,
+                    "replacement_sentence": "Beliebige Werbung für Potsdam.",
+                }
+            ],
+            acf_source_fields={"event_story": "Eine Station versorgte die Gäste."},
+            linkable_fields={"event_story": SimpleNamespace(max_internal_links=1)},
+        )
+
+        self.assertFalse(result.injected)
+        self.assertEqual(result.skipped[0]["reason"], "rewrite_anchor_not_approved")
+
 
 class FeaturedImageMetadataRegressionTests(unittest.TestCase):
     def test_metadata_overwrite_preserves_selected_featured_image(self) -> None:

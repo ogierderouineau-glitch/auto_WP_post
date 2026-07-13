@@ -65,7 +65,8 @@ def create_router(
     async def workbook_status(
         post_type_key: str | None = Query(default=None),
     ) -> dict[str, Any]:
-        snapshot = service_provider().knowledge.current()
+        service = service_provider()
+        snapshot = service.knowledge.current()
         selectable_post_types = [
             row
             for row in snapshot.post_types
@@ -85,6 +86,12 @@ def create_router(
         ):
             selected_post_type = post_types[0] if post_types else None
         selected_post_type_key = selected_post_type.post_type_key if selected_post_type else None
+        eligible_links = service.internal_links.eligible(
+            snapshot,
+            post_type_key=selected_post_type_key or "",
+            language=selected_post_type.default_language if selected_post_type else "de",
+            current_url=None,
+        )
         return {
             **snapshot.version.model_dump(mode="json"),
             "storage_mode": "gcs" if KNOWLEDGE_WORKBOOK_GCS_URI else "local_file",
@@ -115,6 +122,36 @@ def create_router(
                 if row.enabled
                 and row.post_type_key == selected_post_type_key
                 and row.field_role == "input_fact"
+            ],
+            "internal_link_candidates": [
+                {
+                    "link_id": row.link_id,
+                    "anchor_text": row.anchor_text,
+                    "target_url": row.target_url,
+                    "usage_context": row.usage_context,
+                    "priority": row.priority,
+                }
+                for row in eligible_links.candidates
+            ],
+            "internal_link_acf_fields": list({
+                row.acf_field_name or row.field_key: {
+                    "acf_field_name": row.acf_field_name or row.field_key,
+                    "label": row.acf_field_name or row.field_key,
+                }
+                for row in snapshot.acf_fields
+                if row.enabled
+                and row.post_type_key == selected_post_type_key
+                and row.allow_internal_links
+            }.values()),
+            "acf_fields": [
+                {
+                    "field_key": row.field_key,
+                    "acf_field_name": row.acf_field_name or row.field_key,
+                    "label": row.description_de or row.acf_field_name or row.field_key,
+                }
+                for row in snapshot.acf_fields
+                if row.enabled
+                and row.post_type_key == selected_post_type_key
             ],
         }
 
@@ -335,6 +372,9 @@ def create_router(
         message = str(data.pop("message", "")).strip()
         if not message:
             raise InvalidUploadError("Draft chat message is required.")
+        revision_field_ids = data.get("revision_field_ids")
+        if revision_field_ids is not None and not revision_field_ids:
+            raise InvalidUploadError("Select at least one draft field to revise.")
         data["revision_instruction"] = message
         session = service_provider().generate(session_id, **data)
         chat = [

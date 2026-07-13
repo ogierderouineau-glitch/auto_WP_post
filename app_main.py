@@ -77,7 +77,7 @@ from legacy.run_event_import import run_import
 from legacy.step_10_event_payload import ColumnSpec
 from step_40_wordpress_api import preflight_wordpress_permissions, set_post_featured_media, update_media_metadata, upload_media
 from app.v2.api.step_02_routes import create_router as create_v2_router, v2_error_handler
-from app.v2.api.step_03_container import get_v2_service, v2_readiness
+from app.v2.api.step_03_container import get_v2_service, reload_v2_knowledge_if_initialized, v2_readiness
 from app.v2.errors import V2Error
 from app.v2.knowledge_base.step_02_loader import WorkbookLoader
 from app.v2.knowledge_base.step_03_validator import WorkbookValidator
@@ -5500,18 +5500,22 @@ async def upload_knowledge_workbook(
         destination.replace(backup)
       temporary.replace(destination)
     if CONTENT_PIPELINE_VERSION == "v2":
-      get_v2_service().knowledge.reload()
+      reload_v2_knowledge_if_initialized()
     storage_label = "GCS" if gcs_upload_info.get("gcs_uri") else "local"
     generation = gcs_upload_info.get("gcs_generation")
     message = f"Database Datei aktualisiert ({storage_label})."
     if generation:
       message = f"Database Datei aktualisiert (GCS generation {generation})."
-    return {
+    response = {
         "success": True,
         "message": message,
-      "storage": gcs_upload_info,
-      **knowledge_status_payload(post_type=post_type),
+        "storage": gcs_upload_info,
     }
+    try:
+      response.update(knowledge_status_payload(post_type=post_type))
+    except Exception as exc:
+      response["status_warning"] = f"Workbook updated, but legacy status details could not be rendered: {exc}"
+    return response
 
 
 @app.post("/app/sessions", response_model=SessionCreateResponse)

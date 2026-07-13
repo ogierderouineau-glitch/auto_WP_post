@@ -67,9 +67,10 @@ class WorkbookFakeLanguageModel(LanguageModelProvider):
                 for row in rows
             }
         elif task == "shared_field_generation":
+            allowed_fields = set(schema.model_fields)
             rows = [
                 row for row in self.snapshot.shared_fields
-                if row.enabled and row.include_in_ai_schema
+                if row.enabled and row.include_in_ai_schema and row.field_key in allowed_fields
             ]
             data = {
                 row.field_key: (
@@ -102,6 +103,16 @@ class WorkbookFakeLanguageModel(LanguageModelProvider):
                 )
                 for row in rows
             }
+            selected_links = user_context.get("selected_internal_links", [])
+            linkable_fields = [
+                row.field_key
+                for row in rows
+                if row.allow_internal_links and isinstance(data.get(row.field_key), str)
+            ]
+            for selection, field_key in zip(selected_links, linkable_fields):
+                anchor = str(selection.get("anchor_text") or "").strip()
+                if anchor:
+                    data[field_key] = f"{data[field_key]} {anchor}"
         elif task == "internal_link_ranking":
             user = json.loads(context["messages"][1]["content"])
             candidates = user["context"]["candidates"]
@@ -351,11 +362,25 @@ class StructuredPipelineTests(unittest.TestCase):
                 model.calls,
                 [
                     "fact_extraction",
+                    "internal_link_ranking",
                     "shared_field_generation",
                     "acf_field_generation",
-                    "internal_link_ranking",
                     "internal_link_placement_planning",
                 ],
+            )
+            selected_context = next(
+                row["context"]["selected_internal_links"]
+                for row in model.contexts
+                if row["task"] == "acf_field_generation"
+            )
+            linked_fields = session.generation_trace["internal_links"]["linked_fields"]
+            minimum_links, maximum_links = service._internal_link_range(snapshot)
+            self.assertGreaterEqual(len(selected_context), minimum_links)
+            self.assertLessEqual(len(selected_context), maximum_links)
+            self.assertEqual(len(linked_fields), len(selected_context))
+            self.assertEqual(
+                [row["link_id"] for row in linked_fields],
+                [row["link_id"] for row in selected_context],
             )
             self.assertTrue(session.wordpress_payload["meta"])
             self.assertTrue(session.wordpress_payload["acf"])
@@ -485,6 +510,74 @@ class StructuredPipelineTests(unittest.TestCase):
                 revision_contexts[-1]["draft_revision"]["current_shared_fields"],
                 generated.shared_fields,
             )
+
+    def test_draft_revision_only_generates_and_updates_selected_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            knowledge = KnowledgeBaseService(WORKBOOK)
+            snapshot = knowledge.current()
+            model = WorkbookFakeLanguageModel(snapshot)
+            service = ContentSessionService(
+                knowledge=knowledge,
+                repository=FileSessionRepository(temporary),
+                language_model=model,
+            )
+            session = service.create(user_id="user-1", post_type_key="event")
+            session = service.add_inputs(
+                session.session_id,
+                manual_text="Ausdrücklich bestätigte Eventdaten.",
+                confirmed_facts={
+                    row.field_key: WorkbookFakeLanguageModel._value(
+                        row.value_type,
+                        row.min_words,
+                        row.max_words,
+                    )
+                    for row in snapshot.acf_fields
+                    if row.enabled
+                    and row.post_type_key == "event"
+                    and row.field_role == "input_fact"
+                    and row.required_for_analysis
+                },
+                expected_version=session.version,
+            )
+            session = service.analyze(session.session_id, expected_version=session.version)
+            generated = service.generate(
+                session.session_id,
+                shared_fields={},
+                acf_source_fields={},
+                selected_links=[],
+                current_url=None,
+                expected_version=session.version,
+            )
+            selected_key = next(iter(generated.shared_fields))
+            unselected_key = next(iter(generated.acf_source_fields))
+            edited = service.update_draft_fields(
+                generated.session_id,
+                shared_fields={},
+                acf_source_fields={unselected_key: "Keep this exact manual edit"},
+                expected_version=generated.version,
+            )
+            calls_before = list(model.calls)
+
+            revised = service.generate(
+                edited.session_id,
+                shared_fields={},
+                acf_source_fields={},
+                selected_links=edited.selected_links,
+                current_url=None,
+                revision_instruction="Revise only the selected field.",
+                revision_field_ids=[f"shared:{selected_key}"],
+                expected_version=edited.version,
+            )
+
+            self.assertEqual(revised.acf_source_fields[unselected_key], "Keep this exact manual edit")
+            self.assertEqual(model.calls[len(calls_before):].count("shared_field_generation"), 1)
+            self.assertNotIn("acf_field_generation", model.calls[len(calls_before):])
+            revision_context = next(
+                item["context"]
+                for item in reversed(model.contexts)
+                if item["task"] == "shared_field_generation"
+            )
+            self.assertEqual(set(revision_context["fields"]), {selected_key})
 
     def test_image_session_runs_vision_pillow_and_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -106,12 +106,22 @@ class GenerationContextBuilder:
                 style_rules=styles,
             )
 
+        selected_groups = {getattr(schema, "group", None) for schema in schemas}
+        selected_sections = {getattr(schema, "section", None) for schema in schemas}
+
         blueprint = [
             row.model_dump(exclude={"sheet_row"})
             for row in sorted(snapshot.blueprint, key=lambda item: item.section_order)
             if row.enabled
             and row.post_type_key == post_type_key
             and condition_matches(row.display_condition, session)
+            and (
+                field_keys is None
+                or row.target_type not in {"field", "group", "section"}
+                or (row.target_type == "field" and row.target_key in fields)
+                or (row.target_type == "group" and row.target_key in selected_groups)
+                or (row.target_type == "section" and row.target_key in selected_sections)
+            )
         ]
         instructions = [
             row.model_dump(exclude={"sheet_row"})

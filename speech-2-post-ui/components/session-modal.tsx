@@ -13,6 +13,7 @@ export function SessionModal({
   onCreate,
   onLoad,
   onRefresh,
+  onClose,
 }: {
   postTypes: PostTypeOption[]
   selectedPostType: string
@@ -22,6 +23,7 @@ export function SessionModal({
   onCreate: (postTypeKey: string) => void
   onLoad: (sessionId: string) => void
   onRefresh: () => void
+  onClose: () => void
 }) {
   const [postType, setPostType] = useState(selectedPostType)
 
@@ -44,9 +46,14 @@ export function SessionModal({
             <h1 className="text-base font-semibold text-foreground">Session</h1>
             <p className="text-xs text-muted-foreground">Create a workspace or load a recent session.</p>
           </div>
-          <span className="flex size-8 items-center justify-center rounded-md text-muted-foreground">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+            aria-label="Close sessions menu"
+          >
             <X className="size-4" aria-hidden="true" />
-          </span>
+          </button>
         </div>
 
         <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">

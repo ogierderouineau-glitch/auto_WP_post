@@ -187,14 +187,27 @@ class InternalLinkService:
             if max_links is not None and field_counts.get(field_key, 0) >= int(max_links):
                 skipped.append({"link_id": link_id, "field_key": field_key, "reason": "field_link_budget_exceeded"})
                 continue
-            if placement.get("placement_mode") != "wrap_existing_text":
-                skipped.append({"link_id": link_id, "field_key": field_key, "reason": "unsupported_placement_mode"})
-                continue
             value = updated_acf.get(field_key)
             if not isinstance(value, str) or not value.strip():
                 skipped.append({"link_id": link_id, "field_key": field_key, "reason": "empty_field"})
                 continue
             match_text = str(placement.get("match_text") or "").strip() or anchor
+            placement_mode = str(placement.get("placement_mode") or "wrap_existing_text")
+            if placement_mode == "rewrite_single_sentence":
+                replacement = str(placement.get("replacement_sentence") or "").strip()
+                sentence_index = placement.get("sentence_index")
+                allowed_anchors = {record.anchor_text.casefold(), *(item.casefold() for item in record.anchor_variants)}
+                if match_text.casefold() not in allowed_anchors:
+                    skipped.append({"link_id": link_id, "field_key": field_key, "reason": "rewrite_anchor_not_approved"})
+                    continue
+                rewritten = self._replace_sentence(value, sentence_index, replacement)
+                if rewritten is None:
+                    skipped.append({"link_id": link_id, "field_key": field_key, "reason": "invalid_sentence_rewrite"})
+                    continue
+                value = rewritten
+            elif placement_mode != "wrap_existing_text":
+                skipped.append({"link_id": link_id, "field_key": field_key, "reason": "unsupported_placement_mode"})
+                continue
             next_value = self._link_exact_match(
                 value,
                 record,
@@ -225,6 +238,18 @@ class InternalLinkService:
             injected=injected,
             skipped=skipped,
         )
+
+    @staticmethod
+    def _replace_sentence(value: str, sentence_index: Any, replacement: str) -> str | None:
+        if not isinstance(sentence_index, int) or sentence_index < 0 or not replacement:
+            return None
+        if "<" in replacement or ">" in replacement or re.search(r"https?://|www\.", replacement, re.IGNORECASE):
+            return None
+        sentences = list(re.finditer(r"\S(?:.*?\S)?(?:[.!?]+(?=\s|$)|$)", value, re.DOTALL))
+        if sentence_index >= len(sentences):
+            return None
+        selected = sentences[sentence_index]
+        return value[:selected.start()] + replacement + value[selected.end():]
 
     def _inject_one(
         self,
