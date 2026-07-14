@@ -54,6 +54,14 @@ function isScreen(value: string | null): value is Screen {
   return !!value && ORDER.includes(value as Screen)
 }
 
+function appendText(current: string, next: string) {
+  const cleanCurrent = current.trim()
+  const cleanNext = next.trim()
+  if (!cleanCurrent) return cleanNext
+  if (!cleanNext) return cleanCurrent
+  return `${cleanCurrent}\n\n${cleanNext}`
+}
+
 function MetaChip({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center gap-1.5 rounded-md bg-white/5 px-2.5 py-1 text-xs">
@@ -73,6 +81,7 @@ export default function Page() {
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([])
   const [sessionModalOpen, setSessionModalOpen] = useState(false)
   const [otherFunctionsOpen, setOtherFunctionsOpen] = useState(false)
+  const [agentOpen, setAgentOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [statusText, setStatusText] = useState("Starting")
   const [error, setError] = useState("")
@@ -238,6 +247,12 @@ export default function Page() {
     }
   }, [apiAuth, session?.post_type_key])
 
+  useEffect(() => {
+    setSelectedMedia(null)
+    setPictureTranscript("")
+    setPictureTranscriptDrafts({})
+  }, [session?.session_id])
+
   async function handleAuthenticated(result: AuthResult) {
     sessionStorage.setItem(STORAGE_API_KEY, result.apiKey)
     sessionStorage.setItem(STORAGE_USER_ID, result.userId)
@@ -306,6 +321,15 @@ export default function Page() {
     setPictureTranscriptDrafts((current) => {
       if (!selectedMedia?.mediaId) return current
       return { ...current, [selectedMedia.mediaId]: value }
+    })
+  }, [selectedMedia?.mediaId])
+
+  const handlePictureTranscriptAppend = useCallback((text: string) => {
+    if (!selectedMedia?.mediaId) return
+    setPictureTranscript((current) => {
+      const next = appendText(current, text)
+      setPictureTranscriptDrafts((drafts) => ({ ...drafts, [selectedMedia.mediaId]: next }))
+      return next
     })
   }, [selectedMedia?.mediaId])
 
@@ -449,6 +473,7 @@ export default function Page() {
             pictureTranscript={pictureTranscript}
             onPictureTranscriptChange={handlePictureTranscriptChange}
             onSelectedMediaChange={handleSelectedMediaChange}
+            onOpenAgent={() => setAgentOpen(true)}
           />
         ) : screen === "facts" ? (
           <FactsScreen
@@ -477,16 +502,17 @@ export default function Page() {
           />
         )}
       </main>
-      {auth && (
+      {auth && screen !== "wordpress" && (
         <RecordingWidget
           auth={apiAuth}
           session={session}
           activeScreen={screen}
-          selectedMedia={screen === "media" ? selectedMedia : null}
-          pictureTranscript={screen === "media" ? pictureTranscript : ""}
-          onPictureTranscriptChange={handlePictureTranscriptChange}
+          open={agentOpen}
+          onOpenChange={setAgentOpen}
           onSessionChange={handleSessionChange}
           onNavigateFacts={() => setScreen("facts")}
+          selectedPictureId={selectedMedia?.mediaId}
+          onPictureTranscriptAppend={handlePictureTranscriptAppend}
         />
       )}
       <OtherFunctionsDrawer

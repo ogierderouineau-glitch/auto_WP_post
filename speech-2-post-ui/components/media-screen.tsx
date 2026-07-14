@@ -3,6 +3,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
+  Bot,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -240,6 +241,7 @@ export function MediaScreen({
   pictureTranscript,
   onPictureTranscriptChange,
   onSelectedMediaChange,
+  onOpenAgent,
 }: {
   auth: ApiClientOptions | null
   session: ContentSession | null
@@ -247,6 +249,7 @@ export function MediaScreen({
   pictureTranscript: string
   onPictureTranscriptChange: (value: string) => void
   onSelectedMediaChange: (media: SelectedMediaContext | null) => void
+  onOpenAgent: () => void
 }) {
   const images = useMemo(() => (session ? sessionImages(session) : []), [session])
   const [selectedMediaId, setSelectedMediaId] = useState("")
@@ -258,6 +261,7 @@ export function MediaScreen({
   const [transcriptSaving, setTranscriptSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [unsupportedVideo, setUnsupportedVideo] = useState("")
+  const [mobilePreviewOriginal, setMobilePreviewOriginal] = useState(false)
   const [editPromptOpen, setEditPromptOpen] = useState(false)
   const [editPrompt, setEditPrompt] = useState("")
   const pendingTranscripts = useRef<Record<string, string>>({})
@@ -269,6 +273,10 @@ export function MediaScreen({
   const selectedPendingImage = pendingImages.find((image) => image.id === selectedMediaId) || null
   const selectedFilename = selectedImage?.processed_filename || selectedImage?.filename || ""
   const selectedOriginalFilename = selectedImage?.filename || ""
+
+  useEffect(() => {
+    setMobilePreviewOriginal(false)
+  }, [selectedImage?.media_id])
 
   useEffect(() => {
     sessionRef.current = session
@@ -357,13 +365,14 @@ export function MediaScreen({
   async function runAction(action: (currentSession: ContentSession) => Promise<ContentSession>, success: string) {
     const currentSession = sessionRef.current
     if (!auth || !currentSession) return
+    const requestAuth = auth
 
     async function preserveSelectedTranscript(nextSession: ContentSession) {
       if (!selectedOriginalFilename) return nextSession
       const savedTranscript = nextSession.image_context_transcripts?.[selectedMediaIdRef.current] || ""
       if (pictureTranscript === savedTranscript) return nextSession
       const data = await saveSessionImageContextTranscript(
-        auth,
+        requestAuth,
         nextSession,
         selectedOriginalFilename,
         pictureTranscript,
@@ -379,7 +388,7 @@ export function MediaScreen({
         nextSession = await action(await preserveSelectedTranscript(currentSession))
       } catch (error) {
         if (!(error instanceof ApiError) || error.status !== 409) throw error
-        const latest = await loadContentSession(auth, currentSession.session_id)
+        const latest = await loadContentSession(requestAuth, currentSession.session_id)
         sessionRef.current = latest.session
         onSessionChange(latest.session)
         nextSession = await action(await preserveSelectedTranscript(latest.session))
@@ -604,6 +613,21 @@ export function MediaScreen({
               <span className="block text-xs text-muted-foreground">Videos are not supported yet</span>
             </span>
           </label>
+          <button
+            type="button"
+            onClick={onOpenAgent}
+            className="mt-2 flex w-full items-center gap-2 rounded-lg border border-dashed border-ai/50 bg-ai/10 px-3 py-3 text-left text-sm transition-colors hover:border-ai hover:bg-ai/15"
+          >
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-ai text-ai-foreground">
+              <Bot className="size-5" aria-hidden="true" />
+            </span>
+            <span>
+              <span className="block font-medium text-ai">Tell your story</span>
+              <span className="block text-xs text-muted-foreground">
+                Speak to the agent and/or write some text in the Picture transcript directly
+              </span>
+            </span>
+          </button>
           <label className="mt-2 flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
             <input
               type="checkbox"
@@ -760,7 +784,37 @@ export function MediaScreen({
                 </div>
 
                 <div className="lg:hidden">
-                  <ImagePreview auth={auth} session={session} filename={selectedFilename} label="Selected image" />
+                  {selectedImage.processed_filename ? (
+                    <div className="mb-2 flex items-center gap-2" aria-label="Choose image version">
+                      <button
+                        type="button"
+                        onClick={() => setMobilePreviewOriginal(false)}
+                        className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                          mobilePreviewOriginal ? "bg-muted text-muted-foreground" : "bg-confirm/15 text-confirm ring-1 ring-confirm/30"
+                        }`}
+                      >
+                        Processed
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMobilePreviewOriginal(true)}
+                        className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                          mobilePreviewOriginal ? "bg-gold/15 text-foreground ring-1 ring-gold/40" : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        Original
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="mb-1.5 text-xs font-medium text-muted-foreground">Original · no processed version</p>
+                  )}
+                  <ImagePreview
+                    auth={auth}
+                    session={session}
+                    filename={mobilePreviewOriginal ? selectedImage.filename : selectedFilename}
+                    original={mobilePreviewOriginal}
+                    label={mobilePreviewOriginal ? "Original" : selectedImage.processed_filename ? "Processed" : "Original"}
+                  />
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
@@ -813,7 +867,8 @@ export function MediaScreen({
           </div>
         </section>
 
-        <section aria-label="Voice description" className="min-w-0">
+        <section aria-label="Voice description and image metadata" className="min-w-0 lg:contents">
+          <div className="space-y-4 lg:col-start-3 lg:row-span-2 lg:row-start-1">
           <div className="rounded-xl border border-border bg-card p-3 sm:p-4">
             <div className="mb-3 flex items-center gap-2">
               <span className="flex size-8 items-center justify-center rounded-md bg-gold/15 text-gold">
@@ -843,106 +898,103 @@ export function MediaScreen({
               The floating mic saves these notes per picture and sends all picture transcripts to fact extraction.
             </p>
           </div>
-        </section>
-      </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="rounded-xl border border-border bg-card p-4">
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-            <FileText className="size-4 text-muted-foreground" aria-hidden="true" />
-            Image metadata
-          </h2>
-          {selectedImage ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex cursor-pointer items-start gap-2 sm:col-span-2">
-                <input
-                  type="checkbox"
-                  checked={useMetadataVision}
-                  onChange={(event) => changeMetadataVision(event.target.checked)}
-                  disabled={operation === "loading"}
-                  className="mt-0.5 size-4 accent-gold"
-                />
-                <span>
-                  <span className="block text-xs font-medium text-foreground">Improve metadata with Vision</span>
-                  <span className="block text-xs text-muted-foreground">
-                    Uses visual details from this picture in addition to its transcript and rules.
+          <aside aria-label="Processing status" className="rounded-xl border border-border bg-card p-4">
+            <h2 className="mb-3 text-sm font-semibold">Status</h2>
+            <ul className="space-y-2.5">
+              {statusItems.map((status) => (
+                <li key={status.label} className="flex items-center gap-2.5 text-sm">
+                  {status.state === "done" ? (
+                    <span className="flex size-5 items-center justify-center rounded-full bg-confirm/15 text-confirm">
+                      <Check className="size-3.5" aria-hidden="true" />
+                    </span>
+                  ) : (
+                    <span className="flex size-5 items-center justify-center rounded-full bg-warn/20 text-warn-foreground">
+                      <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                    </span>
+                  )}
+                  <span className={status.state === "done" ? "text-muted-foreground" : "text-foreground"}>
+                    {status.label}
                   </span>
-                </span>
-              </label>
-              <MetadataInput
-                label="Alt text"
-                value={metadata.image_alt}
-                onChange={(value) => setMetadata((current) => ({ ...current, image_alt: value }))}
-              />
-              <MetadataInput
-                label="Title"
-                value={metadata.image_title}
-                onChange={(value) => setMetadata((current) => ({ ...current, image_title: value }))}
-              />
-              <MetadataInput
-                label="Caption"
-                value={metadata.image_caption}
-                rows={2}
-                onChange={(value) => setMetadata((current) => ({ ...current, image_caption: value }))}
-              />
-              <MetadataInput
-                label="Description"
-                value={metadata.image_description}
-                rows={2}
-                onChange={(value) => setMetadata((current) => ({ ...current, image_description: value }))}
-              />
-              <div className="flex items-end">
+                </li>
+              ))}
+            </ul>
+            {message && (
+              <div
+                className={[
+                  "mt-4 rounded-lg px-3 py-2 text-xs",
+                  operation === "error" ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground",
+                ].join(" ")}
+              >
+                {message}
+              </div>
+            )}
+            <div className="mt-4 flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+              <UploadCloud className="size-4" aria-hidden="true" />
+              Backend session version {session?.version ?? "-"}
+            </div>
+          </aside>
+          </div>
+
+          <div className="mt-4 self-start rounded-xl border border-border bg-card p-4 lg:col-start-2 lg:row-start-2 lg:mt-0">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+              <FileText className="size-4 text-muted-foreground" aria-hidden="true" />
+              Image metadata - Will be generated with the content draft
+            </h2>
+            {selectedImage ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex cursor-pointer items-start gap-2 sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={useMetadataVision}
+                    onChange={(event) => changeMetadataVision(event.target.checked)}
+                    disabled={operation === "loading"}
+                    className="mt-0.5 size-4 accent-gold"
+                  />
+                  <span>
+                    <span className="block text-xs font-medium text-foreground">Improve metadata with Vision</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Uses visual details from this picture in addition to its transcript and rules.
+                    </span>
+                  </span>
+                </label>
+                <MetadataInput
+                  label="Alt text"
+                  value={metadata.image_alt}
+                  onChange={(value) => setMetadata((current) => ({ ...current, image_alt: value }))}
+                />
+                <MetadataInput
+                  label="Title"
+                  value={metadata.image_title}
+                  onChange={(value) => setMetadata((current) => ({ ...current, image_title: value }))}
+                />
+                <MetadataInput
+                  label="Caption"
+                  value={metadata.image_caption}
+                  rows={2}
+                  onChange={(value) => setMetadata((current) => ({ ...current, image_caption: value }))}
+                />
+                <MetadataInput
+                  label="Description"
+                  value={metadata.image_description}
+                  rows={2}
+                  onChange={(value) => setMetadata((current) => ({ ...current, image_description: value }))}
+                />
                 <button
                   type="button"
                   onClick={savePictureData}
                   disabled={operation === "loading" || transcriptSaving}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-confirm px-3.5 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:opacity-60"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-confirm px-3.5 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:opacity-60 sm:col-span-2"
                 >
                   <Save className="size-4" aria-hidden="true" />
                   Save picture data
                 </button>
               </div>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">No image selected.</p>
-          )}
-        </section>
-
-        <aside aria-label="Processing status" className="rounded-xl border border-border bg-card p-4">
-          <h2 className="mb-3 text-sm font-semibold">Status</h2>
-          <ul className="space-y-2.5">
-            {statusItems.map((status) => (
-              <li key={status.label} className="flex items-center gap-2.5 text-sm">
-                {status.state === "done" ? (
-                  <span className="flex size-5 items-center justify-center rounded-full bg-confirm/15 text-confirm">
-                    <Check className="size-3.5" aria-hidden="true" />
-                  </span>
-                ) : (
-                  <span className="flex size-5 items-center justify-center rounded-full bg-warn/20 text-warn-foreground">
-                    <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-                  </span>
-                )}
-                <span className={status.state === "done" ? "text-muted-foreground" : "text-foreground"}>
-                  {status.label}
-                </span>
-              </li>
-            ))}
-          </ul>
-          {message && (
-            <div
-              className={[
-                "mt-4 rounded-lg px-3 py-2 text-xs",
-                operation === "error" ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground",
-              ].join(" ")}
-            >
-              {message}
-            </div>
-          )}
-          <div className="mt-4 flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
-            <UploadCloud className="size-4" aria-hidden="true" />
-            Backend session version {session?.version ?? "-"}
+            ) : (
+              <p className="text-sm text-muted-foreground">No image selected.</p>
+            )}
           </div>
-        </aside>
+        </section>
       </div>
     </>
   )

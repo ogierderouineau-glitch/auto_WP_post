@@ -5,11 +5,10 @@ import { Bot, CircleDot, Loader2, Mic, Send, Square, Trash2 } from "lucide-react
 import type { ApiClientOptions } from "@/lib/api"
 import {
   analyzeSessionInputs,
-  saveSessionImageContextTranscript,
+  regenerateSessionDraft,
   saveSessionTranscript,
   transcribeSessionRecording,
   type ContentSession,
-  type SelectedMediaContext,
 } from "@/lib/content-sessions"
 
 type RecordingItem = {
@@ -23,26 +22,30 @@ type RecordingItem = {
 
 type ActiveScreen = "media" | "facts" | "content" | "wordpress"
 
-const SCREEN_COPY: Record<ActiveScreen, { title: string; instruction: string; action: string }> = {
+const SCREEN_COPY: Record<ActiveScreen, { title: string; instruction: string; action: string; placeholder: string }> = {
   media: {
     title: "Media agent",
     instruction: "Describe the event through the selected images. Include concrete facts: place, date, people, service, atmosphere, highlights and challenges.",
     action: "Extract facts",
+    placeholder: "Add general event details or instructions for fact extraction. Picture descriptions remain attached to their images.",
   },
   facts: {
     title: "Facts agent",
     instruction: "Explain which facts should be corrected or completed. Be specific and name the fields when possible.",
     action: "Update facts",
+    placeholder: "For example: Correct the venue, add the event date, or explain a missing fact.",
   },
   content: {
     title: "Content agent",
-    instruction: "Describe what should change in the generated content. Mention exact fields or sections when you can.",
+    instruction: "Describe what should change in the generated content. Mention exact fields or sections when you can. You can help in the process by selecting only a few fields by unchecking the others in the list",
     action: "Regenerate content",
+    placeholder: "For example: Make the introduction shorter and give the title a warmer tone.",
   },
   wordpress: {
     title: "WordPress agent",
     instruction: "Review publishing notes before sending content to WordPress. Agent actions for this screen are not connected yet.",
     action: "Not connected",
+    placeholder: "WordPress agent actions are not connected yet. Review the publishing checklist on this screen.",
   },
 }
 
@@ -67,26 +70,34 @@ function combinedPictureTranscripts(session: ContentSession) {
     .join("\n\n")
 }
 
+function draftFieldIds(session: ContentSession) {
+  return [
+    ...Object.keys(session.shared_fields || {}).map((key) => `shared:${key}`),
+    ...Object.keys(session.acf_source_fields || {}).map((key) => `acf:${key}`),
+  ]
+}
+
 export function RecordingWidget({
   auth,
   session,
   activeScreen,
-  selectedMedia,
-  pictureTranscript,
-  onPictureTranscriptChange,
+  open,
+  onOpenChange,
   onSessionChange,
   onNavigateFacts,
+  selectedPictureId,
+  onPictureTranscriptAppend,
 }: {
   auth: ApiClientOptions | null
   session: ContentSession | null
   activeScreen: ActiveScreen
-  selectedMedia: SelectedMediaContext | null
-  pictureTranscript: string
-  onPictureTranscriptChange: (value: string) => void
+  open: boolean
+  onOpenChange: (open: boolean) => void
   onSessionChange: (session: ContentSession) => void
   onNavigateFacts: () => void
+  selectedPictureId?: string
+  onPictureTranscriptAppend: (text: string) => void
 }) {
-  const [open, setOpen] = useState(false)
   const [recording, setRecording] = useState(false)
   const [items, setItems] = useState<RecordingItem[]>([])
   const [transcript, setTranscript] = useState("")
@@ -95,8 +106,8 @@ export function RecordingWidget({
   const recorder = useRef<MediaRecorder | null>(null)
   const chunks = useRef<Blob[]>([])
   const transcriptRef = useRef("")
+  const recordingEpoch = useRef(0)
   const copy = SCREEN_COPY[activeScreen]
-  const selectedMediaId = selectedMedia?.mediaId || ""
 
   function setSyncedTranscript(value: string) {
     transcriptRef.current = value
@@ -104,39 +115,36 @@ export function RecordingWidget({
   }
 
   useEffect(() => {
-    if (activeScreen !== "media" || !session || !selectedMediaId) return
-    if (selectedMediaId.startsWith("pending-")) {
-      setSyncedTranscript(pictureTranscript)
-      setItems([])
-      setStatus(selectedMedia ? `Ready for ${selectedMedia.displayName}.` : "")
-      return
-    }
-    const nextTranscript = String((session.image_context_transcripts || {})[selectedMediaId] || "")
-    setSyncedTranscript(nextTranscript)
-    onPictureTranscriptChange(nextTranscript)
+    recordingEpoch.current += 1
+    if (recorder.current?.state !== "inactive") recorder.current?.stop()
+    recorder.current = null
+    chunks.current = []
+    setRecording(false)
+    setSyncedTranscript("")
     setItems([])
-    setStatus(selectedMedia ? `Ready for ${selectedMedia.displayName}.` : "")
-  }, [activeScreen, selectedMediaId, session?.version])
+    setStatus("")
+  }, [activeScreen, session?.session_id])
 
-  useEffect(() => {
-    if (activeScreen === "media" && transcript !== pictureTranscript) {
-      setSyncedTranscript(pictureTranscript)
-    }
-  }, [activeScreen, pictureTranscript])
-
-  async function transcribe(file: File, id: string) {
-    if (!auth || !session) return
+  async function transcribe(file: File, id: string, requestSession = session, epoch = recordingEpoch.current) {
+    if (!auth || !requestSession) return
     try {
-      const data = await transcribeSessionRecording(auth, session, file)
+      const data = await transcribeSessionRecording(auth, requestSession, file)
+      if (epoch !== recordingEpoch.current) return
       const text = data.text || ""
       setItems((current) =>
         current.map((item) => (item.id === id ? { ...item, status: "done", text } : item)),
       )
-      const nextTranscript = appendText(transcriptRef.current, text)
-      setSyncedTranscript(nextTranscript)
-      if (activeScreen === "media") onPictureTranscriptChange(nextTranscript)
+      if (activeScreen === "media" && selectedPictureId) {
+        onPictureTranscriptAppend(text)
+        setItems((current) => current.filter((item) => item.id !== id))
+        setSyncedTranscript("")
+      } else {
+        const nextTranscript = appendText(transcriptRef.current, text)
+        setSyncedTranscript(nextTranscript)
+      }
       setStatus("Recording transcribed.")
     } catch (error) {
+      if (epoch !== recordingEpoch.current) return
       setItems((current) =>
         current.map((item) =>
           item.id === id
@@ -157,12 +165,30 @@ export function RecordingWidget({
       setStatus("Create or load a session first.")
       return
     }
+    if (!window.isSecureContext) {
+      setStatus("Microphone access requires HTTPS or localhost. This page is using insecure HTTP.")
+      return
+    }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       setStatus("Recording is not supported by this browser.")
       return
     }
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    let stream: MediaStream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch (error) {
+      setStatus(
+        error instanceof DOMException && error.name === "NotAllowedError"
+          ? "Microphone permission was denied. Allow microphone access in the browser's site settings."
+          : error instanceof Error
+            ? `Could not start recording: ${error.message}`
+            : "Could not start recording.",
+      )
+      return
+    }
     chunks.current = []
+    const epoch = recordingEpoch.current
+    const requestSession = session
     const nextRecorder = new MediaRecorder(stream)
     recorder.current = nextRecorder
     nextRecorder.addEventListener("dataavailable", (event) => {
@@ -170,6 +196,7 @@ export function RecordingWidget({
     })
     nextRecorder.addEventListener("stop", () => {
       stream.getTracks().forEach((track) => track.stop())
+      if (epoch !== recordingEpoch.current) return
       const blob = new Blob(chunks.current, { type: nextRecorder.mimeType || "audio/webm" })
       const id = crypto.randomUUID()
       const name = `recording-${new Date().toISOString().replace(/[:.]/g, "-")}.webm`
@@ -185,7 +212,7 @@ export function RecordingWidget({
         },
       ])
       setStatus("Recording stopped. Transcribing...")
-      void transcribe(file, id)
+      void transcribe(file, id, requestSession, epoch)
     })
     nextRecorder.start()
     setRecording(true)
@@ -214,38 +241,43 @@ export function RecordingWidget({
 
   async function submitToAgent() {
     if (!auth || !session) return
-    if (!transcript.trim()) {
-      setStatus("Transcript is empty.")
+    if (activeScreen === "wordpress") return
+    if (items.some((item) => item.status === "transcribing")) {
+      setStatus("Wait for all recordings to finish transcribing.")
+      return
+    }
+    const pictureTranscripts = activeScreen === "media" ? combinedPictureTranscripts(session) : ""
+    if (!transcript.trim() && !pictureTranscripts) {
+      setStatus("Add an instruction or describe at least one picture first.")
       return
     }
     setSubmitting(true)
-    setStatus("Saving transcript...")
+    setStatus(activeScreen === "content" ? "Regenerating content..." : "Updating facts...")
     try {
-      let currentSession = session
-      if (activeScreen === "media" && selectedMedia && !selectedMedia.mediaId.startsWith("pending-")) {
-        const savedImage = await saveSessionImageContextTranscript(
-          auth,
-          currentSession,
-          selectedMedia.filename,
-          transcript,
-        )
-        currentSession = savedImage.session
-        onSessionChange(currentSession)
-      }
-      const transcriptForAnalysis =
-        activeScreen === "media"
-          ? combinedPictureTranscripts(currentSession) || transcript
-          : transcript
-      let data = await saveSessionTranscript(auth, currentSession, transcriptForAnalysis)
-      onSessionChange(data.session)
       if (activeScreen === "media") {
+        let data = await saveSessionTranscript(auth, session, appendText(pictureTranscripts, transcript))
+        onSessionChange(data.session)
         setStatus("Extracting facts...")
         data = await analyzeSessionInputs(auth, data.session)
         onSessionChange(data.session)
         onNavigateFacts()
         setStatus("Facts extracted. Review required fields.")
-      } else {
-        setStatus("Transcript saved. Screen-specific agent action is coming in a later phase.")
+      } else if (activeScreen === "facts") {
+        let data = await saveSessionTranscript(auth, session, appendText(session.manual_text || "", transcript))
+        onSessionChange(data.session)
+        data = await analyzeSessionInputs(auth, data.session)
+        onSessionChange(data.session)
+        setSyncedTranscript("")
+        setItems([])
+        setStatus("Facts updated.")
+      } else if (activeScreen === "content") {
+        const fieldIds = draftFieldIds(session)
+        if (!fieldIds.length) throw new Error("Generate a draft before asking the content agent to revise it.")
+        const data = await regenerateSessionDraft(auth, session, transcript, fieldIds)
+        onSessionChange(data.session)
+        setSyncedTranscript("")
+        setItems([])
+        setStatus("Content regenerated.")
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Agent action failed.")
@@ -255,7 +287,7 @@ export function RecordingWidget({
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-30 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2">
+    <div className="fixed bottom-20 right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2">
       {open && (
         <section className="w-[min(380px,calc(100vw-2rem))] rounded-lg border border-border bg-card p-3 shadow-xl">
           <div className="mb-3 flex items-start justify-between gap-3">
@@ -270,7 +302,7 @@ export function RecordingWidget({
             </div>
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={() => onOpenChange(false)}
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
               aria-label="Close agent widget"
             >
@@ -278,6 +310,11 @@ export function RecordingWidget({
             </button>
           </div>
 
+          {activeScreen === "wordpress" ? (
+            <p className="rounded-lg bg-muted px-3 py-4 text-sm text-muted-foreground">
+              The agent is inactive on the WordPress screen.
+            </p>
+          ) : <>
           <div className="flex h-11 items-center justify-center gap-0.5 rounded-lg bg-muted px-3">
             {[6, 12, 20, 14, 26, 30, 18, 28, 10, 22, 30, 16, 24, 12, 20, 8, 18, 26, 14, 10].map((h, index) => (
               <span
@@ -312,12 +349,9 @@ export function RecordingWidget({
 
           <textarea
             value={transcript}
-            onChange={(event) => {
-              setSyncedTranscript(event.target.value)
-              if (activeScreen === "media") onPictureTranscriptChange(event.target.value)
-            }}
+            onChange={(event) => setSyncedTranscript(event.target.value)}
             rows={5}
-            placeholder="Transcribed recordings will appear here. You can edit before sending."
+            placeholder={copy.placeholder}
             className="mt-3 w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none focus:ring-2 focus:ring-gold/40"
           />
 
@@ -350,16 +384,18 @@ export function RecordingWidget({
           )}
 
           {status && <p className="mt-3 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">{status}</p>}
+          </>}
         </section>
       )}
 
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
-        className="flex size-12 items-center justify-center rounded-full bg-gold text-gold-foreground shadow-lg transition-transform hover:scale-105"
+        onClick={() => onOpenChange(!open)}
+        className="inline-flex h-14 items-center justify-center gap-2 rounded-full bg-gold px-5 text-sm font-bold text-gold-foreground shadow-xl ring-2 ring-background transition-transform hover:scale-105"
         aria-label="Open recording agent"
       >
-        {recording ? <CircleDot className="size-5 animate-pulse text-destructive" /> : <Mic className="size-5" />}
+        {recording ? <CircleDot className="size-5 animate-pulse text-destructive" /> : <Bot className="size-5" />}
+        {open ? "Close agent" : "Ask agent"}
       </button>
     </div>
   )

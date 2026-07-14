@@ -783,6 +783,40 @@ class DomainServiceTests(unittest.TestCase):
         self.assertIn("<strong>Event:</strong> Sommerfest", payload.acf["fakten"])
         self.assertNotIn("&lt;li&gt;", payload.acf["fakten"])
 
+    def test_aggregated_paragraphs_preserve_safe_internal_links_and_escape_other_html(self) -> None:
+        payload = PayloadBuilder().build(
+            self.snapshot,
+            post_type_key="event",
+            shared_values={
+                "post_title": "Test Event",
+                "slug": "test-event",
+                "excerpt": "Kurztext",
+                "status": "draft",
+                "category": "auto event post",
+                "tags": ["Potsdam"],
+                "focus_keyword": "Event Potsdam",
+                "seo_title": "Event Potsdam",
+                "meta_description": "Event in Potsdam",
+                "social_title": "Event Potsdam",
+                "social_description": "Event in Potsdam",
+            },
+            acf_source_values={
+                "event_highlight": (
+                    'Weitere <a href="https://staging.flairlab.de/event-impressionen/">'
+                    "Event-Impressionen von FLAIRLAB</a>. <script>alert(1)</script>"
+                ),
+            },
+        )
+
+        verlauf = payload.acf["verlauf_text"]
+        self.assertIn(
+            '<a href="https://staging.flairlab.de/event-impressionen/">'
+            "Event-Impressionen von FLAIRLAB</a>",
+            verlauf,
+        )
+        self.assertNotIn("<script>", verlauf)
+        self.assertIn("&lt;script&gt;", verlauf)
+
     def test_file_repository_uses_optimistic_versioning(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = FileSessionRepository(temporary)

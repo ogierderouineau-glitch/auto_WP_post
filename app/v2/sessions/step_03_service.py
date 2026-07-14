@@ -1119,10 +1119,11 @@ class ContentSessionService:
         plain_acf_source_fields = dict(routed_acf)
         linkable_fields = self._linkable_acf_fields(snapshot, session)
         if targeted_revision:
-            linkable_fields = [
-                row for row in linkable_fields
-                if row.field_key in selected_acf_keys
-            ]
+            linkable_fields = {
+                field_key: row
+                for field_key, row in linkable_fields.items()
+                if field_key in selected_acf_keys
+            }
         minimum_words_between_links = self._minimum_words_between_internal_links(snapshot)
         if self.language_model is not None and selected_links and linkable_fields:
             self._milestone(session, "internal link placement planning started")
