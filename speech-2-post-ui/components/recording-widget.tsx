@@ -96,7 +96,7 @@ export function RecordingWidget({
   onSessionChange: (session: ContentSession) => void
   onNavigateFacts: () => void
   selectedPictureId?: string
-  onPictureTranscriptAppend: (text: string) => void
+  onPictureTranscriptAppend: (text: string) => Promise<void>
 }) {
   const [recording, setRecording] = useState(false)
   const [items, setItems] = useState<RecordingItem[]>([])
@@ -135,14 +135,21 @@ export function RecordingWidget({
         current.map((item) => (item.id === id ? { ...item, status: "done", text } : item)),
       )
       if (activeScreen === "media" && selectedPictureId) {
-        onPictureTranscriptAppend(text)
-        setItems((current) => current.filter((item) => item.id !== id))
-        setSyncedTranscript("")
+        try {
+          setStatus("Saving transcript to the active picture...")
+          await onPictureTranscriptAppend(text)
+          if (epoch !== recordingEpoch.current) return
+          setItems((current) => current.filter((item) => item.id !== id))
+          setSyncedTranscript("")
+          setStatus("Transcript saved to the active picture.")
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : "Picture transcript could not be saved.")
+        }
       } else {
         const nextTranscript = appendText(transcriptRef.current, text)
         setSyncedTranscript(nextTranscript)
       }
-      setStatus("Recording transcribed.")
+      if (activeScreen !== "media" || !selectedPictureId) setStatus("Recording transcribed.")
     } catch (error) {
       if (epoch !== recordingEpoch.current) return
       setItems((current) =>

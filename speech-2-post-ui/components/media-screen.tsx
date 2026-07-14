@@ -242,6 +242,7 @@ export function MediaScreen({
   onPictureTranscriptChange,
   onSelectedMediaChange,
   onOpenAgent,
+  pictureTranscriptSavingImmediately,
 }: {
   auth: ApiClientOptions | null
   session: ContentSession | null
@@ -250,6 +251,7 @@ export function MediaScreen({
   onPictureTranscriptChange: (value: string) => void
   onSelectedMediaChange: (media: SelectedMediaContext | null) => void
   onOpenAgent: () => void
+  pictureTranscriptSavingImmediately: boolean
 }) {
   const images = useMemo(() => (session ? sessionImages(session) : []), [session])
   const [selectedMediaId, setSelectedMediaId] = useState("")
@@ -326,7 +328,7 @@ export function MediaScreen({
   }, [selectedImage?.media_id, selectedPendingImage?.id, session?.version])
 
   useEffect(() => {
-    if (!auth || !session || !selectedImage || !selectedOriginalFilename || operation === "loading") return
+    if (!auth || !session || !selectedImage || !selectedOriginalFilename || operation === "loading" || pictureTranscriptSavingImmediately) return
     const savedTranscript = selectedImage.context_transcript || ""
     if (pictureTranscript === savedTranscript) return
 
@@ -355,7 +357,7 @@ export function MediaScreen({
       cancelled = true
       window.clearTimeout(timeout)
     }
-  }, [auth, onSessionChange, operation, pictureTranscript, selectedOriginalFilename, selectedImage?.media_id, session])
+  }, [auth, onSessionChange, operation, pictureTranscript, pictureTranscriptSavingImmediately, selectedOriginalFilename, selectedImage?.media_id, session])
 
   useEffect(() => {
     if (!selectedPendingImage) return

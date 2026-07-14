@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Check,
   FilePlus2,
@@ -25,6 +25,7 @@ import {
   loadContentSession,
   loadRecentContentSessions,
   loadWorkbook,
+  saveSessionImageContextTranscript,
   uploadKnowledgeWorkbook,
   downloadKnowledgeWorkbook,
   validateImportKey,
@@ -89,6 +90,11 @@ export default function Page() {
   const [selectedMedia, setSelectedMedia] = useState<SelectedMediaContext | null>(null)
   const [pictureTranscript, setPictureTranscript] = useState("")
   const [pictureTranscriptDrafts, setPictureTranscriptDrafts] = useState<Record<string, string>>({})
+  const [pictureTranscriptSavingImmediately, setPictureTranscriptSavingImmediately] = useState(false)
+  const sessionRef = useRef<ContentSession | null>(null)
+  const pictureTranscriptRef = useRef("")
+  const pictureSaveQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const immediatePictureSaves = useRef(0)
 
   const apiAuth = useMemo(
     () => (auth ? { apiKey: auth.apiKey, userId: auth.userId } : null),
@@ -132,6 +138,7 @@ export default function Page() {
   }
 
   function handleSessionChange(nextSession: ContentSession) {
+    sessionRef.current = nextSession
     setSession(nextSession)
     sessionStorage.setItem(STORAGE_SESSION_ID, nextSession.session_id)
     setStatusText(`Session ${nextSession.state}`)
@@ -249,6 +256,7 @@ export default function Page() {
 
   useEffect(() => {
     setSelectedMedia(null)
+    pictureTranscriptRef.current = ""
     setPictureTranscript("")
     setPictureTranscriptDrafts({})
   }, [session?.session_id])
@@ -317,6 +325,7 @@ export default function Page() {
   }
 
   const handlePictureTranscriptChange = useCallback((value: string) => {
+    pictureTranscriptRef.current = value
     setPictureTranscript(value)
     setPictureTranscriptDrafts((current) => {
       if (!selectedMedia?.mediaId) return current
@@ -325,25 +334,45 @@ export default function Page() {
   }, [selectedMedia?.mediaId])
 
   const handlePictureTranscriptAppend = useCallback((text: string) => {
-    if (!selectedMedia?.mediaId) return
-    setPictureTranscript((current) => {
-      const next = appendText(current, text)
-      setPictureTranscriptDrafts((drafts) => ({ ...drafts, [selectedMedia.mediaId]: next }))
-      return next
+    if (!apiAuth || !selectedMedia?.mediaId || selectedMedia.mediaId.startsWith("pending-")) {
+      return Promise.reject(new Error("Wait until the active picture has finished uploading."))
+    }
+
+    const media = selectedMedia
+    const next = appendText(pictureTranscriptRef.current, text)
+    pictureTranscriptRef.current = next
+    setPictureTranscript(next)
+    setPictureTranscriptDrafts((drafts) => ({ ...drafts, [media.mediaId]: next }))
+    immediatePictureSaves.current += 1
+    setPictureTranscriptSavingImmediately(true)
+
+    const save = pictureSaveQueue.current.then(async () => {
+      const currentSession = sessionRef.current
+      if (!currentSession) throw new Error("The active session is no longer available.")
+      const data = await saveSessionImageContextTranscript(apiAuth, currentSession, media.filename, next)
+      handleSessionChange(data.session)
     })
-  }, [selectedMedia?.mediaId])
+    pictureSaveQueue.current = save.catch(() => undefined)
+
+    return save.finally(() => {
+      immediatePictureSaves.current -= 1
+      if (!immediatePictureSaves.current) setPictureTranscriptSavingImmediately(false)
+    })
+  }, [apiAuth, selectedMedia])
 
   function handleSelectedMediaChange(media: SelectedMediaContext | null) {
     setSelectedMedia(media)
     if (!media || !session) {
+      pictureTranscriptRef.current = ""
       setPictureTranscript("")
       return
     }
-    setPictureTranscript(
+    const nextTranscript =
       Object.prototype.hasOwnProperty.call(pictureTranscriptDrafts, media.mediaId)
         ? pictureTranscriptDrafts[media.mediaId]
-        : String((session.image_context_transcripts || {})[media.mediaId] || ""),
-    )
+        : String((session.image_context_transcripts || {})[media.mediaId] || "")
+    pictureTranscriptRef.current = nextTranscript
+    setPictureTranscript(nextTranscript)
   }
 
   return (
@@ -474,6 +503,7 @@ export default function Page() {
             onPictureTranscriptChange={handlePictureTranscriptChange}
             onSelectedMediaChange={handleSelectedMediaChange}
             onOpenAgent={() => setAgentOpen(true)}
+            pictureTranscriptSavingImmediately={pictureTranscriptSavingImmediately}
           />
         ) : screen === "facts" ? (
           <FactsScreen
