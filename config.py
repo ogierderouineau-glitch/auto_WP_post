@@ -21,6 +21,13 @@ def load_dotenv(path: Path = Path(".env")) -> None:
 load_dotenv()
 
 
+def env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class WordPressClientConfig:
     client_id: str
@@ -60,6 +67,10 @@ def get_active_client_config() -> WordPressClientConfig:
 
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+REQUIRE_IMPORT_API_KEY = env_flag(
+    "REQUIRE_IMPORT_API_KEY",
+    default=bool(os.getenv("RENDER")),
+)
 KNOWLEDGE_WORKBOOK_PATH = os.getenv("KNOWLEDGE_WORKBOOK_PATH", "")
 KNOWLEDGE_WORKBOOK_GCS_URI = os.getenv("KNOWLEDGE_WORKBOOK_GCS_URI", "")
 KNOWLEDGE_SOURCE_POLICY = os.getenv("KNOWLEDGE_SOURCE_POLICY", "").strip().lower()

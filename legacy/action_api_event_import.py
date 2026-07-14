@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
-from config import get_client_config
+from config import REQUIRE_IMPORT_API_KEY, get_client_config
 from legacy.run_event_import import run_import
 from legacy.step_10_event_payload import DEFAULT_OUTPUT_ROOT, safe_name
 from pydantic import BaseModel, ConfigDict, Field
@@ -133,6 +133,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 def verify_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    if REQUIRE_IMPORT_API_KEY and not IMPORT_API_KEY:
+        raise HTTPException(status_code=503, detail="Import API key is not configured.")
     if IMPORT_API_KEY and x_api_key != IMPORT_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid or missing API key.")
 

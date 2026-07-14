@@ -1,0 +1,60 @@
+services:
+  - type: web
+    name: speech2post-backend
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 120
+    envVars:
+      - key: REQUIRE_IMPORT_API_KEY
+        value: "true"
+      - key: IMPORT_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: FLAIRLAB_WP_BASE_URL
+        sync: false
+      - key: FLAIRLAB_WP_USERNAME
+        sync: false
+      - key: FLAIRLAB_WP_APP_PASSWORD
+        sync: false
+      - key: CONTENT_PIPELINE_VERSION
+        value: v2
+      - key: KNOWLEDGE_SOURCE_POLICY
+        value: gcs_required
+      - key: KNOWLEDGE_WORKBOOK_GCS_URI
+        sync: false
+      - key: KNOWLEDGE_WORKBOOK_PATH
+        value: /tmp/speech2post/knowledge/flairlab.xlsm
+      - key: V2_KNOWLEDGE_WORKBOOK_PATH
+        value: /tmp/speech2post/knowledge/flairlab.xlsm
+      - key: V2_SESSION_GCS_PREFIX
+        sync: false
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        value: /etc/secrets/gcp-service-account.json
+      - key: V2_MAX_IMAGE_BYTES
+        value: "20971520"
+      - key: V2_MAX_AUDIO_BYTES
+        value: "26214400"
+
+  - type: web
+    name: speech2post-frontend
+    runtime: node
+    plan: starter
+    region: frankfurt
+    rootDir: speech-2-post-ui
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run typecheck && pnpm run build
+    startCommand: pnpm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 20.19.5
+      - key: NODE_ENV
+        value: production
+      - key: SPEECH2POST_BACKEND_URL
+        fromService:
+          type: web
+          name: speech2post-backend
+          property: hostport

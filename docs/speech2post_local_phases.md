@@ -23,7 +23,8 @@ services one slice at a time.
   - `npx -y -p node@20 -p pnpm@10 pnpm run typecheck`
   - `npx -y -p node@20 -p pnpm@10 pnpm run build`
   - `npx -y -p node@20 -p pnpm@10 pnpm run dev`
-- Production routing/deployment should wait until the local workflow is proven.
+- Production routing/deployment follows the single-client Render showcase gate
+  in Phase 11 after local build and workflow verification.
 
 ## Future Storage And Secret Direction
 
@@ -293,8 +294,8 @@ Current behavior:
   behavior without using `localStorage`.
 - Stored sessions are restored from `sessionStorage` when possible.
 - The WordPress step is now reachable in the V0 shell.
-- The screen bodies still contain V0 mock data until their individual phases are
-  implemented.
+- Later phases replaced the original V0 screen-body mock data with the real V2
+  media, facts, content, and WordPress slices.
 
 Risk:
 
@@ -606,6 +607,40 @@ Outcome:
 - Backend focused tests pass.
 - Four workflow screens work locally.
 - Current `/app` UI still works.
+
+### Phase 11: Single-Client Render Showcase
+
+Outcome:
+
+- The existing FastAPI app and new Next frontend deploy as separate Render web
+  services in Frankfurt.
+- The Next service proxies `/backend/*` to FastAPI over Render's private
+  network.
+- The current `/app` UI remains part of the unchanged FastAPI service.
+- Production authentication fails closed when `IMPORT_API_KEY` is absent.
+- FLAIRLAB's canonical workbook and all V2 session/media objects remain in GCS.
+- Image uploads remain capped at 20 MiB and showcase audio at 25 MiB.
+
+Implemented deployment files:
+
+- `render.yaml`
+- `docs/speech2post_render_showcase.md`
+
+Showcase boundary:
+
+- Only the `flairlab` client is supported.
+- Keep both Render services on paid Starter instances to avoid free-service
+  sleep during a demonstration.
+- In-memory generate/publish jobs can still be lost by a backend restart or
+  deploy. Do not redeploy while a job is active.
+- The shared key in `sessionStorage` is temporary showcase authentication, not
+  the planned secure cookie implementation.
+- Render environment secrets temporarily inject credentials. Direct
+  client-scoped Google Secret Manager resolution remains later multi-client
+  work.
+
+Setup and phone acceptance steps are documented in
+`docs/speech2post_render_showcase.md`.
 
 ## Decisions To Keep Code Small
 

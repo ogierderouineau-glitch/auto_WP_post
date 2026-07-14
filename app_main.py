@@ -117,7 +117,10 @@ app = FastAPI(
 
 def verify_api_key(x_api_key: str | None = Header(default=None)) -> None:
     from legacy.action_api_event_import import IMPORT_API_KEY as configured_key
+    from config import REQUIRE_IMPORT_API_KEY
 
+    if REQUIRE_IMPORT_API_KEY and not configured_key:
+        raise HTTPException(status_code=503, detail="Import API key is not configured.")
     if configured_key and x_api_key != configured_key:
         raise HTTPException(status_code=401, detail="Invalid or missing API key.")
 
@@ -126,10 +129,13 @@ def verify_download_api_key(
   x_api_key: str | None = Header(default=None),
   api_key: str | None = Query(default=None),
 ) -> None:
-  from legacy.action_api_event_import import IMPORT_API_KEY as configured_key
+    from legacy.action_api_event_import import IMPORT_API_KEY as configured_key
+    from config import REQUIRE_IMPORT_API_KEY
 
-  if configured_key and x_api_key != configured_key and api_key != configured_key:
-    raise HTTPException(status_code=401, detail="Invalid or missing API key.")
+    if REQUIRE_IMPORT_API_KEY and not configured_key:
+        raise HTTPException(status_code=503, detail="Import API key is not configured.")
+    if configured_key and x_api_key != configured_key and api_key != configured_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key.")
 
 
 app.add_exception_handler(V2Error, v2_error_handler)
