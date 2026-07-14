@@ -98,23 +98,36 @@ function FactRow({
   fact,
   value,
   changed,
+  selectedForReview,
   onChange,
   onBlur,
+  onReviewSelectionChange,
 }: {
   fact: FactRowModel
   value: string
   changed: boolean
+  selectedForReview: boolean
   onChange: (value: string) => void
   onBlur: (nextTarget: EventTarget | null) => void
+  onReviewSelectionChange: () => void
 }) {
   const missingRequired = fact.required && !hasValue(value)
 
   return (
     <div className="rounded-lg border border-border bg-card p-3 lg:grid lg:grid-cols-[minmax(170px,210px)_minmax(0,1fr)_max-content_92px] lg:items-start lg:gap-3 lg:rounded-none lg:border-0 lg:border-b lg:border-border lg:bg-transparent lg:p-2.5">
-      <div className="min-w-0">
-        <div className="text-sm font-medium text-foreground">{fact.label}</div>
-        <div className="font-mono text-[11px] text-muted-foreground">{fact.key}</div>
-      </div>
+      <label className="flex min-w-0 cursor-pointer items-start gap-2">
+        <input
+          type="checkbox"
+          checked={selectedForReview}
+          onChange={onReviewSelectionChange}
+          aria-label={`Include ${fact.label} in AI review`}
+          className="mt-0.5 size-4 shrink-0 accent-ai"
+        />
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-foreground">{fact.label}</span>
+          <span className="block font-mono text-[11px] text-muted-foreground">{fact.key}</span>
+        </span>
+      </label>
 
       <div className="mt-2 lg:mt-0">
         <input
@@ -248,6 +261,8 @@ export function FactsScreen({
   onBackToMedia,
   onSessionChange,
   onContinueToContent,
+  selectedFactKeys,
+  onSelectedFactKeysChange,
 }: {
   auth: ApiClientOptions | null
   session: ContentSession | null
@@ -255,6 +270,8 @@ export function FactsScreen({
   onBackToMedia: () => void
   onSessionChange: (session: ContentSession) => void
   onContinueToContent: () => void
+  selectedFactKeys: string[]
+  onSelectedFactKeysChange: (keys: string[]) => void
 }) {
   const rows = useMemo(() => buildRows(workbook?.fact_schema || [], session), [session, workbook])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -264,7 +281,7 @@ export function FactsScreen({
 
   useEffect(() => {
     setDrafts(Object.fromEntries(rows.map((row) => [row.key, row.value])))
-  }, [session?.session_id, workbook?.selected_post_type_key])
+  }, [session?.session_id, session?.version, workbook?.selected_post_type_key])
 
   const changed = rows.filter((row) => (drafts[row.key] ?? row.value) !== row.value)
   const missingRequired = rows.filter((row) => row.section === "required").length
@@ -274,6 +291,8 @@ export function FactsScreen({
   const aiRows = rows.filter((row) => row.section === "ai")
   const progress = requiredTotal ? Math.round((requiredComplete / requiredTotal) * 100) : 100
   const allRequiredDone = missingRequired === 0
+  const selectedFacts = new Set(selectedFactKeys)
+  const allFactsSelected = rows.length > 0 && selectedFactKeys.length === rows.length
 
   const grouped = {
     required: rows.filter((row) => row.section === "required"),
@@ -290,6 +309,13 @@ export function FactsScreen({
 
   function toggleSection(id: SectionId) {
     setOpenSection((current) => current === id ? null : id)
+  }
+
+  function toggleFactSelection(key: string) {
+    const next = new Set(selectedFactKeys)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    onSelectedFactKeysChange([...next])
   }
 
   function correctionPayload(includeAllValues: boolean) {
@@ -328,7 +354,8 @@ export function FactsScreen({
     setMessage("Rechecking facts...")
     try {
       const saved = await saveCorrections(false)
-      const data = await analyzeSessionInputs(auth, saved || session)
+      if (!selectedFactKeys.length) throw new Error("Select at least one fact for AI review.")
+      const data = await analyzeSessionInputs(auth, saved || session, selectedFactKeys)
       onSessionChange(data.session)
       setDrafts(Object.fromEntries(buildRows(workbook?.fact_schema || [], data.session).map((row) => [row.key, row.value])))
       setOperation("success")
@@ -362,11 +389,13 @@ export function FactsScreen({
           fact={fact}
           value={drafts[fact.key] ?? fact.value}
           changed={(drafts[fact.key] ?? fact.value) !== fact.value}
+          selectedForReview={selectedFacts.has(fact.key)}
           onChange={(value) => setDrafts((current) => ({ ...current, [fact.key]: value }))}
           onBlur={(nextTarget) => {
             if (nextTarget instanceof Element && nextTarget.closest("[data-facts-action]")) return
             void handleSave()
           }}
+          onReviewSelectionChange={() => toggleFactSelection(fact.key)}
         />
       ))
     ) : (
@@ -389,11 +418,20 @@ export function FactsScreen({
             <h1 className="text-lg font-semibold text-foreground sm:text-xl">Review event facts</h1>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
               Check the information extracted from your media and voice descriptions. Complete required fields before
-              continuing.
+              continuing. Use the field checkboxes to choose which facts the AI reviews next; unchecked facts remain
+              unchanged.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onSelectedFactKeysChange(allFactsSelected ? [] : rows.map((row) => row.key))}
+              title={allFactsSelected ? "Exclude every fact from the next AI review" : "Include every fact in the next AI review"}
+              className="inline-flex items-center rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+            >
+              {allFactsSelected ? "Uncheck all facts" : "Check all facts"}
+            </button>
             <button
               type="button"
               data-facts-action
@@ -408,7 +446,7 @@ export function FactsScreen({
               type="button"
               data-facts-action
               onClick={handleRecheck}
-              disabled={operation === "loading"}
+              disabled={operation === "loading" || !selectedFactKeys.length}
               className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:opacity-60"
             >
               {operation === "loading" ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
@@ -418,6 +456,9 @@ export function FactsScreen({
         </div>
 
         <div className="mt-4 rounded-xl border border-border bg-card p-4">
+          <p className="mb-3 text-xs text-muted-foreground">
+            {selectedFactKeys.length} of {rows.length} facts selected for AI review.
+          </p>
           <div className="grid gap-3 sm:grid-cols-3">
             <button type="button" onClick={() => toggleSection("required")} aria-pressed={openSection === "required"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "required" ? "bg-destructive/15 ring-1 ring-destructive/30" : "bg-destructive/5 hover:bg-destructive/10"}`}>
               <CircleAlert className="size-4 shrink-0 text-destructive" aria-hidden="true" />

@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from app.v2.api.step_01_models import (
     AnswersRequest,
+    AnalyzeRequest,
     ApproveRequest,
     CreateSessionRequest,
     DraftChatRequest,
@@ -310,14 +311,14 @@ def create_router(
     @router.post("/{session_id}/analyze", response_model=SessionResponse)
     async def analyze(
         session_id: str,
-        payload: VersionedRequest,
+        payload: AnalyzeRequest,
         x_user_id: str | None = Header(default=None, alias="X-User-ID"),
     ) -> SessionResponse:
         service_provider().require_owner(session_id, x_user_id)
         return SessionResponse(
             session=service_provider().analyze(
                 session_id,
-                expected_version=payload.expected_version,
+                **payload.model_dump(),
             )
         )
 

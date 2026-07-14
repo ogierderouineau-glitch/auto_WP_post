@@ -52,11 +52,13 @@ class WorkbookFakeLanguageModel(LanguageModelProvider):
             "estimated_cost_usd": None,
         }
         if task == "fact_extraction":
+            allowed_fields = set(schema.model_fields)
             rows = [
                 row for row in self.snapshot.acf_fields
                 if row.enabled
                 and row.post_type_key == "event"
                 and row.field_role == "input_fact"
+                and row.field_key in allowed_fields
             ]
             data = {
                 row.field_key: (
@@ -578,6 +580,55 @@ class StructuredPipelineTests(unittest.TestCase):
                 if item["task"] == "shared_field_generation"
             )
             self.assertEqual(set(revision_context["fields"]), {selected_key})
+
+    def test_fact_review_only_extracts_and_replaces_selected_fact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            knowledge = KnowledgeBaseService(WORKBOOK)
+            snapshot = knowledge.current()
+            model = WorkbookFakeLanguageModel(snapshot)
+            service = ContentSessionService(
+                knowledge=knowledge,
+                repository=FileSessionRepository(temporary),
+                language_model=model,
+            )
+            fact_rows = [
+                row for row in snapshot.acf_fields
+                if row.enabled
+                and row.post_type_key == "event"
+                and row.field_role == "input_fact"
+                and row.required_for_analysis
+            ]
+            self.assertGreaterEqual(len(fact_rows), 2)
+            selected_key = fact_rows[0].field_key
+            unselected_key = fact_rows[1].field_key
+            session = service.create(user_id="user-1", post_type_key="event")
+            session = service.add_inputs(
+                session.session_id,
+                manual_text="Updated event facts.",
+                confirmed_facts={
+                    selected_key: "Old selected value",
+                    unselected_key: "Keep this exact value",
+                },
+                expected_version=session.version,
+            )
+
+            reviewed = service.analyze(
+                session.session_id,
+                review_fact_keys=[selected_key],
+                expected_version=session.version,
+            )
+
+            fact_context = next(
+                item["context"]
+                for item in reversed(model.contexts)
+                if item["task"] == "fact_extraction"
+            )
+            self.assertEqual(
+                [row["field_key"] for row in fact_context["fact_schema"]],
+                [selected_key],
+            )
+            self.assertNotEqual(reviewed.confirmed_facts[selected_key].value, "Old selected value")
+            self.assertEqual(reviewed.confirmed_facts[unselected_key].value, "Keep this exact value")
 
     def test_image_session_runs_vision_pillow_and_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

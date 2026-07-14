@@ -22,6 +22,10 @@ class VersionedRequest(BaseModel):
     expected_version: int
 
 
+class AnalyzeRequest(VersionedRequest):
+    review_fact_keys: list[str] | None = None
+
+
 class AnswersRequest(VersionedRequest):
     corrections: dict[str, Any]
 

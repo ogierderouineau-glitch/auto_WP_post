@@ -91,6 +91,7 @@ export default function Page() {
   const [pictureTranscript, setPictureTranscript] = useState("")
   const [pictureTranscriptDrafts, setPictureTranscriptDrafts] = useState<Record<string, string>>({})
   const [pictureTranscriptSavingImmediately, setPictureTranscriptSavingImmediately] = useState(false)
+  const [selectedFactKeys, setSelectedFactKeys] = useState<string[] | null>(null)
   const sessionRef = useRef<ContentSession | null>(null)
   const pictureTranscriptRef = useRef("")
   const pictureSaveQueue = useRef<Promise<unknown>>(Promise.resolve())
@@ -106,6 +107,12 @@ export default function Page() {
     workbook?.post_types.find((item) => item.post_type_key === selectedPostType)?.display_name_de ||
     selectedPostType ||
     "-"
+  const availableFactKeys = (workbook?.fact_schema || []).map((field) => field.field_key)
+  const factsSelectedForReview = selectedFactKeys ?? availableFactKeys
+
+  useEffect(() => {
+    setSelectedFactKeys(null)
+  }, [session?.session_id, workbook?.selected_post_type_key])
 
   const completedSteps = useMemo(
     () => ({
@@ -513,6 +520,8 @@ export default function Page() {
             onSessionChange={handleSessionChange}
             onBackToMedia={() => setScreen("media")}
             onContinueToContent={() => setScreen("content")}
+            selectedFactKeys={factsSelectedForReview}
+            onSelectedFactKeysChange={setSelectedFactKeys}
           />
         ) : screen === "wordpress" ? (
           <WordPressScreen
@@ -541,6 +550,9 @@ export default function Page() {
           onOpenChange={setAgentOpen}
           onSessionChange={handleSessionChange}
           onNavigateFacts={() => setScreen("facts")}
+          selectedFactKeys={factsSelectedForReview}
+          availableFactKeys={availableFactKeys}
+          onSelectedFactKeysChange={setSelectedFactKeys}
           selectedPictureId={selectedMedia?.mediaId}
           onPictureTranscriptAppend={handlePictureTranscriptAppend}
         />

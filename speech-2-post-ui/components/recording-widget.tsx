@@ -31,9 +31,9 @@ const SCREEN_COPY: Record<ActiveScreen, { title: string; instruction: string; ac
   },
   facts: {
     title: "Facts agent",
-    instruction: "Explain which facts should be corrected or completed. Be specific and name the fields when possible.",
+    instruction: "Select the facts to review using the checkboxes on the Facts screen, then explain what should be corrected or completed.",
     action: "Update facts",
-    placeholder: "For example: Correct the venue, add the event date, or explain a missing fact.",
+    placeholder: "Only checked facts will be reviewed. For example: Correct the venue, add the event date, or explain a missing fact.",
   },
   content: {
     title: "Content agent",
@@ -85,6 +85,9 @@ export function RecordingWidget({
   onOpenChange,
   onSessionChange,
   onNavigateFacts,
+  selectedFactKeys,
+  availableFactKeys,
+  onSelectedFactKeysChange,
   selectedPictureId,
   onPictureTranscriptAppend,
 }: {
@@ -95,6 +98,9 @@ export function RecordingWidget({
   onOpenChange: (open: boolean) => void
   onSessionChange: (session: ContentSession) => void
   onNavigateFacts: () => void
+  selectedFactKeys: string[]
+  availableFactKeys: string[]
+  onSelectedFactKeysChange: (keys: string[] | null) => void
   selectedPictureId?: string
   onPictureTranscriptAppend: (text: string) => Promise<void>
 }) {
@@ -108,6 +114,7 @@ export function RecordingWidget({
   const transcriptRef = useRef("")
   const recordingEpoch = useRef(0)
   const copy = SCREEN_COPY[activeScreen]
+  const allFactsSelected = availableFactKeys.length > 0 && selectedFactKeys.length === availableFactKeys.length
 
   function setSyncedTranscript(value: string) {
     transcriptRef.current = value
@@ -270,9 +277,10 @@ export function RecordingWidget({
         onNavigateFacts()
         setStatus("Facts extracted. Review required fields.")
       } else if (activeScreen === "facts") {
+        if (!selectedFactKeys.length) throw new Error("Select at least one fact for AI review.")
         let data = await saveSessionTranscript(auth, session, appendText(session.manual_text || "", transcript))
         onSessionChange(data.session)
-        data = await analyzeSessionInputs(auth, data.session)
+        data = await analyzeSessionInputs(auth, data.session, selectedFactKeys)
         onSessionChange(data.session)
         setSyncedTranscript("")
         setItems([])
@@ -346,13 +354,29 @@ export function RecordingWidget({
             <button
               type="button"
               onClick={submitToAgent}
-              disabled={submitting || !session}
+              disabled={submitting || !session || (activeScreen === "facts" && !selectedFactKeys.length)}
               className="inline-flex items-center justify-center gap-2 rounded-md bg-ai px-3 py-2.5 text-sm font-semibold text-ai-foreground transition-colors hover:opacity-90 disabled:opacity-60"
             >
               {submitting ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
               {copy.action}
             </button>
           </div>
+
+          {activeScreen === "facts" && (
+            <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2">
+              <span className="text-xs text-muted-foreground">
+                {selectedFactKeys.length} of {availableFactKeys.length} facts selected
+              </span>
+              <button
+                type="button"
+                onClick={() => onSelectedFactKeysChange(allFactsSelected ? [] : null)}
+                disabled={!availableFactKeys.length}
+                className="shrink-0 rounded-md border border-border px-2.5 py-1.5 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-50"
+              >
+                {allFactsSelected ? "Uncheck all facts" : "Check all facts"}
+              </button>
+            </div>
+          )}
 
           <textarea
             value={transcript}

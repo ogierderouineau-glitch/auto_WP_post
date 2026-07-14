@@ -403,6 +403,7 @@ Outcome:
 
 - Facts render dynamically from workbook schema plus session data.
 - Required missing, optional missing, and AI-populated sections work.
+- Fact review supports field-level AI include/exclude selection.
 - Corrections save through `/answers`.
 - Recheck runs through `/analyze`.
 - Confirmation state follows backend validation/state.
@@ -426,7 +427,24 @@ Current behavior:
 - Edited corrections save through
   `POST /api/content-sessions/{session_id}/answers`.
 - Recheck saves pending corrections, then calls
-  `POST /api/content-sessions/{session_id}/analyze`.
+  `POST /api/content-sessions/{session_id}/analyze` with the selected
+  `review_fact_keys`.
+- All facts are selected for AI review by default. Each fact row has a checkbox,
+  with `Check all facts` and `Uncheck all facts` controls; review is disabled
+  when the selection is empty.
+- Targeted fact review builds the extraction schema and fact-rule context only
+  for selected keys. Non-selected extracted and confirmed facts remain
+  unchanged.
+- A non-empty AI result may replace a selected confirmed fact. This replacement
+  is limited to explicitly selected keys; initial Media-screen extraction omits
+  `review_fact_keys` and continues to analyze the complete fact schema.
+- The floating Facts agent uses the same selection as the Facts screen, so typed
+  or recorded review instructions cannot bypass the selected scope. It also
+  shows the selected count and synchronized `Check all facts` / `Uncheck all
+  facts` controls.
+- When an agent action returns a newer session version, the Facts screen refreshes
+  its local editable values immediately; a browser reload is not required to see
+  reviewed facts.
 - Confirm facts saves all non-empty visible fact values through `/answers` and
   moves directly to the Content screen once required facts are complete. It
   does not rerun `/analyze`.
@@ -435,6 +453,8 @@ Current behavior:
 Risk:
 
 - Avoid hardcoding V0 example fields.
+- Do not treat these checkboxes as publication inclusion: they only scope the
+  next AI fact review.
 
 ### Phase 7: Content Slice
 

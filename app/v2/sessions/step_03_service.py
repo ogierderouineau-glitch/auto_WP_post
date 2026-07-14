@@ -324,10 +324,31 @@ class ContentSessionService:
             ).transition(updated, "uploading")
         return self.repository.save(updated, expected_version=expected_version)
 
-    def analyze(self, session_id: str, *, expected_version: int) -> ContentSession:
+    def analyze(
+        self,
+        session_id: str,
+        *,
+        expected_version: int,
+        review_fact_keys: list[str] | None = None,
+    ) -> ContentSession:
         session = self.repository.get(session_id)
         self._milestone(session, "analysis started")
         snapshot = self.knowledge.by_hash(session.workbook_hash)
+        if review_fact_keys is not None:
+            available_fact_keys = {
+                row.field_key
+                for row in snapshot.acf_fields
+                if row.enabled
+                and row.post_type_key == session.post_type_key
+                and row.field_role == "input_fact"
+            }
+            if not review_fact_keys:
+                raise InvalidUploadError("Select at least one fact to review.")
+            invalid_fact_keys = set(review_fact_keys) - available_fact_keys
+            if invalid_fact_keys:
+                raise InvalidUploadError(
+                    f"Unknown facts selected for review: {', '.join(sorted(invalid_fact_keys))}."
+                )
         state_machine = SessionStateMachine(snapshot)
         if session.state == "uploading":
             session = state_machine.transition(session, "analyzing")
@@ -362,6 +383,8 @@ class ContentSessionService:
                 and row.post_type_key == session.post_type_key
                 and row.field_role == "input_fact"
             ]
+            if review_fact_keys is not None:
+                input_rows = [row for row in input_rows if row.field_key in review_fact_keys]
             enum_families = {
                 family: tuple(snapshot.validation_family(family))
                 for family in {row.format_or_enum for row in input_rows if row.format_or_enum}
@@ -412,6 +435,8 @@ class ContentSessionService:
                     confirmed=False,
                 )
                 extracted[key] = fact
+                if review_fact_keys is not None:
+                    confirmed.pop(key, None)
             session = session.model_copy(
                 update={"extracted_facts": extracted, "confirmed_facts": confirmed}
             )

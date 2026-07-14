@@ -367,11 +367,16 @@ export async function saveSessionTranscript(
   })
 }
 
-export async function analyzeSessionInputs(auth: ApiClientOptions, session: ContentSession) {
+export async function analyzeSessionInputs(
+  auth: ApiClientOptions,
+  session: ContentSession,
+  reviewFactKeys?: string[],
+) {
   return apiRequest<SessionResponse>(`/api/content-sessions/${session.session_id}/analyze`, auth, {
     method: "POST",
     body: {
       expected_version: session.version,
+      ...(reviewFactKeys ? { review_fact_keys: reviewFactKeys } : {}),
     },
   })
 }
