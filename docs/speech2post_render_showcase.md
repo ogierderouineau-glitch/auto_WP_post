@@ -8,8 +8,8 @@ new Next frontend online without replacing or changing the current FastAPI
 
 - `speech2post-frontend`: Next web service, public phone-facing URL.
 - `speech2post-backend`: existing FastAPI app, including `/app` and V2 routes.
-- Google Cloud Storage: canonical FLAIRLAB workbook, V2 session JSON, images,
-  and audio.
+- Google Cloud Storage: the existing canonical FLAIRLAB workbook bucket plus a
+  separate Render-only bucket for V2 session JSON, images, and audio.
 - Render environment secrets: temporary showcase injection for the import key,
   OpenAI key, and FLAIRLAB WordPress credentials.
 
@@ -20,21 +20,31 @@ Render's private network.
 ## Before Creating The Blueprint
 
 1. Push the intended commit to the Git provider connected to Render.
-2. Create or select a GCS bucket in a European region.
-3. Put the canonical FLAIRLAB workbook at a stable object path, for example:
+2. Confirm the existing canonical workbook is available at:
 
    ```text
-   gs://YOUR_BUCKET/clients/flairlab/knowledge/current.xlsm
+   gs://auto-wordpress-post-499518-knowledge-workbook/knowledge/FLAIRLAB_EventPost_Master_Knowledge.xlsm
    ```
 
-4. Create a narrowly scoped Google service account for the Render backend.
-   It needs permission to read the workbook object and read/write/delete under
-   the selected V2 session prefix. For a short showcase, bucket-level Storage
-   Object Admin is workable; prefix-level IAM Conditions are preferable when
-   setting up the long-lived service.
-5. Download that service account's JSON key once. Treat it as a credential and
-   never commit it.
-6. Generate a new, long random import key. Do not reuse a personal password.
+3. Confirm the separate Frankfurt data bucket exists:
+
+   ```text
+   gs://auto-wordpress-post-499518-speech2post-data
+   ```
+
+4. Confirm the Render identity exists:
+
+   ```text
+   speech2post-render@auto-wordpress-post-499518.iam.gserviceaccount.com
+   ```
+
+   It has `roles/storage.objectViewer` on the workbook bucket and
+   `roles/storage.objectUser` on the data bucket. It cannot write to the
+   canonical workbook bucket.
+5. The JSON key is created outside the repository at
+   `/tmp/speech2post-render-key.json`. Treat it as a credential, upload it to
+   Render as described below, and delete the local copy afterwards.
+6. Generate a new, long import key. Do not reuse a personal password.
 
 ## Create The Services
 
@@ -49,8 +59,8 @@ Render's private network.
    | `FLAIRLAB_WP_BASE_URL` | FLAIRLAB WordPress base URL |
    | `FLAIRLAB_WP_USERNAME` | FLAIRLAB WordPress username |
    | `FLAIRLAB_WP_APP_PASSWORD` | WordPress application password |
-   | `KNOWLEDGE_WORKBOOK_GCS_URI` | `gs://.../clients/flairlab/knowledge/current.xlsm` |
-   | `V2_SESSION_GCS_PREFIX` | `gs://.../clients/flairlab/v2-sessions` |
+   The two GCS locations are committed as non-secret configuration and do not
+   need to be entered in Render.
 
 4. Create the Blueprint, but expect the backend's first deploy to fail until
    its Google credential secret file is added.
@@ -58,7 +68,7 @@ Render's private network.
 
    ```text
    Filename: gcp-service-account.json
-   Contents: the complete Google service-account JSON
+   Contents: the complete contents of `/tmp/speech2post-render-key.json`
    ```
 
    Render exposes it at `/etc/secrets/gcp-service-account.json`, matching the
@@ -107,4 +117,3 @@ production after create/update behavior and returned links have been checked.
   was shared outside the intended team.
 - Never put `IMPORT_API_KEY`, WordPress credentials, OpenAI keys, or the Google
   JSON key in `render.yaml`, Git, frontend environment variables, or chat logs.
-

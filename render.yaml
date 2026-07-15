@@ -25,13 +25,13 @@ services:
       - key: KNOWLEDGE_SOURCE_POLICY
         value: gcs_required
       - key: KNOWLEDGE_WORKBOOK_GCS_URI
-        sync: false
+        value: gs://auto-wordpress-post-499518-knowledge-workbook/knowledge/FLAIRLAB_EventPost_Master_Knowledge.xlsm
       - key: KNOWLEDGE_WORKBOOK_PATH
         value: /tmp/speech2post/knowledge/flairlab.xlsm
       - key: V2_KNOWLEDGE_WORKBOOK_PATH
         value: /tmp/speech2post/knowledge/flairlab.xlsm
       - key: V2_SESSION_GCS_PREFIX
-        sync: false
+        value: gs://auto-wordpress-post-499518-speech2post-data/clients/flairlab/v2-sessions
       - key: GOOGLE_APPLICATION_CREDENTIALS
         value: /etc/secrets/gcp-service-account.json
       - key: V2_MAX_IMAGE_BYTES
