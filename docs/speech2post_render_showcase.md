@@ -17,6 +17,10 @@ Both Render services must stay in the same region. The committed
 `render.yaml` selects Frankfurt and connects the frontend to the backend over
 Render's private network.
 
+The frontend build pins pnpm 10 explicitly. Do not replace its build command
+with an unversioned Corepack invocation, because Corepack can otherwise select
+a newer incompatible pnpm major.
+
 ## Before Creating The Blueprint
 
 1. Push the intended commit to the Git provider connected to Render.

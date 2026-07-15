@@ -45,7 +45,7 @@ services:
     plan: free
     region: frankfurt
     rootDir: speech-2-post-ui
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run typecheck && pnpm run build
+    buildCommand: npm install --global pnpm@10.34.3 && pnpm install --frozen-lockfile && pnpm run typecheck && pnpm run build
     startCommand: pnpm start
     healthCheckPath: /
     envVars:
@@ -53,6 +53,8 @@ services:
         value: 20.19.5
       - key: NODE_ENV
         value: production
+      - key: CI
+        value: "true"
       - key: SPEECH2POST_BACKEND_URL
         fromService:
           type: web
