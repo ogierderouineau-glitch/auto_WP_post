@@ -1,4 +1,4 @@
-import { apiDownload, apiRequest, type ApiClientOptions } from "@/lib/api"
+import { ApiError, apiDownload, apiRequest, type ApiClientOptions } from "@/lib/api"
 
 export type AuthClient = {
   client_id: string
@@ -438,6 +438,53 @@ export async function loadSessionJob(auth: ApiClientOptions, jobId: string, sign
     json: false,
     signal,
   })
+}
+
+function pollingDelay(milliseconds: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Job polling was cancelled.", "AbortError"))
+      return
+    }
+    const onAbort = () => {
+      window.clearTimeout(timeout)
+      reject(new DOMException("Job polling was cancelled.", "AbortError"))
+    }
+    const timeout = window.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }, milliseconds)
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
+export async function waitForSessionJob(
+  auth: ApiClientOptions,
+  jobId: string,
+  options: { signal?: AbortSignal; onConnectionIssue?: () => void; onConnectionRestored?: () => void } = {},
+) {
+  let connectionFailures = 0
+  while (!options.signal?.aborted) {
+    let job: SessionJob
+    try {
+      job = await loadSessionJob(auth, jobId, options.signal)
+      if (connectionFailures) options.onConnectionRestored?.()
+      connectionFailures = 0
+    } catch (error) {
+      if (options.signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) throw error
+      const transient = !(error instanceof ApiError) || error.status >= 500
+      if (!transient) throw error
+      connectionFailures += 1
+      options.onConnectionIssue?.()
+      await pollingDelay(Math.min(1000 * 2 ** Math.min(connectionFailures, 3), 10000), options.signal)
+      continue
+    }
+    if (job.status === "complete" && job.session) return job.session
+    if (job.status === "failed") throw new Error(job.error || "Background job failed.")
+    if (job.status === "not_found") throw new Error(job.error || "Background job was not found.")
+    await pollingDelay(1500, options.signal)
+  }
+  throw new DOMException("Job polling was cancelled.", "AbortError")
 }
 
 export async function saveSessionDraftFields(

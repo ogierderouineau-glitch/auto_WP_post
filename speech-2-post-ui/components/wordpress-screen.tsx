@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
   Check,
@@ -15,8 +15,8 @@ import {
 } from "lucide-react"
 import type { ApiClientOptions } from "@/lib/api"
 import {
-  loadSessionJob,
   startSessionPublish,
+  waitForSessionJob,
   type ContentSession,
 } from "@/lib/content-sessions"
 
@@ -96,17 +96,47 @@ export function WordPressScreen({
   const canPublish = !!auth && !!session && approved && Object.keys(session.wordpress_payload || {}).length > 0
   const noChange = !!postId && changedFields.length === 0
 
-  async function pollPublishJob(jobId: string) {
+  async function pollPublishJob(jobId: string, signal?: AbortSignal) {
     if (!auth) throw new Error("Authentication is required.")
-    for (let attempt = 0; attempt < 120; attempt += 1) {
-      const job = await loadSessionJob(auth, jobId)
-      if (job.status === "complete" && job.session) return job.session
-      if (job.status === "failed") throw new Error(job.error || "WordPress publication failed.")
-      if (job.status === "not_found") throw new Error(job.error || "Publish job was not found.")
-      await new Promise((resolve) => window.setTimeout(resolve, 1000))
-    }
-    throw new Error("WordPress publication is still running. Try refreshing the session in a moment.")
+    return waitForSessionJob(auth, jobId, {
+      signal,
+      onConnectionIssue: () => setMessage("Connection interrupted. Publishing continues; reconnecting..."),
+      onConnectionRestored: () => setMessage("Connection restored. Publishing continues..."),
+    })
   }
+
+  useEffect(() => {
+    if (!auth || !session) return
+    const rawJob = sessionStorage.getItem(ACTIVE_JOB_STORAGE)
+    if (!rawJob) return
+
+    let storedJob: { jobId?: string; operation?: string; sessionId?: string }
+    try {
+      storedJob = JSON.parse(rawJob) as typeof storedJob
+    } catch {
+      sessionStorage.removeItem(ACTIVE_JOB_STORAGE)
+      return
+    }
+    if (storedJob.operation !== "publish" || storedJob.sessionId !== session.session_id || !storedJob.jobId) return
+
+    const controller = new AbortController()
+    setOperation("loading")
+    setMessage("Checking WordPress publication...")
+    void pollPublishJob(storedJob.jobId, controller.signal)
+      .then((nextSession) => {
+        sessionStorage.removeItem(ACTIVE_JOB_STORAGE)
+        onSessionChange(nextSession)
+        setOperation("success")
+        setMessage("WordPress post created.")
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return
+        setOperation("error")
+        setMessage(error instanceof Error ? error.message : "WordPress action failed.")
+      })
+
+    return () => controller.abort()
+  }, [auth, session?.session_id])
 
   async function runPublish(options: { targetPostId?: number | null; forceCreateNew?: boolean; partialUpdate?: boolean }) {
     if (!auth || !session) return

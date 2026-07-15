@@ -17,10 +17,10 @@ import {
 import type { ApiClientOptions } from "@/lib/api"
 import {
   approveSessionContent,
-  loadSessionJob,
   regenerateSessionDraft,
   saveSessionDraftFields,
   startSessionGeneration,
+  waitForSessionJob,
   type ContentSession,
   type WorkbookStatus,
 } from "@/lib/content-sessions"
@@ -225,14 +225,11 @@ export function ContentScreen({
 
   async function pollJob(jobId: string, signal?: AbortSignal) {
     if (!auth) throw new Error("Authentication is required.")
-    while (!signal?.aborted) {
-      const job = await loadSessionJob(auth, jobId, signal)
-      if (job.status === "complete" && job.session) return job.session
-      if (job.status === "failed") throw new Error(job.error || "Generation failed.")
-      if (job.status === "not_found") throw new Error(job.error || "Generation job was not found.")
-      await new Promise((resolve) => window.setTimeout(resolve, 1000))
-    }
-    throw new DOMException("Generation polling was cancelled.", "AbortError")
+    return waitForSessionJob(auth, jobId, {
+      signal,
+      onConnectionIssue: () => setMessage("Connection interrupted. Generation is still running; reconnecting..."),
+      onConnectionRestored: () => setMessage("Connection restored. Generating content..."),
+    })
   }
 
   useEffect(() => {
