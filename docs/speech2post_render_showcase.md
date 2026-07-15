@@ -8,7 +8,7 @@ new Next frontend online without replacing or changing the current FastAPI
 
 - `speech2post-frontend`: Next web service, public phone-facing URL.
 - `speech2post-backend`: existing FastAPI app, including `/app` and V2 routes.
-- Google Cloud Storage: the existing canonical FLAIRLAB workbook bucket plus a
+- Google Cloud Storage: a versioned Render-only FLAIRLAB workbook bucket plus a
   separate Render-only bucket for V2 session JSON, images, and audio.
 - Render environment secrets: temporary showcase injection for the import key,
   OpenAI key, and FLAIRLAB WordPress credentials.
@@ -20,10 +20,10 @@ Render's private network.
 ## Before Creating The Blueprint
 
 1. Push the intended commit to the Git provider connected to Render.
-2. Confirm the existing canonical workbook is available at:
+2. Confirm the versioned showcase workbook is available at:
 
    ```text
-   gs://auto-wordpress-post-499518-knowledge-workbook/knowledge/FLAIRLAB_EventPost_Master_Knowledge.xlsm
+   gs://auto-wordpress-post-499518-speech2post-knowledge/clients/flairlab/knowledge/current.xlsm
    ```
 
 3. Confirm the separate Frankfurt data bucket exists:
@@ -38,9 +38,11 @@ Render's private network.
    speech2post-render@auto-wordpress-post-499518.iam.gserviceaccount.com
    ```
 
-   It has `roles/storage.objectViewer` on the workbook bucket and
-   `roles/storage.objectUser` on the data bucket. It cannot write to the
-   canonical workbook bucket.
+   It has `roles/storage.objectUser` on both dedicated showcase buckets and no
+   access to the previous mixed workbook/session bucket. Workbook writes are
+   required because the interface can validate and replace the active workbook.
+   Object versioning protects the previous workbook generation when it is
+   replaced.
 5. The JSON key is created outside the repository at
    `/tmp/speech2post-render-key.json`. Treat it as a credential, upload it to
    Render as described below, and delete the local copy afterwards.
@@ -108,8 +110,9 @@ production after create/update behavior and returned links have been checked.
 
 ## Operational Safety
 
-- Keep both services on paid Starter instances during the showcase so they do
-  not sleep.
+- Keep the backend on a paid Starter instance during the showcase so AI jobs do
+  not depend on a sleeping service. The frontend uses Render's Free instance;
+  after 15 idle minutes its next visit can take about a minute to wake.
 - Set a small Render workspace spending limit/notification if available.
 - Set a Google Cloud billing budget and GCS lifecycle rule only after deciding
   how long source media must be retained.

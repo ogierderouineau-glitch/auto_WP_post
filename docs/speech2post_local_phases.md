@@ -683,8 +683,9 @@ Implemented deployment files:
 Showcase boundary:
 
 - Only the `flairlab` client is supported.
-- Keep both Render services on paid Starter instances to avoid free-service
-  sleep during a demonstration.
+- Keep the backend on a paid Starter instance so AI jobs do not depend on a
+  sleeping service. The frontend can use a Free web-service instance; accept a
+  possible cold start after 15 idle minutes.
 - In-memory generate/publish jobs can still be lost by a backend restart or
   deploy. Do not redeploy while a job is active.
 - The shared key in `sessionStorage` is temporary showcase authentication, not
