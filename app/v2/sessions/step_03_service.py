@@ -790,6 +790,43 @@ class ContentSessionService:
         if self.image_editor is None or self.object_storage is None:
             raise ImageProcessingError("Image editing is not configured.")
         session = self.repository.get(session_id)
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        edit_instructions = sorted(
+            (
+                row for row in getattr(snapshot, "agent_instructions", ())
+                if row.enabled
+                and row.owner == "language_model"
+                and row.post_type_key in {"*", session.post_type_key}
+                and row.workflow_stage == "ai_image_edit"
+                and row.condition in {"always", "ai_edit_requested"}
+            ),
+            key=lambda row: ({"high": 0, "medium": 1, "low": 2}.get(row.priority, 9), row.instruction_id),
+        )
+        effective_prompt = prompt
+        if edit_instructions:
+            rules = "\n".join(
+                "\n".join(
+                    part
+                    for part in (
+                        f"{index}. Regel: {row.instruction_de.strip()}",
+                        f"   Erwartetes Verhalten: {row.expected_behavior.strip()}"
+                        if row.expected_behavior.strip() else "",
+                    )
+                    if part
+                )
+                for index, row in enumerate(edit_instructions, 1)
+                if row.instruction_de.strip()
+            )
+            effective_prompt = (
+                "Bearbeite das bereitgestellte Originalbild. Die folgenden Regeln sind verbindliche "
+                "Erhaltungsbedingungen:\n"
+                f"{rules}\n\n"
+                "Führe ausschließlich die folgende ausdrücklich gewünschte Änderung aus:\n"
+                f"{prompt}\n\n"
+                "Alle nicht ausdrücklich genannten Bildbereiche, Personen, Gesichter, Identitätsmerkmale, "
+                "Körpermerkmale und Umgebungsdetails müssen möglichst unverändert bleiben. Erfinde, entferne "
+                "oder ersetze keine weiteren Elemente."
+            )
         reference, processed = self._find_image_reference_and_processed(session, filename)
         if processed is None:
             raise ValueError(f"Processed image not found in this session: {filename}")
@@ -799,11 +836,30 @@ class ContentSessionService:
                 reference.storage_uri,
                 root / reference.filename,
             )
-            edited = root / str(processed.get("filename") or f"{Path(reference.filename).stem}.png")
+            output_name = str(processed.get("filename") or f"{Path(reference.filename).stem}.png")
+            edited = (
+                root / f"ai-edit-{Path(output_name).stem}.png"
+                if self.image_processor is not None
+                else root / output_name
+            )
             try:
-                edited = self.image_editor.edit(source, edited, {"prompt": prompt})
+                edited = self.image_editor.edit(source, edited, {"prompt": effective_prompt})
             except Exception as exc:
                 raise ImageProcessingError(f"Image edit failed: {exc}") from exc
+            normalization: dict[str, Any] = {}
+            if self.image_processor is not None:
+                normalized = root / output_name
+                try:
+                    normalization = self.image_processor.process(
+                        snapshot,
+                        source=edited,
+                        destination=normalized,
+                        analysis=session.image_analysis.get(reference.media_id, {}),
+                        stages={"prepare", "crop", "resize", "export"},
+                    )
+                except Exception as exc:
+                    raise ImageProcessingError(f"Edited image normalization failed: {exc}") from exc
+                edited = normalized
             storage_uri = self.object_storage.put(
                 edited,
                 f"{session.session_id}/processed/{edited.name}",
@@ -821,15 +877,35 @@ class ContentSessionService:
                 if str(operation).strip()
             ]
             operations.append("openai_image_optimization")
+            operations.extend(str(value) for value in normalization.get("operations", []))
             processed_images.append(
                 {
                     **item,
+                    **{
+                        key: normalization[key]
+                        for key in (
+                            "size_bytes", "width", "height", "format", "quality",
+                            "target_bytes", "target_reached", "warnings",
+                        )
+                        if key in normalization
+                    },
                     "path": storage_uri,
                     "output": storage_uri,
                     "size_bytes": edited_size,
                     "operations": operations[-20:],
                     "image_optimization": {
                         "prompt": prompt,
+                        "applied_instruction_ids": [row.instruction_id for row in edit_instructions],
+                        "applied_instructions": [
+                            {
+                                "instruction_id": row.instruction_id,
+                                "instruction": row.instruction_de,
+                                "expected_behavior": row.expected_behavior,
+                            }
+                            for row in edit_instructions
+                        ],
+                        "effective_prompt": effective_prompt,
+                        "pillow_normalized": bool(normalization),
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     },
                 }
@@ -1252,6 +1328,7 @@ class ContentSessionService:
                 overwrite_existing=True,
                 metadata_vision_media_ids=metadata_vision_media_ids,
             )
+            generation_trace = dict(session.generation_trace)
             self._milestone(session, "image metadata generation finished")
             payload = self.payload_builder.build(
                 snapshot,
@@ -1573,6 +1650,8 @@ class ContentSessionService:
             if item.get("media_id")
         }
         image_metadata = [] if overwrite_existing else list(session.image_metadata)
+        generation_trace = dict(session.generation_trace)
+        image_metadata_trace = dict(generation_trace.get("image_metadata") or {})
         metadata_media_ids = {
             str(item.get("media_id"))
             for item in image_metadata
@@ -1636,16 +1715,17 @@ class ContentSessionService:
                 for row in image_metadata
                 if row.get("media_id") != reference.media_id
             ]
+            metadata_context = self._image_metadata_context(
+                snapshot,
+                session,
+                reference.media_id,
+                metadata_rows,
+                use_vision=reference.media_id in metadata_vision_media_ids,
+            )
             messages = structured_task_input(
                 task="image_metadata",
                 instructions=image_instructions,
-                context=self._image_metadata_context(
-                    snapshot,
-                    session,
-                    reference.media_id,
-                    metadata_rows,
-                    use_vision=reference.media_id in metadata_vision_media_ids,
-                ),
+                context=metadata_context,
             )
             generated = self._structured(
                 task="image_metadata",
@@ -1668,7 +1748,13 @@ class ContentSessionService:
                     **generated,
                 }
             )
+            image_metadata_trace[reference.media_id] = {
+                "fields": metadata_context["fields"],
+                "instructions": image_instructions,
+                "vision_used": reference.media_id in metadata_vision_media_ids,
+            }
             metadata_media_ids.add(reference.media_id)
+        generation_trace["image_metadata"] = image_metadata_trace
         return session.model_copy(
             update={
                 "image_metadata": sorted(
@@ -1677,7 +1763,8 @@ class ContentSessionService:
                         0 if row.get("image_usage") == "featured" else 1,
                         int(row.get("image_priority") or 999),
                     ),
-                )
+                ),
+                "generation_trace": generation_trace,
             }
         )
 

@@ -3,6 +3,7 @@
 import { FormEvent, useMemo, useState } from "react"
 import { FilePlus2, FolderOpen, Loader2, RefreshCw, X } from "lucide-react"
 import type { PostTypeOption, RecentSession } from "@/lib/content-sessions"
+import { formatTimestamp } from "@/lib/utils"
 
 export function SessionModal({
   postTypes,
@@ -117,7 +118,7 @@ export function SessionModal({
                   >
                     <span className="block text-sm font-medium text-foreground">{session.session_id}</span>
                     <span className="mt-0.5 block text-xs text-muted-foreground">
-                      {session.post_type_key || session.post_type || "-"} · {session.state || session.status || "-"}
+                      {formatTimestamp(session.created_at)} - {session.post_type_key || session.post_type || "-"} - {session.state || session.status || "-"}
                     </span>
                   </button>
                 ))

@@ -706,6 +706,9 @@ class StructuredPipelineTests(unittest.TestCase):
                 if item["task"] == "image_metadata"
             )
             self.assertEqual(image_context["image_analysis"], {})
+            metadata_trace = session.generation_trace["image_metadata"][session.image_refs[0].media_id]
+            self.assertEqual(metadata_trace["fields"], image_context["fields"])
+            self.assertFalse(metadata_trace["vision_used"])
             self.assertFalse(session.image_metadata_vision)
 
     def test_image_upload_can_skip_immediate_vision(self) -> None:

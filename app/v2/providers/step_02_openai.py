@@ -3,13 +3,14 @@ from __future__ import annotations
 import base64
 import mimetypes
 import json
+import os
 import tempfile
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
-from openai import OpenAI
+from openai import APIStatusError, OpenAI
 
 try:
     from PIL import Image
@@ -111,8 +112,12 @@ class OpenAIVisionProvider(VisionProvider):
 
 
 class OpenAIImageEditingProvider(ImageEditingProvider):
-    def __init__(self, *, api_key: str, model: str = "gpt-image-1") -> None:
-        self.client = OpenAI(api_key=api_key)
+    def __init__(self, *, api_key: str, model: str = "gpt-image-2") -> None:
+        self.client = OpenAI(
+            api_key=api_key,
+            timeout=float(os.getenv("V2_IMAGE_EDIT_TIMEOUT_SECONDS", "150")),
+            max_retries=int(os.getenv("V2_IMAGE_EDIT_MAX_RETRIES", "1")),
+        )
         self.model = model
         self.last_usage: dict[str, Any] | None = None
 
@@ -135,11 +140,21 @@ class OpenAIImageEditingProvider(ImageEditingProvider):
                 edit_input = source
         try:
             with edit_input.open("rb") as image_file:
-                response = self.client.images.edit(
-                    model=self.model,
-                    image=image_file,
-                    prompt=prompt,
-                )
+                try:
+                    response = self.client.images.edit(
+                        model=self.model,
+                        image=image_file,
+                        prompt=prompt,
+                    )
+                except APIStatusError as exc:
+                    if exc.status_code >= 500:
+                        request_id = getattr(exc, "request_id", None)
+                        request_hint = f" Request ID: {request_id}." if request_id else ""
+                        raise RuntimeError(
+                            "OpenAI's image service is temporarily unavailable after automatic retries "
+                            f"(HTTP {exc.status_code}).{request_hint} Wait a minute, then try again."
+                        ) from exc
+                    raise
         finally:
             if temporary_input and temporary_input.exists():
                 try:

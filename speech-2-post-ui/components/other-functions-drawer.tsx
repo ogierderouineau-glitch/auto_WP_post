@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import type { AuthResult } from "@/components/auth-modal"
 import { loadSessionJob, type ContentSession, type RecentSession, type WorkbookStatus } from "@/lib/content-sessions"
+import { formatTimestamp } from "@/lib/utils"
 
 export type OperationLogEntry = {
   id: string
@@ -386,7 +387,7 @@ export function OtherFunctionsDrawer({
                   >
                     <span className="block truncate font-mono text-xs text-foreground">{item.session_id}</span>
                     <span className="mt-0.5 block text-xs text-muted-foreground">
-                      {item.post_type_key || item.post_type || "-"} · {item.state || item.status || "-"}
+                      {formatTimestamp(item.created_at)} - {item.post_type_key || item.post_type || "-"} - {item.state || item.status || "-"}
                     </span>
                   </button>
                 ))

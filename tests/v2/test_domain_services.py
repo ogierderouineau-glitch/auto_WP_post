@@ -87,7 +87,11 @@ class FakeImageEditor:
         "estimated_cost_usd": None,
     }
 
+    def __init__(self) -> None:
+        self.instructions: list[dict[str, Any]] = []
+
     def edit(self, source: Path, destination: Path, instructions: dict[str, Any]) -> Path:
+        self.instructions.append(instructions)
         destination.write_bytes(source.read_bytes() + b"-edited")
         return destination
 
@@ -500,6 +504,18 @@ class FeaturedImageMetadataRegressionTests(unittest.TestCase):
 
     def test_optimize_image_uses_edited_file_size_before_remote_put(self) -> None:
         storage = FakeObjectStorage()
+        editor = FakeImageEditor()
+        instruction = SimpleNamespace(
+            instruction_id="analysis_005",
+            enabled=True,
+            owner="language_model",
+            post_type_key="*",
+            workflow_stage="ai_image_edit",
+            condition="ai_edit_requested",
+            priority="high",
+            instruction_de="Gesichter beibehalten.",
+            expected_behavior="Nur die gewünschte Änderung ausführen.",
+        )
         session = ContentSession(
             session_id="session-1",
             user_id="user-1",
@@ -529,10 +545,10 @@ class FeaturedImageMetadataRegressionTests(unittest.TestCase):
             repository = FileSessionRepository(temporary)
             repository.create(session)
             service = ContentSessionService(
-                knowledge=StaticKnowledge(SimpleNamespace()),
+                knowledge=StaticKnowledge(SimpleNamespace(agent_instructions=(instruction,))),
                 repository=repository,
                 object_storage=storage,
-                image_editor=FakeImageEditor(),
+                image_editor=editor,
             )
 
             updated = service.optimize_image(
@@ -545,6 +561,17 @@ class FeaturedImageMetadataRegressionTests(unittest.TestCase):
         self.assertEqual(updated.processed_images[0]["size_bytes"], len(b"image-edited"))
         self.assertEqual(updated.processed_images[0]["path"], "gs://bucket/session-1/processed/first.webp")
         self.assertIn("openai_image_optimization", updated.processed_images[0]["operations"])
+        self.assertIn("Gesichter beibehalten.", editor.instructions[0]["prompt"])
+        self.assertIn("Nur die gewünschte Änderung ausführen.", editor.instructions[0]["prompt"])
+        self.assertIn("Make it brighter.", editor.instructions[0]["prompt"])
+        self.assertEqual(
+            updated.processed_images[0]["image_optimization"]["applied_instruction_ids"],
+            ["analysis_005"],
+        )
+        self.assertEqual(
+            updated.processed_images[0]["image_optimization"]["effective_prompt"],
+            editor.instructions[0]["prompt"],
+        )
 
 
 @unittest.skipUnless(WORKBOOK.is_file(), f"V2 test workbook not found: {WORKBOOK}")

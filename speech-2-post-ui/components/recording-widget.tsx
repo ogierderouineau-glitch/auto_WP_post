@@ -31,7 +31,7 @@ const SCREEN_COPY: Record<ActiveScreen, { title: string; instruction: string; ac
   },
   facts: {
     title: "Facts agent",
-    instruction: "Select the facts to review using the checkboxes on the Facts screen, then explain what should be corrected or completed.",
+    instruction: "Empty facts are selected automatically. Adjust the checkboxes on the Facts screen if needed, then explain what should be corrected or completed.",
     action: "Update facts",
     placeholder: "Only checked facts will be reviewed. For example: Correct the venue, add the event date, or explain a missing fact.",
   },

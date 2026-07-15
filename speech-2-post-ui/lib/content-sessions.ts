@@ -290,7 +290,9 @@ export async function optimizeSessionImage(
   filename: string,
   prompt: string,
 ) {
-  return apiRequest<SessionResponse>(`/api/content-sessions/${session.session_id}/images/optimize`, auth, {
+  const timeoutMs = 330_000
+  const deadline = Date.now() + timeoutMs
+  const job = await apiRequest<SessionJob>(`/api/content-sessions/${session.session_id}/images/optimize-job`, auth, {
     method: "POST",
     body: {
       expected_version: session.version,
@@ -298,6 +300,16 @@ export async function optimizeSessionImage(
       prompt,
     },
   })
+  while (true) {
+    if (Date.now() >= deadline) {
+      throw new Error("Image optimization timed out after 5½ minutes. The server job may still finish in the background; reload the session before retrying.")
+    }
+    const current = await loadSessionJob(auth, job.job_id)
+    if (current.status === "complete" && current.session) return { session: current.session }
+    if (current.status === "failed") throw new Error(current.error || "Image optimization failed.")
+    if (current.status === "not_found") throw new Error(current.error || "Image optimization job was not found.")
+    await new Promise((resolve) => setTimeout(resolve, 3000))
+  }
 }
 
 export async function restoreSessionImageOriginal(

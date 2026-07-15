@@ -72,6 +72,13 @@ function MetaChip({ label, value }: { label: string; value: string }) {
   )
 }
 
+function factHasValue(value: unknown) {
+  if (value == null) return false
+  if (typeof value === "string") return value.trim() !== ""
+  if (Array.isArray(value)) return value.length > 0
+  return true
+}
+
 export default function Page() {
   const [screen, setScreen] = useState<Screen>("media")
   const [screenReady, setScreenReady] = useState(false)
@@ -108,7 +115,11 @@ export default function Page() {
     selectedPostType ||
     "-"
   const availableFactKeys = (workbook?.fact_schema || []).map((field) => field.field_key)
-  const factsSelectedForReview = selectedFactKeys ?? availableFactKeys
+  const emptyFactKeys = availableFactKeys.filter((key) => {
+    const fact = session?.confirmed_facts?.[key] || session?.extracted_facts?.[key]
+    return !factHasValue(fact?.value)
+  })
+  const factsSelectedForReview = selectedFactKeys ?? emptyFactKeys
 
   useEffect(() => {
     setSelectedFactKeys(null)

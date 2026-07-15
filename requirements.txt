@@ -3,6 +3,6 @@ uvicorn[standard]
 python-multipart
 requests
 Pillow
-openai
+openai==2.45.0
 openpyxl
 google-cloud-storage

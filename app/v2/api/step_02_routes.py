@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable
 from datetime import datetime, timezone
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -38,6 +39,7 @@ from app.v2.storage.step_02_uploads import safe_upload_name, validate_upload
 
 
 _SESSION_JOBS: dict[str, dict[str, Any]] = {}
+_LOGGER = logging.getLogger("flairlab.v2")
 _SESSION_JOB_EXECUTOR = ThreadPoolExecutor(
     max_workers=int(os.getenv("V2_SESSION_JOB_WORKERS", "2"))
 )
@@ -509,6 +511,24 @@ def create_router(
             session=service_provider().optimize_image(session_id, **payload.model_dump())
         )
 
+    @router.post("/{session_id}/images/optimize-job")
+    async def start_optimize_image_job(
+        session_id: str,
+        payload: ImageOptimizationRequest,
+        x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    ) -> dict[str, Any]:
+        service_provider().require_owner(session_id, x_user_id)
+        job = _create_session_job(session_id, "optimize_image")
+        _SESSION_JOB_EXECUTOR.submit(
+            _run_session_job,
+            job["job_id"],
+            service_provider,
+            session_id,
+            "optimize_image",
+            payload.model_dump(),
+        )
+        return job
+
     @router.post("/{session_id}/images/restore-original", response_model=SessionResponse)
     async def restore_image_original(
         session_id: str,
@@ -637,12 +657,20 @@ def _run_session_job(
             session = service.generate(session_id, **payload)
         elif operation == "publish":
             session = service.publish(session_id, **payload)
+        elif operation == "optimize_image":
+            session = service.optimize_image(session_id, **payload)
         else:
             raise ValueError(f"Unsupported session job operation: {operation}")
         job["status"] = "complete"
         job["session"] = session.model_dump(mode="json")
         job["updated_at"] = datetime.now(timezone.utc).isoformat()
     except Exception as exc:
+        _LOGGER.exception(
+            "Session job failed: job_id=%s session_id=%s operation=%s",
+            job_id,
+            session_id,
+            operation,
+        )
         job["status"] = "failed"
         job["error"] = str(exc)
         job["traceback"] = traceback.format_exc(limit=5)

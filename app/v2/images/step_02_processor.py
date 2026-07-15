@@ -25,6 +25,7 @@ class PillowProcessor:
         source: Path,
         destination: Path,
         analysis: dict[str, Any] | None = None,
+        stages: set[str] | None = None,
     ) -> dict[str, Any]:
         rules = sorted(
             (row for row in snapshot.pillow_rules if row.enabled),
@@ -47,6 +48,8 @@ class PillowProcessor:
                 analysis=analysis or {},
             )
             for rule in rules:
+                if stages is not None and rule.stage not in stages:
+                    continue
                 if image_condition_matches(rule.condition, context, rule.value):
                     values.pop("_crop_skip_reason", None)
                     before = image

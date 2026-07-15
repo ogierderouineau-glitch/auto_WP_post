@@ -73,6 +73,34 @@ function metadataFromImage(image: SessionImage | null): MetadataForm {
   }
 }
 
+function metadataFieldTrace(
+  session: ContentSession | null,
+  mediaId: string | undefined,
+  ...fieldKeys: string[]
+) {
+  if (!session || !mediaId) return null
+  const metadataTrace = session.generation_trace?.image_metadata as
+    | Record<string, {
+        fields?: Record<string, unknown>
+        instructions?: Record<string, unknown>[]
+        vision_used?: boolean
+      }>
+    | undefined
+  const imageTrace = metadataTrace?.[mediaId]
+  const fields = imageTrace?.fields
+  for (const key of fieldKeys) {
+    const trace = fields?.[key]
+    if (trace && typeof trace === "object" && !Array.isArray(trace)) {
+      return {
+        ...(trace as Record<string, unknown>),
+        instructions: imageTrace?.instructions || [],
+        vision_used: imageTrace?.vision_used === true,
+      }
+    }
+  }
+  return null
+}
+
 function ImagePreview({
   auth,
   session,
@@ -206,16 +234,30 @@ function MetadataInput({
   label,
   value,
   rows,
+  trace,
   onChange,
 }: {
   label: string
   value: string
   rows?: number
+  trace?: Record<string, unknown> | null
   onChange: (value: string) => void
 }) {
+  const [traceOpen, setTraceOpen] = useState(false)
   return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-medium text-muted-foreground">{label}</span>
+    <div className="block">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+        <button
+          type="button"
+          onClick={() => setTraceOpen((open) => !open)}
+          disabled={!trace}
+          aria-expanded={traceOpen}
+          className="rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Rules trace
+        </button>
+      </div>
       {rows ? (
         <textarea
           value={value}
@@ -230,7 +272,12 @@ function MetadataInput({
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-gold/40"
         />
       )}
-    </label>
+      {traceOpen && trace && (
+        <pre className="mt-2 max-h-64 overflow-auto rounded-lg border border-border bg-background p-3 text-xs leading-relaxed text-muted-foreground">
+          {JSON.stringify(trace, null, 2)}
+        </pre>
+      )}
+    </div>
   )
 }
 
@@ -524,9 +571,10 @@ export function MediaScreen({
     const prompt = editPrompt.trim()
     setEditPromptOpen(false)
     void runAction(async (currentSession) => {
+      setMessage("Optimizing image with OpenAI...")
       const data = await optimizeSessionImage(auth, currentSession, selectedOriginalFilename, prompt)
       return data.session
-    }, "Image edit requested.")
+    }, "Image optimized.")
   }
 
   function restoreOriginal() {
@@ -963,23 +1011,27 @@ export function MediaScreen({
                 <MetadataInput
                   label="Alt text"
                   value={metadata.image_alt}
+                  trace={metadataFieldTrace(session, selectedImage.media_id, "image_alt")}
                   onChange={(value) => setMetadata((current) => ({ ...current, image_alt: value }))}
                 />
                 <MetadataInput
                   label="Title"
                   value={metadata.image_title}
+                  trace={metadataFieldTrace(session, selectedImage.media_id, "image_title")}
                   onChange={(value) => setMetadata((current) => ({ ...current, image_title: value }))}
                 />
                 <MetadataInput
                   label="Caption"
                   value={metadata.image_caption}
                   rows={2}
+                  trace={metadataFieldTrace(session, selectedImage.media_id, "image_caption")}
                   onChange={(value) => setMetadata((current) => ({ ...current, image_caption: value }))}
                 />
                 <MetadataInput
                   label="Description"
                   value={metadata.image_description}
                   rows={2}
+                  trace={metadataFieldTrace(session, selectedImage.media_id, "image_description", "image_description_wp")}
                   onChange={(value) => setMetadata((current) => ({ ...current, image_description: value }))}
                 />
                 <button

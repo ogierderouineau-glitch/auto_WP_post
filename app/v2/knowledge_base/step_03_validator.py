@@ -25,6 +25,7 @@ class WorkbookValidator:
         self._unique(errors, "post_examples", snapshot.post_examples, "example_id")
         self._unique(errors, "image_rules_pillow", snapshot.pillow_rules, "rule_key")
         self._unique(errors, "image_metadata_rules", snapshot.image_metadata_rules, "rule_id")
+        self._unique(errors, "agent_instructions", snapshot.agent_instructions, "instruction_id")
         self._unique(errors, "agent_workflow", snapshot.workflow_steps, "step_key")
         self._unique_validation_values(errors, snapshot)
 
@@ -228,6 +229,7 @@ class WorkbookValidator:
             input_facts,
         )
         self._validate_image_metadata_rules(errors, snapshot, post_types, input_facts, image_metadata_keys, families)
+        self._validate_agent_instructions(errors, snapshot, post_types)
         self._validate_internal_links(errors, snapshot)
         self._validate_state_machine(errors, snapshot)
         self._validate_output_specification(errors, snapshot)
@@ -238,6 +240,32 @@ class WorkbookValidator:
                 details=errors,
             )
         return snapshot
+
+    @staticmethod
+    def _validate_agent_instructions(
+        errors: list[ErrorDetail],
+        snapshot: WorkbookSnapshot,
+        post_types: dict[str, Any],
+    ) -> None:
+        for row in snapshot.agent_instructions:
+            if not row.enabled:
+                continue
+            if row.post_type_key != "*" and row.post_type_key not in post_types:
+                errors.append(WorkbookValidator._error(
+                    "agent_instructions", row.sheet_row, "post_type_key", "unknown_post_type",
+                    "Agent-instruction post type does not resolve.",
+                ))
+            if row.workflow_stage == "ai_image_edit":
+                if row.condition not in {"always", "ai_edit_requested"}:
+                    errors.append(WorkbookValidator._error(
+                        "agent_instructions", row.sheet_row, "condition", "unknown_ai_image_edit_condition",
+                        "AI image-edit instructions support only always or ai_edit_requested.",
+                    ))
+                if row.owner != "language_model":
+                    errors.append(WorkbookValidator._error(
+                        "agent_instructions", row.sheet_row, "owner", "invalid_ai_image_edit_owner",
+                        "AI image-edit instructions must be owned by language_model.",
+                    ))
 
     @staticmethod
     def _unique(

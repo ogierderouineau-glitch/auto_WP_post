@@ -396,6 +396,38 @@ Risk:
     Only opted-in pictures may expose their stored Vision analysis to metadata
     generation. The choice is persisted in `image_metadata_vision` by
     `media_id`.
+- Generated picture metadata stores a field-addressable rules trace in
+  `generation_trace.image_metadata`, keyed by media ID. Alt text, title,
+  caption, and description expose this context through `Rules trace` controls
+  on the Media screen.
+- OpenAI image optimization runs through `/images/optimize-job` and polls the
+  existing session-job endpoint. The synchronous `/images/optimize` route
+  remains available for compatibility, but the Next frontend does not hold a
+  multi-minute proxy request open.
+- Image edits have bounded waits: the OpenAI request defaults to 300 seconds
+  with two retries for transient provider failures (`V2_IMAGE_EDIT_TIMEOUT_SECONDS` and
+  `V2_IMAGE_EDIT_MAX_RETRIES`), while the UI stops polling after 330 seconds
+  and explains that a server job may still complete in the background. The UI
+  polls every three seconds; these GET requests only read job status and do not
+  submit additional image edits.
+- AI edits default to `gpt-image-2` (`V2_IMAGE_EDIT_MODEL`) so edit inputs use
+  the current model's high-fidelity image handling. Persistent provider 5xx
+  failures include the OpenAI request ID when available for support diagnosis.
+- AI picture edits prepend enabled `agent_instructions` for the explicit
+  `ai_image_edit` workflow stage to the user's requested change. Matching uses
+  the current post type (or `*`), `owner=language_model`, and the `always` or
+  `ai_edit_requested` condition. Both `instruction_de` and `expected_behavior`
+  are included as preservation constraints. Applied rules and the exact prompt
+  sent to the image provider are saved in the processed picture's
+  `image_optimization` trace. Keeping this stage explicit
+  prevents unrelated content-writing instructions from entering image prompts.
+- Image-edit results are normalized again with the workbook Pillow `prepare`,
+  `crop`, `resize`, and `export` stages. This deterministically reapplies the
+  required aspect ratio, output format, dimensions, and compression target
+  without applying enhancement/filter rules a second time.
+- Workbook rows for this stage are validated. They must use
+  `owner=language_model`; supported conditions are `always` and
+  `ai_edit_requested`.
 
 ### Phase 6: Facts Slice
 
@@ -429,9 +461,9 @@ Current behavior:
 - Recheck saves pending corrections, then calls
   `POST /api/content-sessions/{session_id}/analyze` with the selected
   `review_fact_keys`.
-- All facts are selected for AI review by default. Each fact row has a checkbox,
-  with `Check all facts` and `Uncheck all facts` controls; review is disabled
-  when the selection is empty.
+- Empty facts are selected for AI review by default; populated facts remain
+  unchecked. Each fact row has a checkbox, with `Check all facts` and `Uncheck
+  all facts` controls; review is disabled when the selection is empty.
 - Targeted fact review builds the extraction schema and fact-rule context only
   for selected keys. Non-selected extracted and confirmed facts remain
   unchanged.
@@ -579,6 +611,8 @@ Outcome:
   logs, current session info, and usage.
 - The top bar uses a labeled New session button to open the Sessions menu; the
   menu can be closed without selecting or creating a session.
+- Session archive entries show the session ID first, followed by creation
+  timestamp, post type, and status.
 - Workbook config can upload a replacement `.xlsm`/`.xlsx` file and download
   the active Database Datei through the existing legacy workbook endpoints.
 - Upload reloads the knowledge snapshot when the V2 service is already active;
