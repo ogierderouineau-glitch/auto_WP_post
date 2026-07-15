@@ -214,6 +214,14 @@ export async function loadRecentContentSessions(auth: ApiClientOptions, limit = 
   })
 }
 
+export async function deleteContentSession(auth: ApiClientOptions, sessionId: string) {
+  return apiRequest<{ deleted: number; deleted_ids: string[]; errors: Record<string, string> }>(
+    "/api/content-sessions/delete",
+    auth,
+    { method: "POST", body: { session_ids: [sessionId] } },
+  )
+}
+
 export async function uploadSessionImage(
   auth: ApiClientOptions,
   session: ContentSession,

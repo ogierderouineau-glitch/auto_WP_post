@@ -13,6 +13,7 @@ import {
   Upload,
   RefreshCw,
   Server,
+  Trash2,
   X,
 } from "lucide-react"
 import type { AuthResult } from "@/components/auth-modal"
@@ -169,6 +170,7 @@ export function OtherFunctionsDrawer({
   onReloadSession,
   onOpenSessionMenu,
   onLoadSession,
+  onDeleteSession,
   onSessionChange,
   onUploadWorkbook,
   onDownloadWorkbook,
@@ -187,6 +189,7 @@ export function OtherFunctionsDrawer({
   onReloadSession: () => void
   onOpenSessionMenu: () => void
   onLoadSession: (sessionId: string) => void
+  onDeleteSession: (sessionId: string) => void
   onSessionChange: (session: ContentSession) => void
   onUploadWorkbook: (file: File) => Promise<void>
   onDownloadWorkbook: () => Promise<void>
@@ -379,17 +382,33 @@ export function OtherFunctionsDrawer({
             <div className="max-h-64 overflow-y-auto rounded-md border border-border bg-panel">
               {recentSessions.length ? (
                 recentSessions.map((item) => (
-                  <button
-                    type="button"
-                    key={item.session_id}
-                    onClick={() => onLoadSession(item.session_id)}
-                    className="block w-full border-b border-border px-3 py-2 text-left last:border-b-0 hover:bg-muted"
-                  >
-                    <span className="block truncate font-mono text-xs text-foreground">{item.session_id}</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">
-                      {formatTimestamp(item.created_at)} - {item.post_type_key || item.post_type || "-"} - {item.state || item.status || "-"}
-                    </span>
-                  </button>
+                  <div key={item.session_id} className="flex border-b border-border last:border-b-0 hover:bg-muted">
+                    <button
+                      type="button"
+                      onClick={() => onLoadSession(item.session_id)}
+                      disabled={loading}
+                      className="min-w-0 flex-1 px-3 py-2 text-left disabled:opacity-60"
+                    >
+                      <span className="block truncate font-mono text-xs text-foreground">{item.session_id}</span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {formatTimestamp(item.created_at)} - {item.post_type_key || item.post_type || "-"} - {item.state || item.status || "-"}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm(`Permanently delete session ${item.session_id} and its files from GCS?`)) {
+                          onDeleteSession(item.session_id)
+                        }
+                      }}
+                      disabled={loading}
+                      className="m-2 flex size-8 shrink-0 items-center justify-center rounded-md text-destructive hover:bg-destructive/10 disabled:opacity-60"
+                      aria-label={`Delete session ${item.session_id}`}
+                      title="Delete session from GCS"
+                    >
+                      <Trash2 className="size-4" aria-hidden="true" />
+                    </button>
+                  </div>
                 ))
               ) : (
                 <p className="px-3 py-6 text-center text-sm text-muted-foreground">No recent V2 sessions found.</p>

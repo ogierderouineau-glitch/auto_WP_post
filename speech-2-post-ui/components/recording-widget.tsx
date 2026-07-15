@@ -143,12 +143,13 @@ export function RecordingWidget({
       )
       if (activeScreen === "media" && selectedPictureId) {
         try {
-          setStatus("Saving transcript to the active picture...")
+          const pictureIsUploading = selectedPictureId.startsWith("pending-")
+          setStatus(pictureIsUploading ? "Adding transcript to the uploading picture..." : "Saving transcript to the active picture...")
           await onPictureTranscriptAppend(text)
           if (epoch !== recordingEpoch.current) return
           setItems((current) => current.filter((item) => item.id !== id))
           setSyncedTranscript("")
-          setStatus("Transcript saved to the active picture.")
+          setStatus(pictureIsUploading ? "Transcript queued for the uploading picture." : "Transcript saved to the active picture.")
         } catch (error) {
           setStatus(error instanceof Error ? error.message : "Picture transcript could not be saved.")
         }

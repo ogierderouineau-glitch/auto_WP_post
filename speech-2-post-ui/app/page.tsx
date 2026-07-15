@@ -22,6 +22,7 @@ import { RecordingWidget } from "@/components/recording-widget"
 import { OtherFunctionsDrawer, type OperationLogEntry } from "@/components/other-functions-drawer"
 import {
   createContentSession,
+  deleteContentSession,
   loadContentSession,
   loadRecentContentSessions,
   loadWorkbook,
@@ -325,6 +326,30 @@ export default function Page() {
     }
   }
 
+  async function handleDeleteSession(sessionId: string) {
+    if (!apiAuth) return
+    setLoading(true)
+    setError("")
+    try {
+      const result = await deleteContentSession(apiAuth, sessionId)
+      if (!result.deleted_ids.includes(sessionId)) {
+        throw new Error(result.errors[sessionId] || "The session could not be deleted.")
+      }
+      if (session?.session_id === sessionId) {
+        sessionRef.current = null
+        setSession(null)
+        sessionStorage.removeItem(STORAGE_SESSION_ID)
+        setStatusText("Session deleted")
+      }
+      await refreshRecent(apiAuth)
+      addOperation("Session deleted", sessionId.slice(0, 8), "success")
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not delete session.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function handleReloadSession() {
     if (!apiAuth || !session) return
     setLoading(true)
@@ -352,8 +377,8 @@ export default function Page() {
   }, [selectedMedia?.mediaId])
 
   const handlePictureTranscriptAppend = useCallback((text: string) => {
-    if (!apiAuth || !selectedMedia?.mediaId || selectedMedia.mediaId.startsWith("pending-")) {
-      return Promise.reject(new Error("Wait until the active picture has finished uploading."))
+    if (!apiAuth || !selectedMedia?.mediaId) {
+      return Promise.reject(new Error("Select a picture before recording."))
     }
 
     const media = selectedMedia
@@ -361,6 +386,11 @@ export default function Page() {
     pictureTranscriptRef.current = next
     setPictureTranscript(next)
     setPictureTranscriptDrafts((drafts) => ({ ...drafts, [media.mediaId]: next }))
+
+    // Pending pictures already have a local record. MediaScreen carries this
+    // transcript into the real session image as soon as its upload completes.
+    if (media.mediaId.startsWith("pending-")) return Promise.resolve()
+
     immediatePictureSaves.current += 1
     setPictureTranscriptSavingImmediately(true)
 
@@ -405,6 +435,7 @@ export default function Page() {
           error={error}
           onCreate={handleCreateSession}
           onLoad={handleLoadSession}
+          onDelete={handleDeleteSession}
           onRefresh={() => void refreshRecent()}
           onClose={() => setSessionModalOpen(false)}
         />
@@ -589,6 +620,7 @@ export default function Page() {
           setOtherFunctionsOpen(false)
           void handleLoadSession(sessionId)
         }}
+        onDeleteSession={(sessionId) => void handleDeleteSession(sessionId)}
         onSessionChange={handleSessionChange}
         onUploadWorkbook={async (file) => {
           if (!apiAuth) return

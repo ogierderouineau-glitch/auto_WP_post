@@ -477,10 +477,12 @@ export function MediaScreen({
       let nextSession = session
       for (const [index, file] of imageFiles.entries()) {
         const pendingImage = pending[index]
-        const transcript = pendingTranscripts.current[pendingImage.id] || ""
         const beforeIds = new Set(nextSession.image_refs.map((image) => image.media_id))
         const data = await uploadSessionImage(auth, nextSession, file, useFocalPointVision)
         nextSession = data.session
+        // Read this after the upload so notes recorded while it was processing
+        // are included in the newly created backend image record.
+        const transcript = pendingTranscripts.current[pendingImage.id] || ""
         const uploadedImage = sessionImages(nextSession).find((image) => !beforeIds.has(image.media_id))
         const currentImages = sessionImages(nextSession)
         if (!currentImages.some((image) => image.is_featured) && currentImages[0]) {

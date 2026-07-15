@@ -1,7 +1,7 @@
 "use client"
 
 import { FormEvent, useMemo, useState } from "react"
-import { FilePlus2, FolderOpen, Loader2, RefreshCw, X } from "lucide-react"
+import { FilePlus2, FolderOpen, Loader2, RefreshCw, Trash2, X } from "lucide-react"
 import type { PostTypeOption, RecentSession } from "@/lib/content-sessions"
 import { formatTimestamp } from "@/lib/utils"
 
@@ -13,6 +13,7 @@ export function SessionModal({
   error,
   onCreate,
   onLoad,
+  onDelete,
   onRefresh,
   onClose,
 }: {
@@ -23,6 +24,7 @@ export function SessionModal({
   error: string
   onCreate: (postTypeKey: string) => void
   onLoad: (sessionId: string) => void
+  onDelete: (sessionId: string) => void
   onRefresh: () => void
   onClose: () => void
 }) {
@@ -110,17 +112,33 @@ export function SessionModal({
             <div className="max-h-72 overflow-y-auto rounded-md border border-border bg-card">
               {recentSessions.length ? (
                 recentSessions.map((session) => (
-                  <button
-                    type="button"
-                    key={session.session_id}
-                    onClick={() => onLoad(session.session_id)}
-                    className="block w-full border-b border-border px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-muted"
-                  >
-                    <span className="block text-sm font-medium text-foreground">{session.session_id}</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">
-                      {formatTimestamp(session.created_at)} - {session.post_type_key || session.post_type || "-"} - {session.state || session.status || "-"}
-                    </span>
-                  </button>
+                  <div key={session.session_id} className="flex border-b border-border last:border-b-0 hover:bg-muted">
+                    <button
+                      type="button"
+                      onClick={() => onLoad(session.session_id)}
+                      disabled={loading}
+                      className="min-w-0 flex-1 px-3 py-2 text-left disabled:opacity-60"
+                    >
+                      <span className="block truncate text-sm font-medium text-foreground">{session.session_id}</span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {formatTimestamp(session.created_at)} - {session.post_type_key || session.post_type || "-"} - {session.state || session.status || "-"}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm(`Permanently delete session ${session.session_id} and its files from GCS?`)) {
+                          onDelete(session.session_id)
+                        }
+                      }}
+                      disabled={loading}
+                      className="m-2 flex size-8 shrink-0 items-center justify-center rounded-md text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-60"
+                      aria-label={`Delete session ${session.session_id}`}
+                      title="Delete session from GCS"
+                    >
+                      <Trash2 className="size-4" aria-hidden="true" />
+                    </button>
+                  </div>
                 ))
               ) : (
                 <div className="px-3 py-6 text-center text-sm text-muted-foreground">No recent V2 sessions found.</div>
