@@ -809,6 +809,30 @@ class StructuredPipelineTests(unittest.TestCase):
                 transcript="Nahaufnahme von Barkeeper Max mit leuchtenden Cocktailgläsern.",
                 expected_version=session.version,
             )
+            transcript_context = service._image_metadata_context(
+                snapshot,
+                session,
+                session.image_refs[0].media_id,
+                list(snapshot.image_metadata_fields),
+                use_vision=False,
+            )
+            transcript_rule_ids = {
+                rule["rule_id"] for rule in transcript_context["transcript_match_rules"]
+            }
+            self.assertIn("img_meta_001", transcript_rule_ids)
+            bartender_rule = next(
+                rule
+                for rule in transcript_context["transcript_match_rules"]
+                if rule["rule_id"] == "img_meta_001"
+            )
+            self.assertEqual(
+                bartender_rule["confirmed_source_facts"]["bartender"]["value"],
+                "Barkeeper Max",
+            )
+            self.assertEqual(
+                transcript_context["approved_context_facts"]["service_type"]["value"],
+                "Cocktailshow",
+            )
             session = service.update_image_metadata(
                 session.session_id,
                 filename="bartender-show.png",

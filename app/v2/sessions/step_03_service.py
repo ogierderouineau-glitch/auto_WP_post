@@ -1838,10 +1838,45 @@ class ContentSessionService:
             for rule in matching_rules
             if rule.usage_mode != "exclude"
         ]
+        transcript_match_rules = [
+            {
+                "rule_id": rule.rule_id,
+                "priority": rule.priority,
+                "usage_mode": rule.usage_mode,
+                "instruction_de": rule.instruction_de,
+                "target_field_keys": rule.target_field_keys,
+                "confirmed_source_facts": {
+                    key: session.confirmed_facts[key].model_dump()
+                    for key in rule.source_fact_keys
+                    if key in session.confirmed_facts
+                    and session.confirmed_facts[key].confirmed
+                    and session.confirmed_facts[key].value not in (None, "", [])
+                },
+            }
+            for rule in snapshot.image_metadata_rules
+            if not image_analysis
+            and rule.enabled
+            and rule.post_type_key in {"*", session.post_type_key}
+            and rule.workflow_stage in {"all", "image_metadata"}
+            and rule.trigger_type == "image_analysis_contains"
+            and rule.usage_mode != "exclude"
+        ]
+        approved_context_facts = {
+            row.field_key: session.confirmed_facts[row.field_key].model_dump()
+            for row in snapshot.acf_fields
+            if row.enabled
+            and row.post_type_key == session.post_type_key
+            and row.include_in_image_metadata_context is True
+            and row.field_key in session.confirmed_facts
+            and session.confirmed_facts[row.field_key].confirmed
+            and session.confirmed_facts[row.field_key].value not in (None, "", [])
+        }
         return {
             "image_context_transcript": session.image_context_transcripts.get(media_id, ""),
             "image_analysis": image_analysis,
+            "approved_context_facts": approved_context_facts,
             "must_use_when_natural": must_use_when_natural,
+            "transcript_match_rules": transcript_match_rules,
             "fields": rule_fact_context,
             "image_schema": [
                 row.model_dump(exclude={"sheet_row"})

@@ -31,7 +31,9 @@ def structured_task_input(
                 "Treat image_context_transcript as the primary description of the selected picture.",
                 "Use only transcript statements that describe the picture; ignore surrounding event, article, or logistical context unless a supplied workbook rule explicitly requires it.",
                 "Use image_analysis only when it is present and do not invent visible details.",
+                "Use approved_context_facts only when they are relevant to what image_context_transcript says this selected picture shows.",
                 "If context.must_use_when_natural contains matching rules with confirmed_source_facts, apply those workbook rules in the target fields whenever the wording remains natural.",
+                "When image_analysis is absent, apply a transcript_match_rule only if image_context_transcript clearly establishes the subject or action described by that rule; then use its confirmed_source_facts naturally in its target fields.",
             ]
         )
     user = {
