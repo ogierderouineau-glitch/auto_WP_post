@@ -100,6 +100,8 @@ export default function Page() {
   const [pictureTranscriptDrafts, setPictureTranscriptDrafts] = useState<Record<string, string>>({})
   const [pictureTranscriptSavingImmediately, setPictureTranscriptSavingImmediately] = useState(false)
   const [selectedFactKeys, setSelectedFactKeys] = useState<string[] | null>(null)
+  const [contentRevisionFieldIds, setContentRevisionFieldIds] = useState<string[]>([])
+  const [contentSelectedLinks, setContentSelectedLinks] = useState<Record<string, string>[]>([])
   const sessionRef = useRef<ContentSession | null>(null)
   const pictureTranscriptRef = useRef("")
   const pictureSaveQueue = useRef<Promise<unknown>>(Promise.resolve())
@@ -578,6 +580,8 @@ export default function Page() {
             session={session}
             workbook={workbook}
             onSessionChange={handleSessionChange}
+            onRevisionFieldIdsChange={setContentRevisionFieldIds}
+            onSelectedLinksChange={setContentSelectedLinks}
             onBackToFacts={() => setScreen("facts")}
             onContinueToWordPress={() => setScreen("wordpress")}
           />
@@ -596,6 +600,8 @@ export default function Page() {
           availableFactKeys={availableFactKeys}
           onSelectedFactKeysChange={setSelectedFactKeys}
           selectedPictureId={selectedMedia?.mediaId}
+          selectedContentFieldIds={contentRevisionFieldIds}
+          selectedContentLinks={contentSelectedLinks}
           onPictureTranscriptAppend={handlePictureTranscriptAppend}
         />
       )}

@@ -510,7 +510,7 @@ export async function regenerateSessionDraft(
   revisionFieldIds: string[],
   selectedLinks = session.selected_links || [],
 ) {
-  return apiRequest<SessionResponse>(`/api/content-sessions/${session.session_id}/draft-chat`, auth, {
+  return apiRequest<SessionJob>(`/api/content-sessions/${session.session_id}/draft-chat-job`, auth, {
     method: "POST",
     body: {
       expected_version: session.version,

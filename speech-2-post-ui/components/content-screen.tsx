@@ -139,6 +139,8 @@ export function ContentScreen({
   session,
   workbook,
   onSessionChange,
+  onRevisionFieldIdsChange,
+  onSelectedLinksChange,
   onBackToFacts,
   onContinueToWordPress,
 }: {
@@ -146,6 +148,8 @@ export function ContentScreen({
   session: ContentSession | null
   workbook: WorkbookStatus | null
   onSessionChange: (session: ContentSession) => void
+  onRevisionFieldIdsChange: (fieldIds: string[]) => void
+  onSelectedLinksChange: (links: Record<string, string>[]) => void
   onBackToFacts: () => void
   onContinueToWordPress: () => void
 }) {
@@ -171,10 +175,15 @@ export function ContentScreen({
   const draftReady = hasDraft(session)
   const canGenerate = !!auth && !!session && ["ready_to_generate", "needs_review", "ready_to_publish", "published"].includes(session.state)
   const canApprove = !!auth && !!session && draftReady && session.state === "needs_review"
-  const selectedLinkIds = new Set((session?.selected_links || []).map((selection) => selection.link_id))
-  const visibleLinkIds = selectedLinkIds.size ? selectedLinkIds : new Set(session?.eligible_link_ids || [])
-  const linkCandidates = (workbook?.internal_link_candidates || []).filter(
-    (candidate) => !visibleLinkIds.size || visibleLinkIds.has(candidate.link_id),
+  const visibleLinkIds = useMemo(() => {
+    const selected = new Set((session?.selected_links || []).map((selection) => selection.link_id))
+    return selected.size ? selected : new Set(session?.eligible_link_ids || [])
+  }, [session?.eligible_link_ids, session?.selected_links])
+  const linkCandidates = useMemo(
+    () => (workbook?.internal_link_candidates || []).filter(
+      (candidate) => !visibleLinkIds.size || visibleLinkIds.has(candidate.link_id),
+    ),
+    [visibleLinkIds, workbook?.internal_link_candidates],
   )
   const usedLinkIds = new Set(
     ((session?.generation_trace?.internal_links as { linked_fields?: Record<string, unknown>[] } | undefined)?.linked_fields || [])
@@ -183,9 +192,38 @@ export function ContentScreen({
   const normalizedSearch = search.trim().toLowerCase()
   const filteredFields = fields.filter((field) => !normalizedSearch || `${field.label} ${field.key} ${drafts[field.id] ?? field.value}`.toLowerCase().includes(normalizedSearch))
   const groupedFields = Object.fromEntries((Object.keys(CONTENT_SECTIONS) as ContentSectionId[]).map((id) => [id, filteredFields.filter((field) => field.section === id)])) as Record<ContentSectionId, DraftField[]>
-  const selectedRevisionFieldIds = revisionFieldIds ?? fields.map((field) => field.id)
+  const selectedRevisionFieldIds = useMemo(
+    () => revisionFieldIds ?? fields.map((field) => field.id),
+    [fields, revisionFieldIds],
+  )
   const selectedRevisionFields = new Set(selectedRevisionFieldIds)
   const allRevisionFieldsSelected = fields.length > 0 && selectedRevisionFieldIds.length === fields.length
+
+  useEffect(() => {
+    onRevisionFieldIdsChange(selectedRevisionFieldIds)
+  }, [onRevisionFieldIdsChange, selectedRevisionFieldIds])
+
+  const selectedLinksForAgent = useMemo(() => {
+    const selections = new Map(
+      (session?.selected_links || []).map((selection) => [selection.link_id, { ...selection }]),
+    )
+    for (const [linkId, destination] of Object.entries(queuedLinks)) {
+      if (!destination) continue
+      const existing = selections.get(linkId)
+      const candidate = linkCandidates.find((item) => item.link_id === linkId)
+      selections.set(linkId, {
+        ...existing,
+        link_id: linkId,
+        anchor_text: existing?.anchor_text || candidate?.anchor_text || "",
+        destination_acf: destination,
+      })
+    }
+    return [...selections.values()]
+  }, [linkCandidates, queuedLinks, session?.selected_links])
+
+  useEffect(() => {
+    onSelectedLinksChange(selectedLinksForAgent)
+  }, [onSelectedLinksChange, selectedLinksForAgent])
 
   function toggleRevisionField(fieldId: string) {
     setRevisionFieldIds((current) => {
@@ -245,17 +283,17 @@ export function ContentScreen({
       sessionStorage.removeItem(ACTIVE_JOB_STORAGE)
       return
     }
-    if (storedJob.operation !== "generate" || storedJob.sessionId !== session.session_id || !storedJob.jobId) return
+    if (!["generate", "regenerate"].includes(storedJob.operation || "") || storedJob.sessionId !== session.session_id || !storedJob.jobId) return
 
     const controller = new AbortController()
     setOperation("loading")
-    setMessage("Generating content...")
+    setMessage(storedJob.operation === "regenerate" ? "Regenerating selected fields..." : "Generating content...")
     void pollJob(storedJob.jobId, controller.signal)
       .then((nextSession) => {
         sessionStorage.removeItem(ACTIVE_JOB_STORAGE)
         onSessionChange(nextSession)
         setOperation("success")
-        setMessage("Draft generated.")
+        setMessage(storedJob.operation === "regenerate" ? "Selected fields regenerated." : "Draft generated.")
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return
@@ -265,25 +303,6 @@ export function ContentScreen({
 
     return () => controller.abort()
   }, [auth, session?.session_id])
-
-  function selectedLinksForContentAgent() {
-    if (!session) return []
-    const selections = new Map(
-      (session.selected_links || []).map((selection) => [selection.link_id, { ...selection }]),
-    )
-    for (const [linkId, destination] of Object.entries(queuedLinks)) {
-      if (!destination) continue
-      const existing = selections.get(linkId)
-      const candidate = linkCandidates.find((item) => item.link_id === linkId)
-      selections.set(linkId, {
-        ...existing,
-        link_id: linkId,
-        anchor_text: existing?.anchor_text || candidate?.anchor_text || "",
-        destination_acf: destination,
-      })
-    }
-    return [...selections.values()]
-  }
 
   async function handleGenerate() {
     if (!auth || !session) return
@@ -339,19 +358,31 @@ export function ContentScreen({
     setMessage("Sending instruction to content agent...")
     try {
       const saved = changedCount ? await handleSave() : session
-      const data = await regenerateSessionDraft(
+      const job = await regenerateSessionDraft(
         auth,
         saved || session,
         agentMessage.trim(),
         selectedRevisionFieldIds,
-        selectedLinksForContentAgent(),
+        selectedLinksForAgent,
       )
-      onSessionChange(data.session)
+      sessionStorage.setItem(
+        ACTIVE_JOB_STORAGE,
+        JSON.stringify({
+          jobId: job.job_id,
+          operation: "regenerate",
+          sessionId: session.session_id,
+          at: new Date().toISOString(),
+        }),
+      )
+      setMessage("Regenerating selected fields...")
+      const nextSession = await pollJob(job.job_id)
+      sessionStorage.removeItem(ACTIVE_JOB_STORAGE)
+      onSessionChange(nextSession)
       setAgentMessage("")
       setRevisionFieldIds(null)
       setQueuedLinks({})
       setOperation("success")
-      setMessage("Draft regenerated.")
+      setMessage("Selected fields regenerated.")
     } catch (error) {
       setOperation("error")
       setMessage(error instanceof Error ? error.message : "Could not regenerate draft.")

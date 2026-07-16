@@ -8,6 +8,7 @@ import {
   regenerateSessionDraft,
   saveSessionTranscript,
   transcribeSessionRecording,
+  waitForSessionJob,
   type ContentSession,
 } from "@/lib/content-sessions"
 
@@ -70,13 +71,6 @@ function combinedPictureTranscripts(session: ContentSession) {
     .join("\n\n")
 }
 
-function draftFieldIds(session: ContentSession) {
-  return [
-    ...Object.keys(session.shared_fields || {}).map((key) => `shared:${key}`),
-    ...Object.keys(session.acf_source_fields || {}).map((key) => `acf:${key}`),
-  ]
-}
-
 export function RecordingWidget({
   auth,
   session,
@@ -89,6 +83,8 @@ export function RecordingWidget({
   availableFactKeys,
   onSelectedFactKeysChange,
   selectedPictureId,
+  selectedContentFieldIds,
+  selectedContentLinks,
   onPictureTranscriptAppend,
 }: {
   auth: ApiClientOptions | null
@@ -102,6 +98,8 @@ export function RecordingWidget({
   availableFactKeys: string[]
   onSelectedFactKeysChange: (keys: string[] | null) => void
   selectedPictureId?: string
+  selectedContentFieldIds: string[]
+  selectedContentLinks: Record<string, string>[]
   onPictureTranscriptAppend: (text: string) => Promise<void>
 }) {
   const [recording, setRecording] = useState(false)
@@ -287,10 +285,21 @@ export function RecordingWidget({
         setItems([])
         setStatus("Facts updated.")
       } else if (activeScreen === "content") {
-        const fieldIds = draftFieldIds(session)
+        const fieldIds = selectedContentFieldIds
         if (!fieldIds.length) throw new Error("Generate a draft before asking the content agent to revise it.")
-        const data = await regenerateSessionDraft(auth, session, transcript, fieldIds)
-        onSessionChange(data.session)
+        const job = await regenerateSessionDraft(auth, session, transcript, fieldIds, selectedContentLinks)
+        sessionStorage.setItem("speech2post_active_job", JSON.stringify({
+          jobId: job.job_id,
+          operation: "regenerate",
+          sessionId: session.session_id,
+          at: new Date().toISOString(),
+        }))
+        const nextSession = await waitForSessionJob(auth, job.job_id, {
+          onConnectionIssue: () => setStatus("Connection interrupted. Regeneration continues; reconnecting..."),
+          onConnectionRestored: () => setStatus("Connection restored. Regenerating selected fields..."),
+        })
+        sessionStorage.removeItem("speech2post_active_job")
+        onSessionChange(nextSession)
         setSyncedTranscript("")
         setItems([])
         setStatus("Content regenerated.")
