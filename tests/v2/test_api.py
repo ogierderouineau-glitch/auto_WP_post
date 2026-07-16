@@ -133,6 +133,26 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(polled.status_code, 200)
         self.assertEqual(polled.json()["job_id"], job["job_id"])
 
+    async def test_draft_chat_job_requires_explicit_revision_fields(self) -> None:
+        created = (await self.client.post(
+            "/api/content-sessions",
+            json={"user_id": "user-1", "post_type_key": "event"},
+        )).json()["session"]
+        response = await self.client.post(
+            f"/api/content-sessions/{created['session_id']}/draft-chat-job",
+            json={
+                "expected_version": created["version"],
+                "shared_fields": {},
+                "acf_source_fields": {},
+                "selected_links": [],
+                "current_url": None,
+                "message": "Revise only selected fields.",
+                "revision_field_ids": [],
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Select at least one draft field", response.text)
+
     async def test_workbook_status_exposes_version_hash(self) -> None:
         response = await self.client.get("/api/content-sessions/_workbook")
         self.assertEqual(response.status_code, 200)

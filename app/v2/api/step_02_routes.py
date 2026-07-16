@@ -371,28 +371,29 @@ def create_router(
         x_user_id: str | None = Header(default=None, alias="X-User-ID"),
     ) -> SessionResponse:
         service_provider().require_owner(session_id, x_user_id)
-        data = payload.model_dump()
-        message = str(data.pop("message", "")).strip()
-        if not message:
-            raise InvalidUploadError("Draft chat message is required.")
-        revision_field_ids = data.get("revision_field_ids")
-        if revision_field_ids is not None and not revision_field_ids:
-            raise InvalidUploadError("Select at least one draft field to revise.")
-        data["revision_instruction"] = message
-        session = service_provider().generate(session_id, **data)
-        chat = [
-            *session.draft_chat,
-            {"role": "user", "content": message},
-            {
-                "role": "assistant",
-                "content": "Entwurf wurde anhand deiner Nachricht strukturiert aktualisiert.",
-            },
-        ]
-        session = service_provider().repository.save(
-            session.model_copy(update={"draft_chat": chat}),
-            expected_version=session.version,
+        return SessionResponse(
+            session=_regenerate_draft_chat(service_provider(), session_id, payload.model_dump())
         )
-        return SessionResponse(session=session)
+
+    @router.post("/{session_id}/draft-chat-job")
+    async def start_draft_chat_job(
+        session_id: str,
+        payload: DraftChatRequest,
+        x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    ) -> dict[str, Any]:
+        service_provider().require_owner(session_id, x_user_id)
+        if not payload.revision_field_ids:
+            raise InvalidUploadError("Select at least one draft field to revise.")
+        job = _create_session_job(session_id, "draft_chat")
+        _SESSION_JOB_EXECUTOR.submit(
+            _run_session_job,
+            job["job_id"],
+            service_provider,
+            session_id,
+            "draft_chat",
+            payload.model_dump(),
+        )
+        return job
 
     @router.put("/{session_id}/draft-fields", response_model=SessionResponse)
     async def update_draft_fields(
@@ -655,6 +656,8 @@ def _run_session_job(
         service = service_provider()
         if operation == "generate":
             session = service.generate(session_id, **payload)
+        elif operation == "draft_chat":
+            session = _regenerate_draft_chat(service, session_id, payload)
         elif operation == "publish":
             session = service.publish(session_id, **payload)
         elif operation == "optimize_image":
@@ -675,6 +678,34 @@ def _run_session_job(
         job["error"] = str(exc)
         job["traceback"] = traceback.format_exc(limit=5)
         job["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def _regenerate_draft_chat(
+    service: ContentSessionService,
+    session_id: str,
+    payload: dict[str, Any],
+) -> Any:
+    data = dict(payload)
+    message = str(data.pop("message", "")).strip()
+    if not message:
+        raise InvalidUploadError("Draft chat message is required.")
+    revision_field_ids = data.get("revision_field_ids")
+    if not revision_field_ids:
+        raise InvalidUploadError("Select at least one draft field to revise.")
+    data["revision_instruction"] = message
+    session = service.generate(session_id, **data)
+    chat = [
+        *session.draft_chat,
+        {"role": "user", "content": message},
+        {
+            "role": "assistant",
+            "content": "Entwurf wurde anhand deiner Nachricht strukturiert aktualisiert.",
+        },
+    ]
+    return service.repository.save(
+        session.model_copy(update={"draft_chat": chat}),
+        expected_version=session.version,
+    )
 
 
 async def v2_error_handler(_request: Request, exc: V2Error) -> JSONResponse:
