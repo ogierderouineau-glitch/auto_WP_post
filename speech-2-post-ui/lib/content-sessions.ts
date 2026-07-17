@@ -37,6 +37,14 @@ export type WorkbookStatus = {
   acf_fields?: AcfFieldOption[]
   internal_link_candidates?: InternalLinkCandidate[]
   internal_link_acf_fields?: InternalLinkAcfField[]
+  generation_settings?: GenerationSettingsOptions
+}
+
+export type GenerationSettingsOptions = {
+  default_language_model: string
+  default_reasoning_effort: string
+  language_models: string[]
+  reasoning_efforts: string[]
 }
 
 export type InternalLinkCandidate = {
@@ -123,10 +131,29 @@ export type ContentSession = {
   }
   wordpress_result: Record<string, unknown>
   ai_usage: Record<string, unknown>
+  operation_log: SessionOperationRecord[]
+  language_model?: string | null
+  reasoning_effort?: string | null
+  generation_mode?: "batched" | "single"
   workflow_steps: Record<string, string>
   created_at: string
   updated_at: string
   version: number
+}
+
+export type SessionOperationRecord = {
+  operation_id: string
+  operation: string
+  status: "success" | "error"
+  started_at: string
+  finished_at: string
+  duration_seconds: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  estimated_cost_usd?: number | null
+  error?: string | null
+  details: Record<string, unknown>
 }
 
 export type SessionResponse = {
@@ -206,6 +233,28 @@ export async function loadContentSession(auth: ApiClientOptions, sessionId: stri
   return apiRequest<SessionResponse>(`/api/content-sessions/${encodeURIComponent(sessionId)}`, auth, {
     json: false,
   })
+}
+
+export async function saveSessionGenerationSettings(
+  auth: ApiClientOptions,
+  session: ContentSession,
+  languageModel: string,
+  reasoningEffort: string,
+  generationMode: "batched" | "single",
+) {
+  return apiRequest<SessionResponse>(
+    `/api/content-sessions/${encodeURIComponent(session.session_id)}/generation-settings`,
+    auth,
+    {
+      method: "PUT",
+      body: {
+        expected_version: session.version,
+        language_model: languageModel,
+        reasoning_effort: reasoningEffort,
+        generation_mode: generationMode,
+      },
+    },
+  )
 }
 
 export async function loadRecentContentSessions(auth: ApiClientOptions, limit = 20) {
@@ -433,6 +482,16 @@ export async function startSessionGeneration(
   })
 }
 
+export async function startImageMetadataGeneration(
+  auth: ApiClientOptions,
+  session: ContentSession,
+) {
+  return apiRequest<SessionJob>(`/api/content-sessions/${session.session_id}/image-metadata-job`, auth, {
+    method: "POST",
+    body: { expected_version: session.version },
+  })
+}
+
 export async function loadSessionJob(auth: ApiClientOptions, jobId: string, signal?: AbortSignal) {
   return apiRequest<SessionJob>(`/api/content-sessions/jobs/${jobId}`, auth, {
     json: false,
@@ -510,6 +569,16 @@ export async function regenerateSessionDraft(
   revisionFieldIds: string[],
   selectedLinks = session.selected_links || [],
 ) {
+  const linkInstructions = selectedLinks
+    .filter((link) => link.revision_requested === "true")
+    .map(
+      (link) =>
+        link.destination_acf
+          ? `Inject the internal link using the approved anchor "${link.anchor_text}". Prefer a field routed to ACF "${link.destination_acf}", but use another eligible field if safer.`
+          : `Inject the internal link using the approved anchor "${link.anchor_text}" into the most suitable eligible ACF field.`,
+    )
+  const revisionInstruction = [message.trim(), ...linkInstructions].filter(Boolean).join("\n")
+
   return apiRequest<SessionJob>(`/api/content-sessions/${session.session_id}/draft-chat-job`, auth, {
     method: "POST",
     body: {
@@ -519,7 +588,7 @@ export async function regenerateSessionDraft(
       selected_links: selectedLinks,
       current_url: null,
       use_vision_for_image_metadata: false,
-      message,
+      message: revisionInstruction,
       revision_field_ids: revisionFieldIds,
     },
   })

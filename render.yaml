@@ -14,6 +14,14 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: V2_LANGUAGE_MODEL
+        value: gpt-5.6
+      - key: V2_TEXT_REASONING_EFFORT
+        value: low
+      - key: V2_METADATA_MODEL
+        value: gpt-5-mini
+      - key: V2_REVISION_MODEL
+        value: gpt-5-mini
       - key: FLAIRLAB_WP_BASE_URL
         sync: false
       - key: FLAIRLAB_WP_USERNAME

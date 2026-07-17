@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -20,6 +20,18 @@ class InputsRequest(BaseModel):
 
 class VersionedRequest(BaseModel):
     expected_version: int
+
+
+class GenerationSettingsRequest(VersionedRequest):
+    language_model: Literal[
+        "gpt-5-mini",
+        "gpt-5.5",
+        "gpt-5.6-luna",
+        "gpt-5.6-terra",
+        "gpt-5.6",
+    ]
+    reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+    generation_mode: Literal["batched", "single"] = "batched"
 
 
 class AnalyzeRequest(VersionedRequest):

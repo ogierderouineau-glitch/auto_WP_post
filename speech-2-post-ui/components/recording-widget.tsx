@@ -39,7 +39,7 @@ const SCREEN_COPY: Record<ActiveScreen, { title: string; instruction: string; ac
   content: {
     title: "Content agent",
     instruction: "Describe what should change in the generated content. Mention exact fields or sections when you can. You can help in the process by selecting only a few fields by unchecking the others in the list",
-    action: "Regenerate content",
+    action: "Revise selected fields",
     placeholder: "For example: Make the introduction shorter and give the title a warmer tone.",
   },
   wordpress: {
@@ -113,6 +113,9 @@ export function RecordingWidget({
   const recordingEpoch = useRef(0)
   const copy = SCREEN_COPY[activeScreen]
   const allFactsSelected = availableFactKeys.length > 0 && selectedFactKeys.length === availableFactKeys.length
+  const hasContentInstruction = transcript.trim() || selectedContentLinks.some(
+    (link) => link.revision_requested === "true",
+  )
 
   function setSyncedTranscript(value: string) {
     transcriptRef.current = value
@@ -326,6 +329,7 @@ export function RecordingWidget({
               </div>
             </div>
             <button
+              id="s2p-recording-agent-close"
               type="button"
               onClick={() => onOpenChange(false)}
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
@@ -353,6 +357,7 @@ export function RecordingWidget({
 
           <div className="mt-3 grid grid-cols-2 gap-2">
             <button
+              id="s2p-recording-agent-record"
               type="button"
               onClick={recording ? stopRecording : startRecording}
               disabled={!session}
@@ -362,9 +367,10 @@ export function RecordingWidget({
               {recording ? "Stop" : "Record"}
             </button>
             <button
+              id="s2p-recording-agent-submit"
               type="button"
               onClick={submitToAgent}
-              disabled={submitting || !session || (activeScreen === "facts" && !selectedFactKeys.length)}
+              disabled={submitting || !session || (activeScreen === "facts" && !selectedFactKeys.length) || (activeScreen === "content" && (!hasContentInstruction || !selectedContentFieldIds.length))}
               className="inline-flex items-center justify-center gap-2 rounded-md bg-ai px-3 py-2.5 text-sm font-semibold text-ai-foreground transition-colors hover:opacity-90 disabled:opacity-60"
             >
               {submitting ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
@@ -378,6 +384,7 @@ export function RecordingWidget({
                 {selectedFactKeys.length} of {availableFactKeys.length} facts selected
               </span>
               <button
+                id="s2p-recording-agent-toggle-all-facts"
                 type="button"
                 onClick={() => onSelectedFactKeysChange(allFactsSelected ? [] : null)}
                 disabled={!availableFactKeys.length}
@@ -389,6 +396,7 @@ export function RecordingWidget({
           )}
 
           <textarea
+            id="s2p-recording-agent-instruction"
             value={transcript}
             onChange={(event) => setSyncedTranscript(event.target.value)}
             rows={5}
@@ -410,11 +418,11 @@ export function RecordingWidget({
                   {item.error && <p className="mt-1 text-destructive">{item.error}</p>}
                   <div className="mt-2 flex gap-2">
                     {item.status === "failed" && (
-                      <button type="button" onClick={() => retryRecording(item)} className="text-ai">
+                      <button id={`s2p-recording-agent-retry-${item.id}`} type="button" onClick={() => retryRecording(item)} className="text-ai">
                         Retry
                       </button>
                     )}
-                    <button type="button" onClick={() => deleteRecording(item.id)} className="inline-flex items-center gap-1 text-destructive">
+                    <button id={`s2p-recording-agent-delete-${item.id}`} type="button" onClick={() => deleteRecording(item.id)} className="inline-flex items-center gap-1 text-destructive">
                       <Trash2 className="size-3" />
                       Delete
                     </button>
@@ -430,6 +438,7 @@ export function RecordingWidget({
       )}
 
       <button
+        id="s2p-recording-agent-toggle"
         type="button"
         onClick={() => onOpenChange(!open)}
         className="inline-flex h-14 items-center justify-center gap-2 rounded-full bg-gold px-5 text-sm font-bold text-gold-foreground shadow-xl ring-2 ring-background transition-transform hover:scale-105"

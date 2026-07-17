@@ -470,6 +470,7 @@ export default function Page() {
               <Wifi className={`size-4 ${session ? "text-confirm" : "text-muted-foreground"}`} aria-hidden="true" />
             </span>
             <button
+              id="s2p-header-new-session"
               type="button"
               onClick={() => auth && setSessionModalOpen(true)}
               className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-white/5 px-2.5 text-xs font-semibold transition-colors hover:bg-white/10"
@@ -478,6 +479,7 @@ export default function Page() {
               New session
             </button>
             <button
+              id="s2p-header-other-functions"
               type="button"
               onClick={() => setOtherFunctionsOpen(true)}
               className="flex size-8 items-center justify-center rounded-md bg-white/5 transition-colors hover:bg-white/10"
@@ -505,6 +507,7 @@ export default function Page() {
             return (
               <div key={step.id} className="flex items-center gap-2">
                 <button
+                  id={`s2p-workflow-step-${step.id}`}
                   type="button"
                   onClick={() => canNavigate && setScreen(step.id)}
                   disabled={!canNavigate}

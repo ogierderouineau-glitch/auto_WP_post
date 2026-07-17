@@ -5,6 +5,7 @@ import mimetypes
 import json
 import os
 import tempfile
+from time import perf_counter
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -38,18 +39,60 @@ MODEL_PRICES_PER_MILLION_TOKENS_USD: dict[str, tuple[float, float]] = {
 
 
 class OpenAILanguageModelProvider(LanguageModelProvider):
-    def __init__(self, *, api_key: str, model: str) -> None:
-        self.client = OpenAI(api_key=api_key)
+    def __init__(self, *, api_key: str, model: str, reasoning_effort: str | None = None) -> None:
+        self.api_key = api_key
+        self.client = OpenAI(
+            api_key=api_key,
+            timeout=float(os.getenv("V2_TEXT_TIMEOUT_SECONDS", "120")),
+            max_retries=int(os.getenv("V2_TEXT_MAX_RETRIES", "0")),
+        )
         self.model = model
+        self.reasoning_effort = (
+            reasoning_effort
+            if reasoning_effort is not None
+            else os.getenv("V2_TEXT_REASONING_EFFORT", "low").strip()
+        )
         self.last_usage: dict[str, Any] | None = None
 
-    def structured(self, *, task: str, context: dict[str, Any], schema: type[Any]) -> Any:
-        response = self.client.responses.parse(
-            model=self.model,
-            input=context["messages"],
-            text_format=schema,
+    def with_settings(self, *, model: str, reasoning_effort: str) -> "OpenAILanguageModelProvider":
+        return OpenAILanguageModelProvider(
+            api_key=self.api_key,
+            model=model,
+            reasoning_effort=reasoning_effort,
         )
-        self.last_usage = _usage_event(response, model=self.model, service="openai_text", call_name=task)
+
+    def structured(self, *, task: str, context: dict[str, Any], schema: type[Any]) -> Any:
+        request_options: dict[str, Any] = {}
+        if self.reasoning_effort:
+            request_options["reasoning"] = {"effort": self.reasoning_effort}
+        started = perf_counter()
+        try:
+            response = self.client.responses.parse(
+                model=self.model,
+                input=context["messages"],
+                text_format=schema,
+                **request_options,
+            )
+        except APIStatusError as exc:
+            if exc.status_code >= 500:
+                body = exc.body if isinstance(exc.body, dict) else {}
+                retry_after = body.get("retry_after")
+                retry_hint = (
+                    f" Wait at least {retry_after} seconds, then try again."
+                    if retry_after
+                    else " Wait briefly, then try again."
+                )
+                request_id = getattr(exc, "request_id", None)
+                request_hint = f" Request ID: {request_id}." if request_id else ""
+                raise RuntimeError(
+                    f"OpenAI is temporarily unavailable (HTTP {exc.status_code})."
+                    f"{retry_hint}{request_hint}"
+                ) from exc
+            raise
+        self.last_usage = {
+            **_usage_event(response, model=self.model, service="openai_text", call_name=task),
+            "duration_seconds": round(perf_counter() - started, 3),
+        }
         if response.output_parsed is None:
             raise ValueError(f"OpenAI returned no parsed output for task {task!r}.")
         return response.output_parsed

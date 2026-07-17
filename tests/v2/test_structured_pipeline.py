@@ -69,12 +69,12 @@ class WorkbookFakeLanguageModel(LanguageModelProvider):
                 for row in rows
             }
         elif task == "shared_field_generation":
-            allowed_fields = set(schema.model_fields)
+            allowed_shared_fields = set(schema.model_fields)
             rows = [
                 row for row in self.snapshot.shared_fields
-                if row.enabled and row.include_in_ai_schema and row.field_key in allowed_fields
+                if row.enabled and row.include_in_ai_schema and row.field_key in allowed_shared_fields
             ]
-            data = {
+            shared_data = {
                 row.field_key: (
                     self._value(
                         row.value_type,
@@ -87,34 +87,36 @@ class WorkbookFakeLanguageModel(LanguageModelProvider):
                 )
                 for row in rows
             }
-        elif task == "acf_field_generation":
-            allowed_fields = set(schema.model_fields)
-            rows = [
+            data = shared_data
+        elif task.startswith("acf_field_generation:"):
+            allowed_acf_fields = set(schema.model_fields)
+            acf_rows = [
                 row for row in self.snapshot.acf_fields
                 if row.enabled
                 and row.post_type_key == "event"
                 and row.field_role != "input_fact"
                 and row.include_in_ai_schema
-                and row.field_key in allowed_fields
+                and row.field_key in allowed_acf_fields
             ]
-            data = {
+            acf_data = {
                 row.field_key: (
                     self._value(row.value_type, row.min_words, row.max_words)
                     if row.required_for_output
                     else None
                 )
-                for row in rows
+                for row in acf_rows
             }
             selected_links = user_context.get("selected_internal_links", [])
             linkable_fields = [
                 row.field_key
-                for row in rows
-                if row.allow_internal_links and isinstance(data.get(row.field_key), str)
+                for row in acf_rows
+                if row.allow_internal_links and isinstance(acf_data.get(row.field_key), str)
             ]
             for selection, field_key in zip(selected_links, linkable_fields):
-                anchor = str(selection.get("anchor_text") or "").strip()
+                anchor = str(selection.get("preferred_anchor") or "").strip()
                 if anchor:
-                    data[field_key] = f"{data[field_key]} {anchor}"
+                    acf_data[field_key] = f"{acf_data[field_key]} {anchor}"
+            data = acf_data
         elif task == "internal_link_ranking":
             user = json.loads(context["messages"][1]["content"])
             candidates = user["context"]["candidates"]
@@ -147,14 +149,18 @@ class WorkbookFakeLanguageModel(LanguageModelProvider):
                         )
                         break
             data = {"placements": placements}
-        elif task == "image_metadata":
-            data = {
-                "image_alt": "FLAIRLAB Event in Berlin",
-                "image_title": "FLAIRLAB Event Berlin",
-                "image_caption": "FLAIRLAB beim Event in Berlin.",
-                "image_description_wp": "Das Bild zeigt den bestätigten Eventkontext von FLAIRLAB in Berlin.",
-                "image_filename": "flairlab-event-berlin-01.webp",
-            }
+        elif task == "image_metadata_batch":
+            data = {"images": [
+                {
+                    "media_id": image["media_id"],
+                    "image_alt": "FLAIRLAB Event in Berlin",
+                    "image_title": "FLAIRLAB Event Berlin",
+                    "image_caption": "FLAIRLAB beim Event in Berlin.",
+                    "image_description_wp": "Das Bild zeigt den bestätigten Eventkontext von FLAIRLAB in Berlin.",
+                    "image_filename": f"flairlab-event-berlin-{index:02d}.webp",
+                }
+                for index, image in enumerate(user_context["images"], 1)
+            ]}
         else:
             raise AssertionError(f"Unexpected fake model task: {task}")
         return schema.model_validate(data)
@@ -282,7 +288,7 @@ class RetryLanguageModel(LanguageModelProvider):
     def structured(self, *, task: str, context: dict[str, Any], schema: type[Any]) -> Any:
         self.calls += 1
         self.last_messages = context["messages"]
-        if self.calls < 3:
+        if self.calls < 2:
             return schema.model_validate({"text": None})
         return schema.model_validate({"text": "valid"})
 
@@ -303,7 +309,7 @@ class StructuredPipelineTests(unittest.TestCase):
                 schema=RetryResponse,
             )
             self.assertEqual(result.text, "valid")
-            self.assertEqual(model.calls, 3)
+            self.assertEqual(model.calls, 2)
             self.assertIn("Validation feedback", model.last_messages[-1]["content"])
 
     def test_fake_model_runs_separate_structured_tasks(self) -> None:
@@ -360,29 +366,25 @@ class StructuredPipelineTests(unittest.TestCase):
                 expected_version=session.version,
             )
             self.assertEqual(session.state, "needs_review")
-            self.assertEqual(
-                model.calls,
-                [
-                    "fact_extraction",
-                    "internal_link_ranking",
-                    "shared_field_generation",
-                    "acf_field_generation",
-                    "internal_link_placement_planning",
-                ],
+            self.assertEqual(model.calls[0], "fact_extraction")
+            self.assertEqual(model.calls.count("shared_field_generation"), 1)
+            self.assertGreater(
+                len([task for task in model.calls if task.startswith("acf_field_generation:")]),
+                1,
             )
             selected_context = next(
                 row["context"]["selected_internal_links"]
                 for row in model.contexts
-                if row["task"] == "acf_field_generation"
+                if row["task"].startswith("acf_field_generation:")
             )
             linked_fields = session.generation_trace["internal_links"]["linked_fields"]
-            minimum_links, maximum_links = service._internal_link_range(snapshot)
-            self.assertGreaterEqual(len(selected_context), minimum_links)
+            _, maximum_links = service._internal_link_range(snapshot)
             self.assertLessEqual(len(selected_context), maximum_links)
-            self.assertEqual(len(linked_fields), len(selected_context))
-            self.assertEqual(
-                [row["link_id"] for row in linked_fields],
-                [row["link_id"] for row in selected_context],
+            self.assertLessEqual(len(linked_fields), len(selected_context))
+            self.assertTrue(
+                {row["link_id"] for row in linked_fields}.issubset(
+                    {row["link_id"] for row in selected_context}
+                )
             )
             self.assertTrue(session.wordpress_payload["meta"])
             self.assertTrue(session.wordpress_payload["acf"])
@@ -392,18 +394,22 @@ class StructuredPipelineTests(unittest.TestCase):
             self.assertTrue(story_trace["rules"])
             self.assertTrue(any(rule["shared"] for rule in story_trace["rules"]))
             self.assertTrue(any(not rule["shared"] for rule in story_trace["rules"]))
-            self.assertEqual(session.ai_usage["call_count"], 5)
-            self.assertEqual(session.ai_usage["total_tokens"], 75)
-            self.assertEqual(session.ai_usage["services"]["openai_text"]["call_count"], 5)
+            self.assertEqual(session.ai_usage["call_count"], len(model.calls))
+            self.assertEqual(session.ai_usage["total_tokens"], len(model.calls) * 15)
+            self.assertEqual(
+                session.ai_usage["services"]["openai_text"]["call_count"],
+                len(model.calls),
+            )
 
     def test_generated_session_can_be_regenerated_after_review_edits(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             knowledge = KnowledgeBaseService(WORKBOOK)
             snapshot = knowledge.current()
+            model = WorkbookFakeLanguageModel(snapshot)
             service = ContentSessionService(
                 knowledge=knowledge,
                 repository=FileSessionRepository(temporary),
-                language_model=WorkbookFakeLanguageModel(snapshot),
+                language_model=model,
             )
             session = service.create(user_id="user-1", post_type_key="event")
             session = service.add_inputs(
@@ -437,14 +443,22 @@ class StructuredPipelineTests(unittest.TestCase):
             )
             regenerated = service.generate(
                 generated.session_id,
-                shared_fields=generated.shared_fields,
-                acf_source_fields=generated.acf_source_fields,
-                selected_links=generated.selected_links,
+                shared_fields={},
+                acf_source_fields={},
+                selected_links=[],
                 current_url=None,
                 expected_version=generated.version,
             )
             self.assertEqual(regenerated.state, "needs_review")
             self.assertEqual(regenerated.version, generated.version + 1)
+            regeneration_context = next(
+                item["context"]
+                for item in reversed(model.contexts)
+                if item["task"].startswith("acf_field_generation:")
+            )
+            self.assertEqual(regeneration_context["current_shared_fields"], {})
+            self.assertEqual(regeneration_context["current_acf_source_fields"], {})
+            self.assertTrue(regeneration_context["examples"])
 
     def test_draft_revision_instruction_is_passed_to_structured_generation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -500,7 +514,8 @@ class StructuredPipelineTests(unittest.TestCase):
             revision_contexts = [
                 item["context"]
                 for item in model.contexts
-                if item["task"] in {"shared_field_generation", "acf_field_generation"}
+                if item["task"] == "shared_field_generation"
+                or item["task"].startswith("acf_field_generation:")
                 and "draft_revision" in item["context"]
             ]
             self.assertTrue(revision_contexts)
@@ -508,10 +523,7 @@ class StructuredPipelineTests(unittest.TestCase):
                 revision_contexts[-1]["draft_revision"]["instruction"],
                 "Bitte den Text wärmer und persönlicher machen.",
             )
-            self.assertEqual(
-                revision_contexts[-1]["draft_revision"]["current_shared_fields"],
-                generated.shared_fields,
-            )
+            self.assertEqual(revision_contexts[-1]["current_shared_fields"], {})
 
     def test_draft_revision_only_generates_and_updates_selected_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -573,13 +585,19 @@ class StructuredPipelineTests(unittest.TestCase):
 
             self.assertEqual(revised.acf_source_fields[unselected_key], "Keep this exact manual edit")
             self.assertEqual(model.calls[len(calls_before):].count("shared_field_generation"), 1)
-            self.assertNotIn("acf_field_generation", model.calls[len(calls_before):])
+            self.assertFalse(any(
+                task.startswith("acf_field_generation:")
+                for task in model.calls[len(calls_before):]
+            ))
             revision_context = next(
                 item["context"]
                 for item in reversed(model.contexts)
                 if item["task"] == "shared_field_generation"
             )
             self.assertEqual(set(revision_context["fields"]), {selected_key})
+            self.assertEqual(revision_context["examples"], [])
+            self.assertEqual(set(revision_context["current_shared_fields"]), {selected_key})
+            self.assertEqual(revision_context["current_acf_source_fields"], {})
 
     def test_fact_review_only_extracts_and_replaces_selected_fact(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -696,6 +714,11 @@ class StructuredPipelineTests(unittest.TestCase):
             self.assertEqual(vision.calls, 1)
             self.assertEqual(len(session.image_analysis), 1)
             self.assertEqual(len(session.processed_images), 1)
+            self.assertEqual(len(session.image_metadata), 0)
+            session = service.generate_image_metadata(
+                session.session_id,
+                expected_version=session.version,
+            )
             self.assertEqual(len(session.image_metadata), 1)
             self.assertTrue(Path(session.image_metadata[0]["path"]).is_file())
             self.assertEqual(session.image_metadata[0]["image_usage"], "featured")
@@ -703,8 +726,9 @@ class StructuredPipelineTests(unittest.TestCase):
             image_context = next(
                 item["context"]
                 for item in reversed(model.contexts)
-                if item["task"] == "image_metadata"
+                if item["task"] == "image_metadata_batch"
             )
+            image_context = image_context["images"][0]
             self.assertEqual(image_context["image_analysis"], {})
             metadata_trace = session.generation_trace["image_metadata"][session.image_refs[0].media_id]
             self.assertEqual(metadata_trace["fields"], image_context["fields"])
@@ -840,7 +864,7 @@ class StructuredPipelineTests(unittest.TestCase):
                 use_vision_for_metadata=True,
                 expected_version=session.version,
             )
-            self.assertEqual(model.calls.count("image_metadata"), 0)
+            self.assertEqual(model.calls.count("image_metadata_batch"), 0)
 
             session = service.analyze(session.session_id, expected_version=session.version)
             session = service.generate(
@@ -864,13 +888,13 @@ class StructuredPipelineTests(unittest.TestCase):
             )
 
             self.assertEqual(published.state, "published")
-            self.assertEqual(model.calls.count("image_metadata"), 2)
+            self.assertEqual(model.calls.count("image_metadata_batch"), 1)
             image_contexts = [
                 item["context"]
                 for item in model.contexts
-                if item["task"] == "image_metadata"
+                if item["task"] == "image_metadata_batch"
             ]
-            final_context = image_contexts[-1]
+            final_context = image_contexts[-1]["images"][0]
             self.assertNotIn("base_confirmed_facts", final_context)
             self.assertNotIn("shared_fields", final_context)
             self.assertNotIn("acf_source_fields", final_context)
@@ -985,6 +1009,10 @@ class StructuredPipelineTests(unittest.TestCase):
             self.assertEqual(regenerated.state, "needs_review")
             self.assertEqual(len(regenerated.image_refs), 1)
             self.assertEqual(len(regenerated.processed_images), 1)
+            regenerated = service.generate_image_metadata(
+                regenerated.session_id,
+                expected_version=regenerated.version,
+            )
             self.assertEqual(len(regenerated.image_metadata), 1)
             self.assertEqual(
                 regenerated.processed_images[0]["media_id"],

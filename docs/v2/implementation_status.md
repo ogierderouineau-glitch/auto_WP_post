@@ -58,7 +58,18 @@ Implemented:
 | `V2_SESSION_ROOT` | `data/v2_sessions` | Initial file-backed V2 session repository |
 | `V2_SESSION_GCS_PREFIX` | empty | GCS session and object root for Cloud Run |
 | `V2_LANGUAGE_MODEL` | `gpt-5.5` | OpenAI model used for structured text tasks |
+| `V2_REVISION_MODEL` | `gpt-5-mini` | Faster OpenAI model used for checkbox-scoped draft revisions |
+| `V2_METADATA_MODEL` | `gpt-5-mini` | Faster OpenAI model used for batched image metadata |
 | `V2_VISION_MODEL` | `gpt-5.5` | OpenAI model used for structured image analysis |
+| `V2_TEXT_TIMEOUT_SECONDS` | `120` | Maximum duration of one text-model request |
+| `V2_TEXT_MAX_RETRIES` | `0` | OpenAI SDK retries for text requests; app validation retries remain separate |
+| `V2_TEXT_REASONING_EFFORT` | `low` | Lower-latency reasoning level for text generation; leave empty to omit it |
+
+The Menu starts with per-session generation settings. Until saved, its model and
+reasoning dropdowns display the active backend defaults above. A saved session
+override applies to analysis and full draft generation; scoped revisions and image
+metadata retain their dedicated model settings.
+| `V2_VISION_CONCURRENCY` | `3` | Maximum concurrent contextual Vision analyses |
 | `V2_TRANSCRIPTION_MODEL` | `gpt-4o-transcribe` | Speech-to-text model |
 | `V2_MAX_IMAGE_BYTES` | 20 MiB | Maximum image upload size |
 | `V2_MAX_AUDIO_BYTES` | 50 MiB | Maximum audio upload size |
@@ -130,6 +141,18 @@ Business/content prompts come from the workbook. Code contains only technical tr
 instructions enforcing schema-only output and prohibiting invented facts/URLs, plus a
 deterministic German clarification fallback. If desired, that fallback can be moved into
 the workbook before production.
+
+Draft generation supports a per-session `batched` mode (the safe default) and a
+`single` structured-call test mode. Final word-count validation accepts 20% below a
+declared minimum and 20% above a declared maximum, with integer boundaries rounded
+inward using `ceil(min × 0.8)` and `floor(max × 1.2)`; character limits remain exact.
+Internal link candidates are ranked in Python. Destination-aware placement first wraps
+an exact approved anchor deterministically and calls the model planner only for
+unresolved links. User-selected ACF destinations are preferences with an automatic
+eligible-field fallback; irrelevant links are not added merely to meet a workbook minimum.
+The readable draft is returned before image metadata. The Next interface starts a
+separate background job that batches metadata for all images, while enabled contextual
+Vision analyses run with bounded concurrency.
 
 ## Intentionally untouched legacy files
 

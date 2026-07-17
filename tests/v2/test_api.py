@@ -205,6 +205,10 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         images = response.json()["session"]["image_refs"]
         self.assertEqual(len(images), 1)
         self.assertTrue(Path(images[0]["storage_uri"]).is_file())
+        operation = response.json()["session"]["operation_log"][0]
+        self.assertEqual(operation["operation"], "image_upload")
+        self.assertEqual(operation["status"], "success")
+        self.assertGreaterEqual(operation["duration_seconds"], 0)
 
     async def test_invalid_image_upload_returns_stable_error(self) -> None:
         created = (await self.client.post(

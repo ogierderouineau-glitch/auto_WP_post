@@ -314,7 +314,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertLessEqual(len(generated.selected_links), maximum_links)
         self.assertEqual(generated.selected_links, selected[:maximum_links])
 
-    def test_generation_tops_up_too_few_internal_links(self) -> None:
+    def test_generation_does_not_force_extra_internal_links(self) -> None:
         session = self.service.create(user_id="user-1", post_type_key="event")
         snapshot = self.knowledge.by_hash(session.workbook_hash)
         facts = {
@@ -377,7 +377,7 @@ class WorkflowTests(unittest.TestCase):
             expected_version=session.version,
         )
 
-        self.assertGreaterEqual(len(generated.selected_links), minimum_links)
+        self.assertEqual(generated.selected_links, selected)
         self.assertEqual(generated.selected_links[0], selected[0])
 
     @staticmethod

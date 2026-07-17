@@ -70,21 +70,21 @@ export function AuthModal({
           </span>
         </div>
 
-        <label htmlFor="client-id" className="mb-1.5 block text-xs font-medium text-muted-foreground">
+        <label htmlFor="s2p-auth-client-id" className="mb-1.5 block text-xs font-medium text-muted-foreground">
           Client
         </label>
         <input
-          id="client-id"
+          id="s2p-auth-client-id"
           value={userId}
           onChange={(event) => setUserId(event.target.value)}
           className="mb-3 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-gold/40"
         />
 
-        <label htmlFor="import-key" className="mb-1.5 block text-xs font-medium text-muted-foreground">
+        <label htmlFor="s2p-auth-import-key" className="mb-1.5 block text-xs font-medium text-muted-foreground">
           Access key
         </label>
         <input
-          id="import-key"
+          id="s2p-auth-import-key"
           type="password"
           autoComplete="off"
           value={apiKey}
@@ -101,6 +101,7 @@ export function AuthModal({
         )}
 
         <button
+          id="s2p-auth-connect"
           type="submit"
           disabled={loading}
           className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-confirm px-3.5 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"

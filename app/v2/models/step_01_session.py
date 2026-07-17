@@ -36,6 +36,21 @@ class Approval(BaseModel):
     approved_at: datetime | None = None
 
 
+class OperationRecord(BaseModel):
+    operation_id: str
+    operation: str
+    status: Literal["success", "error"]
+    started_at: datetime
+    finished_at: datetime
+    duration_seconds: float = Field(ge=0)
+    prompt_tokens: int = Field(default=0, ge=0)
+    completion_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+    estimated_cost_usd: float | None = None
+    error: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
 class ContentSession(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
@@ -72,6 +87,10 @@ class ContentSession(BaseModel):
     approval: Approval = Field(default_factory=Approval)
     wordpress_result: dict[str, Any] = Field(default_factory=dict)
     ai_usage: dict[str, Any] = Field(default_factory=dict)
+    operation_log: list[OperationRecord] = Field(default_factory=list)
+    language_model: str | None = None
+    reasoning_effort: str | None = None
+    generation_mode: Literal["batched", "single"] = "batched"
     publication_idempotency_key: str | None = None
     workflow_steps: dict[str, str] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

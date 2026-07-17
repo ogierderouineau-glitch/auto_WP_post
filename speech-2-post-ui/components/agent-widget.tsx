@@ -32,6 +32,7 @@ export function AgentWidget({
       </div>
 
       <button
+        id="s2p-agent-start-recording"
         type="button"
         className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md border border-border bg-card px-3 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
       >
@@ -47,6 +48,7 @@ export function AgentWidget({
       </div>
 
       <button
+        id="s2p-agent-submit"
         type="button"
         onClick={onAction}
         className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ai px-3.5 py-2.5 text-sm font-semibold text-ai-foreground transition-colors hover:opacity-90"

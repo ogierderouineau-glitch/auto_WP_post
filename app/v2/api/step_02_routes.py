@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 import traceback
 import uuid
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -22,6 +23,7 @@ from app.v2.api.step_01_models import (
     DraftChatRequest,
     DraftFieldsUpdateRequest,
     FeaturedImageRequest,
+    GenerationSettingsRequest,
     GenerateRequest,
     ImageOptimizationRequest,
     ImageContextTranscriptUpdateRequest,
@@ -32,8 +34,8 @@ from app.v2.api.step_01_models import (
     SessionsDeleteRequest,
     VersionedRequest,
 )
-from config import KNOWLEDGE_SOURCE_POLICY, KNOWLEDGE_WORKBOOK_GCS_URI
-from app.v2.errors import InvalidUploadError, SessionOwnershipError, V2Error
+from config import KNOWLEDGE_SOURCE_POLICY, KNOWLEDGE_WORKBOOK_GCS_URI, V2_LANGUAGE_MODEL
+from app.v2.errors import InvalidUploadError, SessionBusyError, SessionOwnershipError, V2Error
 from app.v2.sessions.step_03_service import ContentSessionService
 from app.v2.storage.step_02_uploads import safe_upload_name, validate_upload
 
@@ -101,6 +103,12 @@ def create_router(
             "knowledge_source_policy": KNOWLEDGE_SOURCE_POLICY or "auto",
             "gcs_uri": KNOWLEDGE_WORKBOOK_GCS_URI or None,
             "selected_post_type_key": selected_post_type_key,
+            "generation_settings": {
+                "default_language_model": V2_LANGUAGE_MODEL,
+                "default_reasoning_effort": os.getenv("V2_TEXT_REASONING_EFFORT", "low").strip() or "none",
+                "language_models": ["gpt-5-mini", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6"],
+                "reasoning_efforts": ["none", "minimal", "low", "medium", "high", "xhigh"],
+            },
             "post_types": [
                 {
                     "post_type_key": row.post_type_key,
@@ -211,7 +219,11 @@ def create_router(
         payload: InputsRequest,
         x_user_id: str | None = Header(default=None, alias="X-User-ID"),
     ) -> SessionResponse:
-        service_provider().require_owner(session_id, x_user_id)
+        service = service_provider()
+        service.require_owner(session_id, x_user_id)
+        started_at = datetime.now(timezone.utc)
+        started_clock = perf_counter()
+        usage_before = dict(service.get(session_id).ai_usage or {})
         return SessionResponse(
             session=service_provider().add_inputs(session_id, **payload.model_dump())
         )
@@ -225,7 +237,11 @@ def create_router(
         upload: UploadFile = File(...),
         x_user_id: str | None = Header(default=None, alias="X-User-ID"),
     ) -> SessionResponse:
-        service_provider().require_owner(session_id, x_user_id)
+        service = service_provider()
+        service.require_owner(session_id, x_user_id)
+        started_at = datetime.now(timezone.utc)
+        started_clock = perf_counter()
+        usage_before = dict(service.get(session_id).ai_usage or {})
         suffix = Path(upload.filename or "").suffix
         safe_name = safe_upload_name(upload.filename or "", suffix or ".bin")
         max_bytes = int(
@@ -255,7 +271,7 @@ def create_router(
                 )
             except ValueError as exc:
                 raise InvalidUploadError(str(exc)) from exc
-            session = service_provider().attach_upload(
+            session = service.attach_upload(
                 session_id,
                 source=temporary,
                 kind=kind,
@@ -263,6 +279,15 @@ def create_router(
                 content_type=content_type,
                 expected_version=expected_version,
                 use_vision=use_vision,
+            )
+            session = service.record_operation(
+                session_id,
+                operation=f"{kind}_upload",
+                status="success",
+                started_at=started_at,
+                duration_seconds=perf_counter() - started_clock,
+                usage_before=usage_before,
+                details={"filename": safe_name, "size_bytes": size, "use_vision": use_vision},
             )
             return SessionResponse(session=session)
         finally:
@@ -316,13 +341,40 @@ def create_router(
         payload: AnalyzeRequest,
         x_user_id: str | None = Header(default=None, alias="X-User-ID"),
     ) -> SessionResponse:
-        service_provider().require_owner(session_id, x_user_id)
-        return SessionResponse(
-            session=service_provider().analyze(
+        service = service_provider()
+        service.require_owner(session_id, x_user_id)
+        started_at = datetime.now(timezone.utc)
+        started_clock = perf_counter()
+        usage_before = dict(service.get(session_id).ai_usage or {})
+        try:
+            session = service.analyze(
                 session_id,
                 **payload.model_dump(),
             )
-        )
+            session = service.record_operation(
+                session_id,
+                operation="analysis",
+                status="success",
+                started_at=started_at,
+                duration_seconds=perf_counter() - started_clock,
+                usage_before=usage_before,
+                details={"review_fact_keys": payload.review_fact_keys or []},
+            )
+            return SessionResponse(session=session)
+        except Exception as exc:
+            try:
+                service.record_operation(
+                    session_id,
+                    operation="analysis",
+                    status="error",
+                    started_at=started_at,
+                    duration_seconds=perf_counter() - started_clock,
+                    usage_before=usage_before,
+                    error=str(exc),
+                )
+            except Exception:
+                _LOGGER.exception("Could not persist failed analysis operation")
+            raise
 
     @router.post("/{session_id}/answers", response_model=SessionResponse)
     async def answer(
@@ -333,6 +385,21 @@ def create_router(
         service_provider().require_owner(session_id, x_user_id)
         return SessionResponse(
             session=service_provider().answer(session_id, **payload.model_dump())
+        )
+
+    @router.put("/{session_id}/generation-settings", response_model=SessionResponse)
+    async def update_generation_settings(
+        session_id: str,
+        payload: GenerationSettingsRequest,
+        x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    ) -> SessionResponse:
+        service_provider().require_owner(session_id, x_user_id)
+        _raise_if_session_job_active(session_id)
+        return SessionResponse(
+            session=service_provider().update_generation_settings(
+                session_id,
+                **payload.model_dump(),
+            )
         )
 
     @router.post("/{session_id}/generate", response_model=SessionResponse)
@@ -360,6 +427,24 @@ def create_router(
             service_provider,
             session_id,
             "generate",
+            payload.model_dump(),
+        )
+        return job
+
+    @router.post("/{session_id}/image-metadata-job")
+    async def start_image_metadata_job(
+        session_id: str,
+        payload: VersionedRequest,
+        x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    ) -> dict[str, Any]:
+        service_provider().require_owner(session_id, x_user_id)
+        job = _create_session_job(session_id, "image_metadata")
+        _SESSION_JOB_EXECUTOR.submit(
+            _run_session_job,
+            job["job_id"],
+            service_provider,
+            session_id,
+            "image_metadata",
             payload.model_dump(),
         )
         return job
@@ -402,6 +487,7 @@ def create_router(
         x_user_id: str | None = Header(default=None, alias="X-User-ID"),
     ) -> SessionResponse:
         service_provider().require_owner(session_id, x_user_id)
+        _raise_if_session_job_active(session_id, ignore_operations={"image_metadata"})
         return SessionResponse(
             session=service_provider().update_draft_fields(
                 session_id,
@@ -626,6 +712,7 @@ def _legacy_acf_guidance_list(snapshot: Any) -> list[dict[str, str]]:
 
 
 def _create_session_job(session_id: str, operation: str) -> dict[str, Any]:
+    _raise_if_session_job_active(session_id)
     job_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc).isoformat()
     job = {
@@ -642,6 +729,28 @@ def _create_session_job(session_id: str, operation: str) -> dict[str, Any]:
     return job
 
 
+def _raise_if_session_job_active(
+    session_id: str,
+    *,
+    ignore_operations: set[str] | None = None,
+) -> None:
+    ignored = ignore_operations or set()
+    active = next(
+        (
+            job
+            for job in _SESSION_JOBS.values()
+            if job.get("session_id") == session_id
+            and job.get("status") in {"queued", "running"}
+            and job.get("operation") not in ignored
+        ),
+        None,
+    )
+    if active:
+        raise SessionBusyError(
+            f"Session operation '{active.get('operation')}' is still running. Wait for it to finish before starting another change."
+        )
+
+
 def _run_session_job(
     job_id: str,
     service_provider: Callable[[], ContentSessionService],
@@ -652,8 +761,23 @@ def _run_session_job(
     job = _SESSION_JOBS[job_id]
     job["status"] = "running"
     job["updated_at"] = datetime.now(timezone.utc).isoformat()
+    started_at = datetime.now(timezone.utc)
+    started_clock = perf_counter()
+    service = service_provider()
+    starting_session = service.get(session_id)
+    usage_before = dict(starting_session.ai_usage or {})
+    provider = (
+        service.revision_language_model
+        if operation == "draft_chat"
+        else service._session_language_provider(starting_session)
+    )
+    operation_details = {
+        "job_id": job_id,
+        "model": getattr(provider, "model", None),
+        "reasoning_effort": getattr(provider, "reasoning_effort", None),
+        "generation_mode": starting_session.generation_mode,
+    }
     try:
-        service = service_provider()
         if operation == "generate":
             session = service.generate(session_id, **payload)
         elif operation == "draft_chat":
@@ -662,12 +786,49 @@ def _run_session_job(
             session = service.publish(session_id, **payload)
         elif operation == "optimize_image":
             session = service.optimize_image(session_id, **payload)
+        elif operation == "image_metadata":
+            session = service.generate_image_metadata(session_id, **payload)
         else:
             raise ValueError(f"Unsupported session job operation: {operation}")
+        session = service.record_operation(
+            session_id,
+            operation={
+                "generate": "content_generation",
+                "draft_chat": "content_revision",
+                "publish": "wordpress_publish",
+                "optimize_image": "image_optimization",
+                "image_metadata": "image_metadata_generation",
+            }.get(operation, operation),
+            status="success",
+            started_at=started_at,
+            duration_seconds=perf_counter() - started_clock,
+            usage_before=usage_before,
+            details=operation_details,
+        )
         job["status"] = "complete"
         job["session"] = session.model_dump(mode="json")
         job["updated_at"] = datetime.now(timezone.utc).isoformat()
     except Exception as exc:
+        error_message = str(exc)
+        if isinstance(exc, V2Error) and exc.details:
+            detail_text = "; ".join(
+                f"{detail.column or detail.error_code}: {detail.message}"
+                for detail in exc.details
+            )
+            error_message = f"{error_message} {detail_text}"
+        try:
+            service.record_operation(
+                session_id,
+                operation=operation,
+                status="error",
+                started_at=started_at,
+                duration_seconds=perf_counter() - started_clock,
+                usage_before=usage_before,
+                error=error_message,
+                details=operation_details,
+            )
+        except Exception:
+            _LOGGER.exception("Could not persist failed operation log entry")
         _LOGGER.exception(
             "Session job failed: job_id=%s session_id=%s operation=%s",
             job_id,
@@ -675,7 +836,7 @@ def _run_session_job(
             operation,
         )
         job["status"] = "failed"
-        job["error"] = str(exc)
+        job["error"] = error_message
         job["traceback"] = traceback.format_exc(limit=5)
         job["updated_at"] = datetime.now(timezone.utc).isoformat()
 

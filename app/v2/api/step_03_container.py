@@ -107,6 +107,24 @@ def get_v2_service() -> ContentSessionService:
             if OPENAI_API_KEY and V2_LANGUAGE_MODEL
             else None
         )
+        metadata_model_name = os.getenv("V2_METADATA_MODEL", "gpt-5-mini").strip()
+        metadata_language_model = (
+            OpenAILanguageModelProvider(
+                api_key=OPENAI_API_KEY,
+                model=metadata_model_name,
+            )
+            if OPENAI_API_KEY and metadata_model_name
+            else language_model
+        )
+        revision_model_name = os.getenv("V2_REVISION_MODEL", "gpt-5-mini").strip()
+        revision_language_model = (
+            OpenAILanguageModelProvider(
+                api_key=OPENAI_API_KEY,
+                model=revision_model_name,
+            )
+            if OPENAI_API_KEY and revision_model_name
+            else language_model
+        )
         speech_to_text = (
             OpenAISpeechToTextProvider(
                 api_key=OPENAI_API_KEY,
@@ -136,6 +154,8 @@ def get_v2_service() -> ContentSessionService:
             repository=repository,
             wordpress=ExistingWordPressProvider(),
             language_model=language_model,
+            revision_language_model=revision_language_model,
+            metadata_language_model=metadata_language_model,
             speech_to_text=speech_to_text,
             vision=vision,
             image_editor=image_editor,

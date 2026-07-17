@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -43,7 +44,7 @@ class MetadataOnlyLanguageModel:
     last_usage: dict[str, Any] | None = None
 
     def structured(self, *, task: str, context: dict[str, Any], schema: type[Any]) -> Any:
-        if task != "image_metadata":
+        if task != "image_metadata_batch":
             raise AssertionError(f"Unexpected fake model task: {task}")
         self.last_usage = {
             "service": "openai_text",
@@ -54,12 +55,13 @@ class MetadataOnlyLanguageModel:
             "total_tokens": 2,
             "estimated_cost_usd": None,
         }
-        return schema.model_validate(
-            {
-                field_key: f"generated {field_key}"
-                for field_key in schema.model_fields
-            }
-        )
+        user_context = json.loads(context["messages"][1]["content"])["context"]
+        return schema.model_validate({
+            "images": [
+                {"media_id": image["media_id"], "image_alt": "generated image_alt"}
+                for image in user_context["images"]
+            ]
+        })
 
 
 class FakeObjectStorage:
@@ -263,6 +265,48 @@ class InternalLinkInjectionTests(unittest.TestCase):
         self.assertIn("<a", result.acf_source_fields["cta_text"])
         self.assertEqual(len(result.injected), 1)
         self.assertEqual(result.skipped[0]["reason"], "field_link_budget_exceeded")
+
+    def test_existing_anchor_placements_honor_each_requested_acf_destination(self) -> None:
+        first = InternalLinkRecord(
+            sheet_row=1, link_id="mobile-bar", post_type_key="event",
+            keyword="mobile Cocktailbar", anchor_text="mobile Cocktailbar", anchor_variants=(),
+            target_url="https://example.com/mobile-bar/", link_role="service", category="bar",
+            priority="high", active=True, usage_context="Mobile bar", language="de-DE",
+        )
+        second = InternalLinkRecord(
+            sheet_row=2, link_id="smoothie-bike", post_type_key="event",
+            keyword="Smoothie-Fahrrad", anchor_text="Smoothie-Fahrrad", anchor_variants=(),
+            target_url="https://example.com/smoothie-bike/", link_role="service", category="smoothie",
+            priority="high", active=True, usage_context="Smoothie bike", language="de-DE",
+        )
+        eligible = EligibleLinks(candidates=(first, second))
+        fields = {
+            "hero_intro": SimpleNamespace(acf_field_name="hero_text", max_internal_links=1),
+            "event_story": SimpleNamespace(acf_field_name="story_text", max_internal_links=1),
+        }
+        values = {
+            "hero_intro": "Unsere mobile Cocktailbar begrüßte die Gäste.",
+            "event_story": "Das Smoothie-Fahrrad war den ganzen Abend beliebt.",
+        }
+
+        placements = InternalLinkService().existing_anchor_placements(
+            eligible,
+            [
+                {"link_id": "mobile-bar", "anchor_text": "mobile Cocktailbar", "destination_acf": "hero_text"},
+                {"link_id": "smoothie-bike", "anchor_text": "Smoothie-Fahrrad", "destination_acf": "story_text"},
+            ],
+            acf_source_fields=values,
+            linkable_fields=fields,
+        )
+
+        self.assertEqual(
+            {(item["link_id"], item["field_key"]) for item in placements},
+            {("mobile-bar", "hero_intro"), ("smoothie-bike", "event_story")},
+        )
+        result = InternalLinkService().inject_placements(
+            eligible, placements, acf_source_fields=values, linkable_fields=fields,
+        )
+        self.assertEqual(len(result.injected), 2)
 
     def test_internal_link_placement_can_rewrite_one_sentence_with_approved_anchor(self) -> None:
         record = InternalLinkRecord(

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.v2.content_generation.step_01_schema_factory import (
+    _effective_maximum_words,
+    _effective_minimum_words,
+)
 from app.v2.errors import DraftValidationError, ErrorDetail
 from app.v2.knowledge_base.step_01_models import WorkbookSnapshot
 from app.v2.models.step_01_session import ContentSession
@@ -92,15 +96,17 @@ class DraftValidator:
         if value is None or not isinstance(value, str):
             return
         word_count = len(value.split())
-        if min_words is not None and word_count < min_words:
+        if min_words is not None and word_count < _effective_minimum_words(min_words):
             errors.append(DraftValidator._detail(
                 sheet, row, field_key, "minimum_words_not_met",
-                f"Expected at least {min_words} words; received {word_count}.",
+                f"Target is {min_words} words; minimum accepted with 20% tolerance is "
+                f"{_effective_minimum_words(min_words)}; received {word_count}.",
             ))
-        if max_words is not None and word_count > max_words:
+        if max_words is not None and word_count > _effective_maximum_words(max_words):
             errors.append(DraftValidator._detail(
                 sheet, row, field_key, "maximum_words_exceeded",
-                f"Expected at most {max_words} words; received {word_count}.",
+                f"Target is {max_words} words; maximum accepted with 20% tolerance is "
+                f"{_effective_maximum_words(max_words)}; received {word_count}.",
             ))
         if min_characters is not None and len(value) < min_characters:
             errors.append(DraftValidator._detail(

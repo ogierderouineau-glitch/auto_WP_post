@@ -148,7 +148,7 @@ class GenerationContextBuilder:
             row.model_dump(exclude={"sheet_row"})
             for row in sorted(snapshot.post_examples, key=lambda item: item.quality_score, reverse=True)
             if row.enabled and row.approved and row.post_type_key == post_type_key
-        ][:5]
+        ][:1]
         return GenerationContext(
             task=task,
             post_type=post_type.model_dump(exclude={"sheet_row"}),
@@ -157,7 +157,7 @@ class GenerationContextBuilder:
                 "transcript": session.transcript,
             },
             confirmed_facts={
-                key: value.model_dump()
+                key: value.value
                 for key, value in session.confirmed_facts.items()
             },
             fields=fields,

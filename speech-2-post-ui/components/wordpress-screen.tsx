@@ -231,11 +231,11 @@ export function WordPressScreen({
 
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="sm:w-44">
-                <label htmlFor="wp-status" className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                <label htmlFor="s2p-wordpress-post-status" className="mb-1.5 block text-xs font-medium text-muted-foreground">
                   New post status
                 </label>
                 <select
-                  id="wp-status"
+                  id="s2p-wordpress-post-status"
                   value={postStatus}
                   onChange={(event) => setPostStatus(event.target.value as PublishStatus)}
                   className="w-full rounded-md border border-input bg-card px-3 py-2.5 text-sm font-medium text-foreground outline-none focus:ring-2 focus:ring-ring"
@@ -247,6 +247,7 @@ export function WordPressScreen({
               </div>
 
               <button
+                id="s2p-wordpress-create-post"
                 type="button"
                 onClick={() => runPublish({ forceCreateNew: true })}
                 disabled={operation === "loading" || !canPublish}
@@ -324,6 +325,7 @@ export function WordPressScreen({
                     </a>
                   )}
                   <button
+                    id="s2p-wordpress-update-post"
                     type="button"
                     onClick={() => runPublish({ targetPostId: Number(postId), partialUpdate: true })}
                     disabled={operation === "loading" || !canPublish || noChange}
@@ -405,6 +407,7 @@ export function WordPressScreen({
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-3 py-3 sm:px-4">
           <button
+            id="s2p-wordpress-back-to-content"
             type="button"
             onClick={onBackToContent}
             className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3.5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted"

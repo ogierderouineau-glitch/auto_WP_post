@@ -249,6 +249,7 @@ function MetadataInput({
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
         <button
+          id={`s2p-media-metadata-trace-${label.toLowerCase().replaceAll(" ", "-")}`}
           type="button"
           onClick={() => setTraceOpen((open) => !open)}
           disabled={!trace}
@@ -260,6 +261,7 @@ function MetadataInput({
       </div>
       {rows ? (
         <textarea
+          id={`s2p-media-metadata-${label.toLowerCase().replaceAll(" ", "-")}`}
           value={value}
           rows={rows}
           onChange={(event) => onChange(event.target.value)}
@@ -267,6 +269,7 @@ function MetadataInput({
         />
       ) : (
         <input
+          id={`s2p-media-metadata-${label.toLowerCase().replaceAll(" ", "-")}`}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-gold/40"
@@ -617,6 +620,7 @@ export function MediaScreen({
                 <p className="mt-1 text-xs text-muted-foreground">{selectedImage.filename}</p>
               </div>
               <button
+                id="s2p-media-edit-dialog-close"
                 type="button"
                 onClick={() => setEditPromptOpen(false)}
                 className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
@@ -626,6 +630,7 @@ export function MediaScreen({
               </button>
             </div>
             <textarea
+              id="s2p-media-edit-prompt"
               value={editPrompt}
               onChange={(event) => setEditPrompt(event.target.value)}
               rows={5}
@@ -634,6 +639,7 @@ export function MediaScreen({
             />
             <div className="mt-3 flex justify-end gap-2">
               <button
+                id="s2p-media-edit-cancel"
                 type="button"
                 onClick={() => setEditPromptOpen(false)}
                 className="inline-flex items-center justify-center rounded-md border border-border bg-card px-3.5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
@@ -641,6 +647,7 @@ export function MediaScreen({
                 Cancel
               </button>
               <button
+                id="s2p-media-edit-apply"
                 type="button"
                 onClick={submitImageOptimization}
                 disabled={!editPrompt.trim() || operation === "loading"}
@@ -656,7 +663,7 @@ export function MediaScreen({
       <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)_320px]">
         <section aria-label="Media library" className="min-w-0">
           <label className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border bg-card px-3 py-3 text-left text-sm transition-colors hover:border-gold hover:bg-gold/5">
-            <input type="file" multiple accept="image/*,video/*" onChange={uploadFiles} className="sr-only" />
+            <input id="s2p-media-upload" type="file" multiple accept="image/*,video/*" onChange={uploadFiles} className="sr-only" />
             <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gold/15 text-gold">
               <ImagePlus className="size-5" aria-hidden="true" />
             </span>
@@ -666,6 +673,7 @@ export function MediaScreen({
             </span>
           </label>
           <button
+            id="s2p-media-open-agent"
             type="button"
             onClick={onOpenAgent}
             className="mt-2 flex w-full items-center gap-2 rounded-lg border border-dashed border-ai/50 bg-ai/10 px-3 py-3 text-left text-sm transition-colors hover:border-ai hover:bg-ai/15"
@@ -682,6 +690,7 @@ export function MediaScreen({
           </button>
           <label className="mt-2 flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
             <input
+              id="s2p-media-use-focal-point-vision"
               type="checkbox"
               checked={useFocalPointVision}
               onChange={(event) => setUseFocalPointVision(event.target.checked)}
@@ -696,6 +705,7 @@ export function MediaScreen({
 
           <div className="mt-3 flex items-center gap-2">
             <button
+              id="s2p-media-previous"
               type="button"
               onClick={() => selectOffset(-1)}
               disabled={!images.length && !pendingImages.length}
@@ -712,6 +722,7 @@ export function MediaScreen({
                     const active = image.id === selectedMediaId
                     return (
                       <button
+                        id={`s2p-media-pending-${image.id}`}
                         key={image.id}
                         type="button"
                         onClick={() => setSelectedMediaId(image.id)}
@@ -736,6 +747,7 @@ export function MediaScreen({
                     const active = image.media_id === selectedImage?.media_id
                     return (
                       <button
+                        id={`s2p-media-select-${image.media_id}`}
                         key={image.media_id}
                         type="button"
                         onClick={() => setSelectedMediaId(image.media_id)}
@@ -775,6 +787,7 @@ export function MediaScreen({
             </div>
 
             <button
+              id="s2p-media-next"
               type="button"
               onClick={() => selectOffset(1)}
               disabled={!images.length && !pendingImages.length}
@@ -839,6 +852,7 @@ export function MediaScreen({
                   {selectedImage.processed_filename ? (
                     <div className="mb-2 flex items-center gap-2" aria-label="Choose image version">
                       <button
+                        id="s2p-media-preview-processed"
                         type="button"
                         onClick={() => setMobilePreviewOriginal(false)}
                         className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
@@ -848,6 +862,7 @@ export function MediaScreen({
                         Processed
                       </button>
                       <button
+                        id="s2p-media-preview-original"
                         type="button"
                         onClick={() => setMobilePreviewOriginal(true)}
                         className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
@@ -871,6 +886,7 @@ export function MediaScreen({
 
                 <div className="mt-4 flex flex-wrap gap-2">
                   <button
+                    id="s2p-media-set-featured"
                     type="button"
                     onClick={setFeatured}
                     disabled={operation === "loading"}
@@ -880,6 +896,7 @@ export function MediaScreen({
                     Featured
                   </button>
                   <button
+                    id="s2p-media-edit-with-ai"
                     type="button"
                     onClick={optimizeImage}
                     disabled={operation === "loading" || !selectedImage.processed_filename}
@@ -889,6 +906,7 @@ export function MediaScreen({
                     Edit with AI
                   </button>
                   <button
+                    id="s2p-media-restore-original"
                     type="button"
                     onClick={restoreOriginal}
                     disabled={operation === "loading" || !selectedImage.processed_filename}
@@ -898,6 +916,7 @@ export function MediaScreen({
                     Restore original
                   </button>
                   <button
+                    id="s2p-media-remove"
                     type="button"
                     onClick={removeImage}
                     disabled={operation === "loading"}
@@ -932,6 +951,7 @@ export function MediaScreen({
               </div>
             </div>
             <textarea
+              id="s2p-media-picture-transcript"
               value={pictureTranscript}
               onChange={(event) => {
                 if (selectedPendingImage) pendingTranscripts.current[selectedPendingImage.id] = event.target.value
@@ -997,6 +1017,7 @@ export function MediaScreen({
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="flex cursor-pointer items-start gap-2 sm:col-span-2">
                   <input
+                    id="s2p-media-use-metadata-vision"
                     type="checkbox"
                     checked={useMetadataVision}
                     onChange={(event) => changeMetadataVision(event.target.checked)}
@@ -1037,6 +1058,7 @@ export function MediaScreen({
                   onChange={(value) => setMetadata((current) => ({ ...current, image_description: value }))}
                 />
                 <button
+                  id="s2p-media-save-picture-data"
                   type="button"
                   onClick={savePictureData}
                   disabled={operation === "loading" || transcriptSaving}

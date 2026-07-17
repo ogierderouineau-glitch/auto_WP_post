@@ -66,6 +66,11 @@ class SessionVersionConflictError(V2Error):
     http_status = 409
 
 
+class SessionBusyError(V2Error):
+    error_code = "session_busy"
+    http_status = 409
+
+
 class MissingRequiredFactsError(V2Error):
     error_code = "missing_required_facts"
     http_status = 409

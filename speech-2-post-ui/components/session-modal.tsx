@@ -50,6 +50,7 @@ export function SessionModal({
             <p className="text-xs text-muted-foreground">Create a workspace or load a recent session.</p>
           </div>
           <button
+            id="s2p-session-modal-close"
             type="button"
             onClick={onClose}
             className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
@@ -65,11 +66,11 @@ export function SessionModal({
               <FilePlus2 className="size-4 text-gold" aria-hidden="true" />
               New session
             </h2>
-            <label htmlFor="post-type" className="mb-1.5 block text-xs font-medium text-muted-foreground">
+            <label htmlFor="s2p-session-post-type" className="mb-1.5 block text-xs font-medium text-muted-foreground">
               Post type
             </label>
             <select
-              id="post-type"
+              id="s2p-session-post-type"
               value={effectivePostType}
               onChange={(event) => setPostType(event.target.value)}
               className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-gold/40"
@@ -84,6 +85,7 @@ export function SessionModal({
               {selected?.wp_category_name || "No category configured"}
             </div>
             <button
+              id="s2p-session-create"
               type="submit"
               disabled={!effectivePostType || loading}
               className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-confirm px-3.5 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
@@ -100,6 +102,7 @@ export function SessionModal({
                 Recent sessions
               </h2>
               <button
+                id="s2p-session-refresh"
                 type="button"
                 onClick={onRefresh}
                 disabled={loading}
@@ -114,6 +117,7 @@ export function SessionModal({
                 recentSessions.map((session) => (
                   <div key={session.session_id} className="flex border-b border-border last:border-b-0 hover:bg-muted">
                     <button
+                      id={`s2p-session-load-${session.session_id}`}
                       type="button"
                       onClick={() => onLoad(session.session_id)}
                       disabled={loading}
@@ -125,6 +129,7 @@ export function SessionModal({
                       </span>
                     </button>
                     <button
+                      id={`s2p-session-delete-${session.session_id}`}
                       type="button"
                       onClick={() => {
                         if (window.confirm(`Permanently delete session ${session.session_id} and its files from GCS?`)) {

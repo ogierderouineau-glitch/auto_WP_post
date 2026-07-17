@@ -117,6 +117,7 @@ function FactRow({
     <div className="rounded-lg border border-border bg-card p-3 lg:grid lg:grid-cols-[minmax(170px,210px)_minmax(0,1fr)_max-content_92px] lg:items-start lg:gap-3 lg:rounded-none lg:border-0 lg:border-b lg:border-border lg:bg-transparent lg:p-2.5">
       <label className="flex min-w-0 cursor-pointer items-start gap-2">
         <input
+          id={`s2p-facts-review-${fact.key}`}
           type="checkbox"
           checked={selectedForReview}
           onChange={onReviewSelectionChange}
@@ -131,6 +132,7 @@ function FactRow({
 
       <div className="mt-2 lg:mt-0">
         <input
+          id={`s2p-facts-value-${fact.key}`}
           type="text"
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -201,6 +203,7 @@ function Section({
   return (
     <div className={`overflow-hidden rounded-xl border ${tone.border} bg-card`}>
       <button
+        id={`s2p-facts-section-${id}`}
         type="button"
         onClick={onToggle}
         aria-expanded={open}
@@ -425,6 +428,7 @@ export function FactsScreen({
 
           <div className="flex flex-wrap items-center gap-2">
             <button
+              id="s2p-facts-toggle-all"
               type="button"
               onClick={() => onSelectedFactKeysChange(allFactsSelected ? [] : rows.map((row) => row.key))}
               title={allFactsSelected ? "Exclude every fact from the next AI review" : "Include every fact in the next AI review"}
@@ -433,6 +437,7 @@ export function FactsScreen({
               {allFactsSelected ? "Uncheck all facts" : "Check all facts"}
             </button>
             <button
+              id="s2p-facts-save"
               type="button"
               data-facts-action
               onClick={handleSave}
@@ -443,6 +448,7 @@ export function FactsScreen({
               Save changes
             </button>
             <button
+              id="s2p-facts-recheck"
               type="button"
               data-facts-action
               onClick={handleRecheck}
@@ -460,19 +466,19 @@ export function FactsScreen({
             {selectedFactKeys.length} of {rows.length} facts selected for AI review.
           </p>
           <div className="grid gap-3 sm:grid-cols-3">
-            <button type="button" onClick={() => toggleSection("required")} aria-pressed={openSection === "required"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "required" ? "bg-destructive/15 ring-1 ring-destructive/30" : "bg-destructive/5 hover:bg-destructive/10"}`}>
+            <button id="s2p-facts-summary-required" type="button" onClick={() => toggleSection("required")} aria-pressed={openSection === "required"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "required" ? "bg-destructive/15 ring-1 ring-destructive/30" : "bg-destructive/5 hover:bg-destructive/10"}`}>
               <CircleAlert className="size-4 shrink-0 text-destructive" aria-hidden="true" />
               <span className="text-sm text-foreground">
                 <span className="font-semibold">{missingRequired}</span> required facts missing
               </span>
             </button>
-            <button type="button" onClick={() => toggleSection("optional")} aria-pressed={openSection === "optional"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "optional" ? "bg-warn/25 ring-1 ring-warn/40" : "bg-warn/10 hover:bg-warn/20"}`}>
+            <button id="s2p-facts-summary-optional" type="button" onClick={() => toggleSection("optional")} aria-pressed={openSection === "optional"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "optional" ? "bg-warn/25 ring-1 ring-warn/40" : "bg-warn/10 hover:bg-warn/20"}`}>
               <CircleHelp className="size-4 shrink-0 text-warn-foreground" aria-hidden="true" />
               <span className="text-sm text-foreground">
                 <span className="font-semibold">{missingOptional}</span> optional facts missing
               </span>
             </button>
-            <button type="button" onClick={() => toggleSection("ai")} aria-pressed={openSection === "ai"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "ai" ? "bg-confirm/15 ring-1 ring-confirm/30" : "bg-confirm/5 hover:bg-confirm/10"}`}>
+            <button id="s2p-facts-summary-ai" type="button" onClick={() => toggleSection("ai")} aria-pressed={openSection === "ai"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "ai" ? "bg-confirm/15 ring-1 ring-confirm/30" : "bg-confirm/5 hover:bg-confirm/10"}`}>
               <Sparkles className="size-4 shrink-0 text-confirm" aria-hidden="true" />
               <span className="text-sm text-foreground">
                 <span className="font-semibold">{aiRows.length}</span> populated facts
@@ -553,6 +559,7 @@ export function FactsScreen({
 
           <div className="flex items-center gap-3">
             <button
+              id="s2p-facts-back-to-media"
               type="button"
               data-facts-action
               onClick={onBackToMedia}
@@ -577,6 +584,7 @@ export function FactsScreen({
             </div>
 
             <button
+              id="s2p-facts-confirm"
               type="button"
               data-facts-action
               onClick={handleConfirm}

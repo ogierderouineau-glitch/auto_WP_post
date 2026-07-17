@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Check,
+  ChevronDown,
   Database,
   Download,
   FileClock,
@@ -13,11 +14,18 @@ import {
   Upload,
   RefreshCw,
   Server,
+  Settings2,
   Trash2,
   X,
 } from "lucide-react"
 import type { AuthResult } from "@/components/auth-modal"
-import { loadSessionJob, type ContentSession, type RecentSession, type WorkbookStatus } from "@/lib/content-sessions"
+import {
+  loadSessionJob,
+  saveSessionGenerationSettings,
+  type ContentSession,
+  type RecentSession,
+  type WorkbookStatus,
+} from "@/lib/content-sessions"
 import { formatTimestamp } from "@/lib/utils"
 
 export type OperationLogEntry = {
@@ -55,14 +63,19 @@ function Section({
   icon: React.ReactNode
   children: React.ReactNode
 }) {
+  const sectionId = title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
   return (
-    <section className="rounded-lg border border-border bg-card p-4">
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+    <details id={`s2p-other-section-${sectionId}`} className="group rounded-lg border border-border bg-card">
+      <summary
+        id={`s2p-other-section-toggle-${sectionId}`}
+        className="flex cursor-pointer list-none items-center gap-2 p-4 text-sm font-semibold text-foreground [&::-webkit-details-marker]:hidden"
+      >
         {icon}
-        {title}
-      </h2>
-      {children}
-    </section>
+        <span>{title}</span>
+        <ChevronDown className="ml-auto size-4 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden="true" />
+      </summary>
+      <div className="px-4 pb-4">{children}</div>
+    </details>
   )
 }
 
@@ -70,6 +83,16 @@ function formatTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+}
+
+function formatDuration(seconds: number) {
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${Math.round(seconds % 60)}s`
+}
+
+function formatOperation(value: string) {
+  return value.replaceAll("_", " ").replace(/^\w/, (character) => character.toUpperCase())
 }
 
 function numberValue(value: unknown) {
@@ -155,6 +178,47 @@ function UsageSummary({ usage }: { usage: Record<string, unknown> }) {
   )
 }
 
+type ModelCallDetail = {
+  call_name?: string
+  model?: string
+  duration_seconds?: number
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+  estimated_cost_usd?: number | null
+}
+
+function OperationModelCalls({ operationId, details }: { operationId: string; details: Record<string, unknown> }) {
+  const calls = Array.isArray(details.model_calls) ? details.model_calls as ModelCallDetail[] : []
+  if (!calls.length) return null
+
+  return (
+    <details id={`s2p-operation-calls-${operationId}`} className="mt-2 rounded-md border border-border bg-background px-2.5 py-2">
+      <summary id={`s2p-operation-calls-toggle-${operationId}`} className="cursor-pointer text-xs font-semibold text-foreground">
+        Model calls ({calls.length})
+      </summary>
+      <div className="mt-2 space-y-2">
+        {calls.map((call, index) => (
+          <div key={`${call.call_name || "call"}-${index}`} className="rounded border border-border bg-panel px-2.5 py-2 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-1">
+              <span className="font-medium text-foreground">{formatOperation(call.call_name || `Call ${index + 1}`)}</span>
+              <span className="text-muted-foreground">{call.duration_seconds != null ? formatDuration(call.duration_seconds) : "Duration unavailable"}</span>
+            </div>
+            <p className="mt-1 text-muted-foreground">
+              {call.model || "Unknown model"}
+              {call.total_tokens ? ` · ${formatInteger(call.total_tokens)} tokens` : ""}
+              {call.estimated_cost_usd != null ? ` · ${formatUsd(call.estimated_cost_usd)}` : ""}
+            </p>
+            <p className="mt-0.5 text-muted-foreground">
+              {formatInteger(call.prompt_tokens)} input · {formatInteger(call.completion_tokens)} output
+            </p>
+          </div>
+        ))}
+      </div>
+    </details>
+  )
+}
+
 export function OtherFunctionsDrawer({
   open,
   auth,
@@ -199,6 +263,48 @@ export function OtherFunctionsDrawer({
   const [jobRecoveryMessage, setJobRecoveryMessage] = useState("")
   const [workbookOperation, setWorkbookOperation] = useState<"idle" | "uploading" | "downloading">("idle")
   const [workbookMessage, setWorkbookMessage] = useState("")
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [settingsMessage, setSettingsMessage] = useState("")
+  const settingsSavingRef = useRef(false)
+  const latestSessionRef = useRef(session)
+
+  useEffect(() => {
+    latestSessionRef.current = session
+  }, [session])
+
+  const generationSettings = workbook?.generation_settings
+  const selectedLanguageModel = session?.language_model || generationSettings?.default_language_model || "gpt-5.6"
+  const configuredReasoningEffort = session?.reasoning_effort || generationSettings?.default_reasoning_effort || "low"
+  const selectedReasoningEffort = selectedLanguageModel === "gpt-5-mini" && configuredReasoningEffort === "none"
+    ? "minimal"
+    : configuredReasoningEffort
+  const selectedGenerationMode = session?.generation_mode || "batched"
+  const languageModels = Array.from(new Set([selectedLanguageModel, ...(generationSettings?.language_models || [])]))
+  const reasoningEfforts = Array.from(new Set([selectedReasoningEffort, ...(generationSettings?.reasoning_efforts || [])]))
+    .filter((effort) => selectedLanguageModel !== "gpt-5-mini" || effort !== "none")
+
+  async function saveGenerationSettings(
+    languageModel: string,
+    reasoningEffort: string,
+    generationMode: "batched" | "single" = selectedGenerationMode,
+  ) {
+    const currentSession = latestSessionRef.current
+    if (!auth || !currentSession || settingsSavingRef.current) return
+    settingsSavingRef.current = true
+    setSettingsSaving(true)
+    setSettingsMessage("")
+    try {
+      const response = await saveSessionGenerationSettings(auth, currentSession, languageModel, reasoningEffort, generationMode)
+      latestSessionRef.current = response.session
+      onSessionChange(response.session)
+      setSettingsMessage("Generation settings saved for this session.")
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "Could not save generation settings.")
+    } finally {
+      settingsSavingRef.current = false
+      setSettingsSaving(false)
+    }
+  }
 
   async function runWorkbookAction(action: "uploading" | "downloading", callback: () => Promise<void>) {
     setWorkbookOperation(action)
@@ -261,6 +367,7 @@ export function OtherFunctionsDrawer({
             <p className="text-xs text-muted-foreground">Workspace status, recovery, config and session tools.</p>
           </div>
           <button
+            id="s2p-other-close"
             type="button"
             onClick={onClose}
             className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
@@ -271,6 +378,66 @@ export function OtherFunctionsDrawer({
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
+          <Section title="Generation settings" icon={<Settings2 className="size-4 text-gold" aria-hidden="true" />}>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="space-y-1.5 text-sm font-medium text-foreground">
+                <span>Language model</span>
+                <select
+                  id="s2p-other-language-model"
+                  value={selectedLanguageModel}
+                  disabled={!session || loading || settingsSaving}
+                  onChange={(event) => {
+                    const model = event.target.value
+                    const effort = model === "gpt-5-mini" && selectedReasoningEffort === "none"
+                      ? "minimal"
+                      : selectedReasoningEffort
+                    void saveGenerationSettings(model, effort)
+                  }}
+                  className="w-full rounded-md border border-border bg-panel px-3 py-2 text-sm text-foreground disabled:opacity-60"
+                >
+                  {languageModels.map((model) => (
+                    <option key={model} value={model}>{model}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1.5 text-sm font-medium text-foreground">
+                <span>Reasoning effort</span>
+                <select
+                  id="s2p-other-reasoning-effort"
+                  value={selectedReasoningEffort}
+                  disabled={!session || loading || settingsSaving}
+                  onChange={(event) => void saveGenerationSettings(selectedLanguageModel, event.target.value)}
+                  className="w-full rounded-md border border-border bg-panel px-3 py-2 text-sm capitalize text-foreground disabled:opacity-60"
+                >
+                  {reasoningEfforts.map((effort) => (
+                    <option key={effort} value={effort}>{effort}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1.5 text-sm font-medium text-foreground">
+                <span>Generation calls</span>
+                <select
+                  id="s2p-other-generation-mode"
+                  value={selectedGenerationMode}
+                  disabled={!session || loading || settingsSaving}
+                  onChange={(event) => void saveGenerationSettings(
+                    selectedLanguageModel,
+                    selectedReasoningEffort,
+                    event.target.value as "batched" | "single",
+                  )}
+                  className="w-full rounded-md border border-border bg-panel px-3 py-2 text-sm text-foreground disabled:opacity-60"
+                >
+                  <option value="batched">Batched (safer)</option>
+                  <option value="single">Single call (test)</option>
+                </select>
+              </label>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Controls analysis and full draft generation for this session. Single call avoids repeated context but sends a larger schema and response, which may be more vulnerable to provider timeouts.
+            </p>
+            {settingsMessage ? <p className="mt-2 text-xs text-muted-foreground">{settingsMessage}</p> : null}
+          </Section>
+
           <Section title="Global status" icon={<Server className="size-4 text-gold" aria-hidden="true" />}>
             <div className="divide-y divide-border rounded-md border border-border bg-panel px-3">
               <InfoRow
@@ -308,6 +475,7 @@ export function OtherFunctionsDrawer({
                 {workbookOperation === "uploading" ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
                 Database Datei aktualisieren
                 <input
+                  id="s2p-other-workbook-upload"
                   type="file"
                   accept=".xlsm,.xlsx"
                   className="sr-only"
@@ -320,6 +488,7 @@ export function OtherFunctionsDrawer({
                 />
               </label>
               <button
+                id="s2p-other-workbook-download"
                 type="button"
                 disabled={!auth || workbookOperation !== "idle"}
                 onClick={() => void runWorkbookAction("downloading", onDownloadWorkbook)}
@@ -348,6 +517,7 @@ export function OtherFunctionsDrawer({
             )}
             <div className="mt-3 flex flex-wrap gap-2">
               <button
+                id="s2p-other-reload-session"
                 type="button"
                 onClick={onReloadSession}
                 disabled={!session || loading}
@@ -357,6 +527,7 @@ export function OtherFunctionsDrawer({
                 Reload session
               </button>
               <button
+                id="s2p-other-open-session-menu"
                 type="button"
                 onClick={onOpenSessionMenu}
                 className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground hover:bg-muted"
@@ -370,6 +541,7 @@ export function OtherFunctionsDrawer({
           <Section title="Session archive" icon={<FolderOpen className="size-4 text-gold" aria-hidden="true" />}>
             <div className="mb-3 flex justify-end">
               <button
+                id="s2p-other-refresh-archive"
                 type="button"
                 onClick={onRefreshRecent}
                 disabled={loading}
@@ -384,6 +556,7 @@ export function OtherFunctionsDrawer({
                 recentSessions.map((item) => (
                   <div key={item.session_id} className="flex border-b border-border last:border-b-0 hover:bg-muted">
                     <button
+                      id={`s2p-other-load-session-${item.session_id}`}
                       type="button"
                       onClick={() => onLoadSession(item.session_id)}
                       disabled={loading}
@@ -395,6 +568,7 @@ export function OtherFunctionsDrawer({
                       </span>
                     </button>
                     <button
+                      id={`s2p-other-delete-session-${item.session_id}`}
                       type="button"
                       onClick={() => {
                         if (window.confirm(`Permanently delete session ${item.session_id} and its files from GCS?`)) {
@@ -425,6 +599,28 @@ export function OtherFunctionsDrawer({
           </Section>
 
           <Section title="Operation log" icon={<FileClock className="size-4 text-gold" aria-hidden="true" />}>
+            {session?.operation_log?.length ? (
+              <ol className="mb-3 space-y-2">
+                {session.operation_log.map((entry) => (
+                  <li key={entry.operation_id} className="rounded-md border border-border bg-panel px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-foreground">{formatOperation(entry.operation)}</span>
+                      <span className="text-xs text-muted-foreground">{formatTime(entry.finished_at)}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {entry.status} · {formatDuration(entry.duration_seconds)}
+                      {entry.total_tokens ? ` · ${formatInteger(entry.total_tokens)} tokens` : ""}
+                      {entry.estimated_cost_usd != null ? ` · ${formatUsd(entry.estimated_cost_usd)}` : ""}
+                      {entry.details?.model ? ` · ${String(entry.details.model)}` : ""}
+                      {entry.details?.reasoning_effort ? ` · reasoning ${String(entry.details.reasoning_effort)}` : ""}
+                      {entry.details?.generation_mode ? ` · ${String(entry.details.generation_mode)}` : ""}
+                    </p>
+                    <OperationModelCalls operationId={entry.operation_id} details={entry.details || {}} />
+                    {entry.error ? <p className="mt-1 text-xs text-destructive">{entry.error}</p> : null}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
             {operationLog.length ? (
               <ol className="space-y-2">
                 {operationLog.map((entry) => (
@@ -438,7 +634,7 @@ export function OtherFunctionsDrawer({
                 ))}
               </ol>
             ) : (
-              <p className="text-sm text-muted-foreground">No frontend operations recorded yet.</p>
+              !session?.operation_log?.length ? <p className="text-sm text-muted-foreground">No session operations recorded yet.</p> : null
             )}
           </Section>
 
@@ -451,6 +647,7 @@ export function OtherFunctionsDrawer({
                     <p className="mt-0.5 font-mono text-xs text-muted-foreground">{storedJob.jobId}</p>
                   </div>
                   <button
+                    id="s2p-other-recover-job"
                     type="button"
                     onClick={() => void recoverStoredJob()}
                     disabled={jobRecovery === "loading"}

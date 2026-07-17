@@ -32,6 +32,11 @@ class InternalLinkInjectionResult:
 
 
 class InternalLinkService:
+    SEARCH_STOP_TERMS = {
+        "aber", "auch", "das", "der", "die", "ein", "eine", "einer", "eines",
+        "für", "ist", "mit", "oder", "und", "von", "wenn", "wird", "zum", "zur",
+        "event", "events", "flairlab",
+    }
     BODY_FIELD_PRIORITY = (
         "hero_intro",
         "event_story",
@@ -90,6 +95,59 @@ class InternalLinkService:
             candidates=tuple(candidates),
             empty_reason=None if candidates else "deterministic_filter_returned_zero_candidates",
         )
+
+    def rank(
+        self,
+        eligible: EligibleLinks,
+        *,
+        source_text: str,
+        context_tags: tuple[str, ...] = (),
+        content_signals: tuple[str, ...] = (),
+        maximum: int | None = None,
+    ) -> list[dict[str, str]]:
+        """Rank curated candidates without an extra language-model request."""
+
+        haystack = self._search_terms(
+            " ".join((source_text, *context_tags, *content_signals))
+        )
+        priority_score = {"high": 3, "medium": 2, "low": 1}
+        scored: list[tuple[int, int, str, InternalLinkRecord]] = []
+        for row in eligible.candidates:
+            keyword_terms = self._search_terms(
+                " ".join(
+                    (
+                        row.keyword,
+                        row.category,
+                        row.usage_context,
+                        row.city or "",
+                        row.anchor_text,
+                        *row.anchor_variants,
+                    )
+                )
+            )
+            overlap = len(haystack.intersection(keyword_terms))
+            phrase_bonus = sum(
+                4
+                for phrase in (row.keyword, row.category, row.city or "")
+                if phrase and phrase.casefold() in source_text.casefold()
+            )
+            score = overlap * 2 + phrase_bonus
+            scored.append((score, priority_score.get(row.priority, 0), row.link_id, row))
+        scored.sort(key=lambda item: (-item[0], -item[1], item[2]))
+        limit = maximum if maximum is not None else len(scored)
+        return [
+            {"link_id": row.link_id, "anchor_text": row.anchor_text}
+            for score, _, _, row in scored[:limit]
+            if score >= 2
+        ]
+
+    @staticmethod
+    def _search_terms(value: str) -> set[str]:
+        return {
+            term
+            for term in re.findall(r"[\wäöüß-]+", value.casefold())
+            if len(term) >= 3 and term not in InternalLinkService.SEARCH_STOP_TERMS
+        }
 
     def inject(
         self,
@@ -238,6 +296,59 @@ class InternalLinkService:
             injected=injected,
             skipped=skipped,
         )
+
+    def existing_anchor_placements(
+        self,
+        eligible: EligibleLinks,
+        selections: list[dict[str, str]],
+        *,
+        acf_source_fields: dict[str, Any],
+        linkable_fields: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Plan safe exact matches locally, honoring an explicitly requested ACF destination."""
+        records = {row.link_id: row for row in eligible.candidates}
+        placements: list[dict[str, Any]] = []
+        for selection in selections:
+            link_id = str(selection.get("link_id") or "")
+            record = records.get(link_id)
+            if record is None:
+                continue
+            destination = str(selection.get("destination_acf") or "")
+            selected_anchor = self._valid_anchor(record, str(selection.get("anchor_text") or ""))
+            approved = {record.anchor_text.casefold(), *(item.casefold() for item in record.anchor_variants)}
+            anchors = [
+                anchor for anchor in self._anchor_candidates(record, selected_anchor)
+                if anchor.casefold() in approved
+            ]
+            placed = False
+            for field_key, field_schema in linkable_fields.items():
+                field_destination = str(getattr(field_schema, "acf_field_name", None) or field_key)
+                if destination and field_destination != destination:
+                    continue
+                value = acf_source_fields.get(field_key)
+                if not isinstance(value, str) or not value.strip():
+                    continue
+                protected_ranges = self._protected_ranges(value)
+                for anchor in anchors:
+                    matches = [
+                        match
+                        for match in self._anchor_pattern(anchor).finditer(value)
+                        if not self._range_overlaps(match.start(), match.end(), protected_ranges)
+                    ]
+                    if len(matches) != 1:
+                        continue
+                    placements.append({
+                        "link_id": link_id,
+                        "field_key": field_key,
+                        "match_text": matches[0].group(0),
+                        "anchor_text": selected_anchor,
+                        "placement_mode": "wrap_existing_text",
+                    })
+                    placed = True
+                    break
+                if placed:
+                    break
+        return placements
 
     @staticmethod
     def _replace_sentence(value: str, sentence_index: Any, replacement: str) -> str | None:

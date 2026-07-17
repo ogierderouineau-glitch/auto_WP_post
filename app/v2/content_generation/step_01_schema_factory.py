@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Literal
 
@@ -11,6 +12,16 @@ from app.v2.knowledge_base.step_01_models import (
     ImageMetadataField,
     SharedFieldSchema,
 )
+
+WORD_TOLERANCE = 0.20
+
+
+def _effective_minimum_words(minimum: int) -> int:
+    return math.ceil(minimum * (1 - WORD_TOLERANCE))
+
+
+def _effective_maximum_words(maximum: int) -> int:
+    return math.floor(maximum * (1 + WORD_TOLERANCE))
 
 
 class NormalizedFocalPoint(BaseModel):
@@ -130,10 +141,18 @@ def build_generation_model(
                 if not value:
                     continue
                 count = len(str(value).split())
-                if minimum is not None and count < minimum:
-                    raise ValueError(f"{field_key} requires at least {minimum} words; received {count}.")
-                if maximum is not None and count > maximum:
-                    raise ValueError(f"{field_key} allows at most {maximum} words; received {count}.")
+                if minimum is not None and count < _effective_minimum_words(minimum):
+                    raise ValueError(
+                        f"{field_key} targets at least {minimum} words "
+                        f"(minimum accepted with 20% tolerance: {_effective_minimum_words(minimum)}); "
+                        f"received {count}."
+                    )
+                if maximum is not None and count > _effective_maximum_words(maximum):
+                    raise ValueError(
+                        f"{field_key} targets at most {maximum} words "
+                        f"(maximum accepted with 20% tolerance: {_effective_maximum_words(maximum)}); "
+                        f"received {count}."
+                    )
             for field_key in raw_aggregation_fields:
                 value = getattr(self, field_key, None)
                 if isinstance(value, str) and ("<" in value or ">" in value):
@@ -269,4 +288,22 @@ def build_image_metadata_model(
         "ImageMetadataResponse",
         __base__=ImageMetadataBase,
         **fields,
+    )
+
+
+def build_image_metadata_batch_model(
+    rows: list[ImageMetadataField],
+    *,
+    media_ids: tuple[str, ...],
+) -> type[BaseModel]:
+    metadata_model = build_image_metadata_model(rows, enum_families={})
+    item_model = create_model(
+        "ImageMetadataBatchItem",
+        __base__=metadata_model,
+        media_id=(Literal.__getitem__(media_ids), ...),
+    )
+    return create_model(
+        "ImageMetadataBatchResponse",
+        __config__=ConfigDict(extra="forbid"),
+        images=(list[item_model], ...),
     )
