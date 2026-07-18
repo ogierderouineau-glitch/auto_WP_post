@@ -21,6 +21,7 @@ import {
   startImageMetadataGeneration,
   saveSessionDraftFields,
   startSessionGeneration,
+  startSessionPublish,
   waitForSessionJob,
   type ContentSession,
   type WorkbookStatus,
@@ -314,6 +315,7 @@ export function ContentScreen({
 
   async function handleGenerate() {
     if (!auth || !session) return
+    const isFirstGeneration = !draftReady
     setOperation("loading")
     setActiveAction("generate")
     setMessage("Starting generation...")
@@ -333,15 +335,42 @@ export function ContentScreen({
       sessionStorage.removeItem(ACTIVE_JOB_STORAGE)
       onSessionChange(nextSession)
       setOperation("success")
-      setMessage("Draft generated. Image metadata continues in the background.")
+      setMessage(isFirstGeneration ? "Draft generated. Preparing the WordPress post in the background..." : "Draft regenerated.")
       setQueuedLinks({})
-      if (nextSession.image_refs.length) {
+      if (isFirstGeneration) {
         setBackgroundMetadata(true)
-        void startImageMetadataGeneration(auth, nextSession)
-          .then((job) => waitForSessionJob(auth, job.job_id))
-          .then((metadataSession) => onSessionChange(metadataSession))
+        void Promise.resolve(nextSession)
+          .then(async (generatedSession) => {
+            if (!generatedSession.image_refs.length) return generatedSession
+            setMessage("Generating image metadata before publishing...")
+            const metadataJob = await startImageMetadataGeneration(auth, generatedSession)
+            const metadataSession = await waitForSessionJob(auth, metadataJob.job_id)
+            onSessionChange(metadataSession)
+            return metadataSession
+          })
+          .then(async (metadataSession) => {
+            setMessage("Approving the first draft for WordPress...")
+            const approved = await approveSessionContent(auth, metadataSession)
+            onSessionChange(approved.session)
+            setMessage("Creating the WordPress post...")
+            const publishJob = await startSessionPublish(auth, approved.session)
+            sessionStorage.setItem(
+              ACTIVE_JOB_STORAGE,
+              JSON.stringify({
+                jobId: publishJob.job_id,
+                operation: "publish",
+                sessionId: approved.session.session_id,
+                at: new Date().toISOString(),
+              }),
+            )
+            const publishedSession = await waitForSessionJob(auth, publishJob.job_id)
+            sessionStorage.removeItem(ACTIVE_JOB_STORAGE)
+            onSessionChange(publishedSession)
+            setMessage("Draft generated and WordPress post created.")
+          })
           .catch((error) => {
-            console.warn("Background image metadata could not be completed.", error)
+            setOperation("error")
+            setMessage(error instanceof Error ? `Draft generated, but automatic WordPress publishing failed: ${error.message}` : "Draft generated, but automatic WordPress publishing failed.")
           })
           .finally(() => setBackgroundMetadata(false))
       }

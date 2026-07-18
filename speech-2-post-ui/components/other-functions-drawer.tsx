@@ -553,13 +553,19 @@ export function OtherFunctionsDrawer({
             </div>
             <div className="max-h-64 overflow-y-auto rounded-md border border-border bg-panel">
               {recentSessions.length ? (
-                recentSessions.map((item) => (
-                  <div key={item.session_id} className="flex border-b border-border last:border-b-0 hover:bg-muted">
+                recentSessions.map((item) => {
+                  const isActive = item.session_id === session?.session_id
+                  return (
+                    <div
+                      key={item.session_id}
+                      className={`flex border-b border-border last:border-b-0 ${isActive ? "bg-gold/15 ring-1 ring-inset ring-gold/50" : "hover:bg-muted"}`}
+                    >
                     <button
                       id={`s2p-other-load-session-${item.session_id}`}
                       type="button"
                       onClick={() => onLoadSession(item.session_id)}
                       disabled={loading}
+                      aria-current={isActive ? "true" : undefined}
                       className="min-w-0 flex-1 px-3 py-2 text-left disabled:opacity-60"
                     >
                       <span className="block truncate font-mono text-xs text-foreground">{item.session_id}</span>
@@ -582,8 +588,9 @@ export function OtherFunctionsDrawer({
                     >
                       <Trash2 className="size-4" aria-hidden="true" />
                     </button>
-                  </div>
-                ))
+                    </div>
+                  )
+                })
               ) : (
                 <p className="px-3 py-6 text-center text-sm text-muted-foreground">No recent V2 sessions found.</p>
               )}

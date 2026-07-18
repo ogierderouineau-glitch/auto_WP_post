@@ -8,6 +8,7 @@ import { formatTimestamp } from "@/lib/utils"
 export function SessionModal({
   postTypes,
   selectedPostType,
+  activeSessionId,
   recentSessions,
   loading,
   error,
@@ -19,6 +20,7 @@ export function SessionModal({
 }: {
   postTypes: PostTypeOption[]
   selectedPostType: string
+  activeSessionId?: string
   recentSessions: RecentSession[]
   loading: boolean
   error: string
@@ -114,13 +116,19 @@ export function SessionModal({
             </div>
             <div className="max-h-72 overflow-y-auto rounded-md border border-border bg-card">
               {recentSessions.length ? (
-                recentSessions.map((session) => (
-                  <div key={session.session_id} className="flex border-b border-border last:border-b-0 hover:bg-muted">
+                recentSessions.map((session) => {
+                  const isActive = session.session_id === activeSessionId
+                  return (
+                    <div
+                      key={session.session_id}
+                      className={`flex border-b border-border last:border-b-0 ${isActive ? "bg-gold/15 ring-1 ring-inset ring-gold/50" : "hover:bg-muted"}`}
+                    >
                     <button
                       id={`s2p-session-load-${session.session_id}`}
                       type="button"
                       onClick={() => onLoad(session.session_id)}
                       disabled={loading}
+                      aria-current={isActive ? "true" : undefined}
                       className="min-w-0 flex-1 px-3 py-2 text-left disabled:opacity-60"
                     >
                       <span className="block truncate text-sm font-medium text-foreground">{session.session_id}</span>
@@ -143,8 +151,9 @@ export function SessionModal({
                     >
                       <Trash2 className="size-4" aria-hidden="true" />
                     </button>
-                  </div>
-                ))
+                    </div>
+                  )
+                })
               ) : (
                 <div className="px-3 py-6 text-center text-sm text-muted-foreground">No recent V2 sessions found.</div>
               )}

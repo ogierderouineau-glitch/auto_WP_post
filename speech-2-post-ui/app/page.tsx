@@ -432,6 +432,7 @@ export default function Page() {
         <SessionModal
           postTypes={workbook?.post_types || []}
           selectedPostType={selectedPostType}
+          activeSessionId={session?.session_id}
           recentSessions={recentSessions}
           loading={loading}
           error={error}
