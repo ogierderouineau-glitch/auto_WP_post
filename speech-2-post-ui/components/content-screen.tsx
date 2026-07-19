@@ -181,7 +181,8 @@ export function ContentScreen({
   const canApprove = !!auth && !!session && draftReady && session.state === "needs_review"
   const visibleLinkIds = useMemo(() => {
     const selected = new Set((session?.selected_links || []).map((selection) => selection.link_id))
-    return selected.size ? selected : new Set(session?.eligible_link_ids || [])
+    for (const linkId of session?.eligible_link_ids || []) selected.add(linkId)
+    return selected
   }, [session?.eligible_link_ids, session?.selected_links])
   const linkCandidates = useMemo(
     () => (workbook?.internal_link_candidates || []).filter(

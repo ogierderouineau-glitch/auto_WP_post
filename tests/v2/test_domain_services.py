@@ -308,6 +308,51 @@ class InternalLinkInjectionTests(unittest.TestCase):
         )
         self.assertEqual(len(result.injected), 2)
 
+    def test_internal_link_ranking_prefers_smoothie_link_for_smoothie_event(self) -> None:
+        smoothie = InternalLinkRecord(
+            sheet_row=1,
+            link_id="link_018",
+            post_type_key="*",
+            keyword="Smoothiebar Berlin",
+            anchor_text="Smoothiebar in Berlin",
+            anchor_variants=("Smoothiebar", "mobile Smoothiebar", "Smoothie-Catering", "Smoothie-Bar"),
+            target_url="https://flairlab.de/smoothie-catering/",
+            link_role="service",
+            category="Service",
+            priority="medium",
+            active=True,
+            usage_context="Für Smoothiebar, Smoothie-Fahrrad, alkoholfreie Konzepte, Smoothies",
+            city="Berlin",
+            language="de-DE",
+        )
+        generic = InternalLinkRecord(
+            sheet_row=2,
+            link_id="link_001",
+            post_type_key="*",
+            keyword="Cocktailcatering Berlin",
+            anchor_text="Cocktailcatering in Berlin",
+            anchor_variants=(),
+            target_url="https://flairlab.de/cocktailcatering/",
+            link_role="service",
+            category="Service",
+            priority="high",
+            active=True,
+            usage_context="Für Cocktailcatering und mobile Bars",
+            city="Berlin",
+            language="de-DE",
+        )
+
+        ranked = InternalLinkService().rank(
+            EligibleLinks(candidates=(generic, smoothie)),
+            source_text=(
+                "Politische Promotionsveranstaltung mit Smoothie-Fahrrad, "
+                "Smoothie-Catering, frischen Smoothies und alkoholfreien Konzepten in Berlin."
+            ),
+            maximum=1,
+        )
+
+        self.assertEqual(ranked, [{"link_id": "link_018", "anchor_text": "Smoothiebar in Berlin"}])
+
     def test_internal_link_placement_can_rewrite_one_sentence_with_approved_anchor(self) -> None:
         record = InternalLinkRecord(
             sheet_row=1,

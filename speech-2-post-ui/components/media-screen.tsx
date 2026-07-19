@@ -662,9 +662,9 @@ export function MediaScreen({
       )}
       <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)_320px]">
         <section aria-label="Media library" className="min-w-0">
-          <label className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border bg-card px-3 py-3 text-left text-sm transition-colors hover:border-gold hover:bg-gold/5">
+          <label className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-dashed border-gold/70 bg-gold/18 px-3 py-3 text-left text-sm shadow-[0_8px_18px_rgba(170,130,0,0.12)] transition-colors hover:border-gold hover:bg-gold/26">
             <input id="s2p-media-upload" type="file" multiple accept="image/*,video/*" onChange={uploadFiles} className="sr-only" />
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gold/15 text-gold">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gold/25 text-gold">
               <ImagePlus className="size-5" aria-hidden="true" />
             </span>
             <span>
