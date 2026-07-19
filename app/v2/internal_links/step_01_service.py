@@ -128,7 +128,13 @@ class InternalLinkService:
             overlap = len(haystack.intersection(keyword_terms))
             phrase_bonus = sum(
                 4
-                for phrase in (row.keyword, row.category, row.city or "")
+                for phrase in (
+                    row.keyword,
+                    row.anchor_text,
+                    *row.anchor_variants,
+                    row.category,
+                    row.city or "",
+                )
                 if phrase and phrase.casefold() in source_text.casefold()
             )
             score = overlap * 2 + phrase_bonus

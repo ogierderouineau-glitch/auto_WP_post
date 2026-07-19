@@ -353,6 +353,48 @@ class InternalLinkInjectionTests(unittest.TestCase):
 
         self.assertEqual(ranked, [{"link_id": "link_018", "anchor_text": "Smoothiebar in Berlin"}])
 
+    def test_internal_link_ranking_uses_approved_anchor_variants_as_strong_signal(self) -> None:
+        smoothie = InternalLinkRecord(
+            sheet_row=1,
+            link_id="link_018",
+            post_type_key="*",
+            keyword="Smoothiebar Berlin",
+            anchor_text="Smoothiebar in Berlin",
+            anchor_variants=("Smoothie-Catering",),
+            target_url="https://flairlab.de/smoothie-catering/",
+            link_role="service",
+            category="Service",
+            priority="medium",
+            active=True,
+            usage_context="Für alkoholfreie Konzepte",
+            city="Berlin",
+            language="de-DE",
+        )
+        generic = InternalLinkRecord(
+            sheet_row=2,
+            link_id="link_001",
+            post_type_key="*",
+            keyword="Cocktailcatering Berlin",
+            anchor_text="Cocktailcatering in Berlin",
+            anchor_variants=(),
+            target_url="https://flairlab.de/cocktailcatering/",
+            link_role="service",
+            category="Service",
+            priority="high",
+            active=True,
+            usage_context="Für Events in Berlin",
+            city="Berlin",
+            language="de-DE",
+        )
+
+        ranked = InternalLinkService().rank(
+            EligibleLinks(candidates=(generic, smoothie)),
+            source_text="Das Smoothie-Catering war der Mittelpunkt der Promotion.",
+            maximum=1,
+        )
+
+        self.assertEqual(ranked[0]["link_id"], "link_018")
+
     def test_internal_link_placement_can_rewrite_one_sentence_with_approved_anchor(self) -> None:
         record = InternalLinkRecord(
             sheet_row=1,

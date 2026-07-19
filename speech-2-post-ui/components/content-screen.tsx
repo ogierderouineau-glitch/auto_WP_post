@@ -17,6 +17,7 @@ import {
 import type { ApiClientOptions } from "@/lib/api"
 import {
   approveSessionContent,
+  loadContentSession,
   regenerateSessionDraft,
   startImageMetadataGeneration,
   saveSessionDraftFields,
@@ -26,6 +27,7 @@ import {
   type ContentSession,
   type WorkbookStatus,
 } from "@/lib/content-sessions"
+import { ApiError } from "@/lib/api"
 
 type FieldScope = "shared" | "acf"
 type ContentSectionId = "wordpress" | "acf"
@@ -181,8 +183,7 @@ export function ContentScreen({
   const canApprove = !!auth && !!session && draftReady && session.state === "needs_review"
   const visibleLinkIds = useMemo(() => {
     const selected = new Set((session?.selected_links || []).map((selection) => selection.link_id))
-    for (const linkId of session?.eligible_link_ids || []) selected.add(linkId)
-    return selected
+    return selected.size ? selected : new Set(session?.eligible_link_ids || [])
   }, [session?.eligible_link_ids, session?.selected_links])
   const linkCandidates = useMemo(
     () => (workbook?.internal_link_candidates || []).filter(
@@ -276,6 +277,25 @@ export function ContentScreen({
       onConnectionIssue: () => setMessage("Connection interrupted. Generation is still running; reconnecting..."),
       onConnectionRestored: () => setMessage("Connection restored. Generating content..."),
     })
+  }
+
+  function isSessionVersionConflict(error: unknown) {
+    if (!(error instanceof ApiError) || error.status !== 409) return false
+    if (/changed from version/i.test(error.message)) return true
+    const payload = error.payload as { error_code?: unknown; detail?: { error_code?: unknown } | unknown } | null
+    const code = typeof payload?.error_code === "string"
+      ? payload.error_code
+      : (typeof payload?.detail === "object" && payload?.detail && "error_code" in payload.detail && typeof (payload.detail as { error_code?: unknown }).error_code === "string")
+        ? (payload.detail as { error_code: string }).error_code
+        : ""
+    return code === "session_version_conflict"
+  }
+
+  async function reloadLatestSession() {
+    if (!auth || !session) throw new Error("Authentication is required.")
+    const latest = await loadContentSession(auth, session.session_id)
+    onSessionChange(latest.session)
+    return latest.session
   }
 
   useEffect(() => {
@@ -388,7 +408,15 @@ export function ContentScreen({
     setOperation("loading")
     setActiveAction("revise")
     setMessage("Saving draft fields...")
-    const data = await saveSessionDraftFields(auth, session, changed.shared, changed.acf)
+    let data
+    try {
+      data = await saveSessionDraftFields(auth, session, changed.shared, changed.acf)
+    } catch (error) {
+      if (!isSessionVersionConflict(error)) throw error
+      setMessage("Session updated in the background. Syncing latest version and retrying save...")
+      const latestSession = await reloadLatestSession()
+      data = await saveSessionDraftFields(auth, latestSession, changed.shared, changed.acf)
+    }
     onSessionChange(data.session)
     setOperation("success")
     setMessage("Draft fields saved.")
@@ -411,13 +439,27 @@ export function ContentScreen({
     setMessage("Sending instruction to content agent...")
     try {
       const saved = changedCount ? await handleSave() : session
-      const job = await regenerateSessionDraft(
-        auth,
-        saved || session,
-        agentMessage.trim(),
-        selectedRevisionFieldIds,
-        selectedLinksForAgent,
-      )
+      let job
+      try {
+        job = await regenerateSessionDraft(
+          auth,
+          saved || session,
+          agentMessage.trim(),
+          selectedRevisionFieldIds,
+          selectedLinksForAgent,
+        )
+      } catch (error) {
+        if (!isSessionVersionConflict(error)) throw error
+        setMessage("Session updated in the background. Syncing latest version and retrying regeneration...")
+        const latestSession = await reloadLatestSession()
+        job = await regenerateSessionDraft(
+          auth,
+          latestSession,
+          agentMessage.trim(),
+          selectedRevisionFieldIds,
+          selectedLinksForAgent,
+        )
+      }
       sessionStorage.setItem(
         ACTIVE_JOB_STORAGE,
         JSON.stringify({
@@ -526,7 +568,15 @@ export function ContentScreen({
         </div>
 
         {message && (
-          <p className={`mt-4 rounded-md px-3 py-2 text-sm ${operation === "error" ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>
+          <p
+            className={`mt-4 rounded-md px-3 py-2 text-sm ${
+              operation === "error"
+                ? "bg-destructive/10 text-destructive"
+                : message === "Selected fields regenerated."
+                  ? "bg-confirm/15 text-confirm"
+                  : "bg-muted text-muted-foreground"
+            }`}
+          >
             {message}
           </p>
         )}
@@ -667,18 +717,6 @@ export function ContentScreen({
                                   else delete next[candidate.link_id]
                                   return next
                                 })
-                                if (event.target.checked) {
-                                  const firstLinkableField = fields.find((field) =>
-                                    field.scope === "acf" && workbook?.internal_link_acf_fields?.some(
-                                      (destination) => workbook.acf_fields?.some(
-                                        (schema) => schema.field_key === field.key && schema.acf_field_name === destination.acf_field_name,
-                                      ),
-                                    ),
-                                  )
-                                  if (firstLinkableField) {
-                                    setRevisionFieldIds((current) => current.includes(firstLinkableField.id) ? current : [...current, firstLinkableField.id])
-                                  }
-                                }
                               }}
                               className="mt-0.5 size-4 accent-gold"
                             />
