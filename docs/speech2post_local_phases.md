@@ -632,6 +632,11 @@ Current behavior:
 - The WordPress screen no longer uses simulated post IDs or fake changed fields.
 - Create Post starts `POST /publish-job` with `force_create_new: true` and polls
   `GET /jobs/{job_id}` until the backend returns the updated session.
+- After the first successful publication, Create Post is disabled while the
+  current payload matches the published payload. It becomes Re-create Post
+  after content changes; this uses `force_create_new: true` to publish the full
+  current content and media to a new WordPress post ID and replaces the
+  session's current `wordpress_result`.
 - Update Post uses the stored `wordpress_result.post_id` as `target_post_id`
   with `partial_update: true`.
 - Returned WordPress post ID, status, view link, edit link, and idempotency key

@@ -96,6 +96,7 @@ export function WordPressScreen({
   const approved = !!session?.approval.approved
   const canPublish = !!auth && !!session && approved && Object.keys(session.wordpress_payload || {}).length > 0
   const noChange = !!postId && changedFields.length === 0
+  const canCreatePost = canPublish && (!postId || !noChange)
 
   async function pollPublishJob(jobId: string, signal?: AbortSignal) {
     if (!auth) throw new Error("Authentication is required.")
@@ -251,11 +252,11 @@ export function WordPressScreen({
                 id="s2p-wordpress-create-post"
                 type="button"
                 onClick={() => runPublish({ forceCreateNew: true })}
-                disabled={operation === "loading" || !canPublish}
+                disabled={operation === "loading" || !canCreatePost}
                 className="inline-flex items-center justify-center gap-2 rounded-md bg-confirm px-4 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {operation === "loading" ? <Loader2 className="size-4 animate-spin" /> : <CloudUpload className="size-4" />}
-                Create post
+                {postId ? "Re-create Post" : "Create post"}
               </button>
             </div>
           </section>

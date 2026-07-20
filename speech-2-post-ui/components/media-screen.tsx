@@ -1030,9 +1030,10 @@ export function MediaScreen({
                     type="button"
                     onClick={setFeatured}
                     disabled={operation === "loading"}
+                    aria-pressed={selectedImage.is_featured}
                     className="inline-flex items-center gap-2 rounded-md bg-confirm px-3.5 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:opacity-60"
                   >
-                    <Star className="size-4" aria-hidden="true" />
+                    <Star className={`size-4 ${selectedImage.is_featured ? "fill-current" : ""}`} aria-hidden="true" />
                     Featured
                   </button>
                   <button
