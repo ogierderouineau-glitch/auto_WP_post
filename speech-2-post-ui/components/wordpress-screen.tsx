@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
   ChevronLeft,
   CloudUpload,
   ExternalLink,
@@ -53,18 +54,26 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-function JsonPanel({ title, data }: { title: string; data: Record<string, unknown> }) {
+function JsonPanel({ id, title, data }: { id: string; title: string; data: Record<string, unknown> }) {
   return (
-    <section className="rounded-lg border border-border bg-card p-4">
-      <h2 className="mb-3 text-sm font-semibold text-foreground">{title}</h2>
-      {Object.keys(data || {}).length ? (
-        <pre className="max-h-80 overflow-auto rounded-md border border-border bg-background p-3 text-xs leading-relaxed text-muted-foreground">
-          {JSON.stringify(data, null, 2)}
-        </pre>
-      ) : (
-        <p className="text-sm text-muted-foreground">No data yet.</p>
-      )}
-    </section>
+    <details id={id} className="group rounded-lg border border-border bg-card">
+      <summary
+        id={`${id}-toggle`}
+        className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-sm font-semibold text-foreground"
+      >
+        {title}
+        <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden="true" />
+      </summary>
+      <div className="px-4 pb-4">
+        {Object.keys(data || {}).length ? (
+          <pre className="max-h-80 overflow-auto rounded-md border border-border bg-background p-3 text-xs leading-relaxed text-muted-foreground">
+            {JSON.stringify(data, null, 2)}
+          </pre>
+        ) : (
+          <p className="text-sm text-muted-foreground">No data yet.</p>
+        )}
+      </div>
+    </details>
   )
 }
 
@@ -364,7 +373,7 @@ export function WordPressScreen({
             </section>
           )}
 
-          <JsonPanel title="Sent WordPress payload" data={sentPayload} />
+          <JsonPanel id="s2p-wordpress-sent-payload" title="Sent WordPress payload" data={sentPayload} />
         </div>
 
         <aside className="flex flex-col gap-4">
@@ -391,18 +400,7 @@ export function WordPressScreen({
             </ul>
           </section>
 
-          <JsonPanel title="Current WordPress payload" data={currentPayload} />
-
-          <section className="rounded-lg border border-border bg-card p-4">
-            <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-foreground">
-              <FileText className="size-4 text-muted-foreground" />
-              About this version
-            </h2>
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              This screen uses the existing V2 publish job. Multiple WordPress targets per session are not represented
-              yet because the backend stores one `wordpress_result`.
-            </p>
-          </section>
+          <JsonPanel id="s2p-wordpress-current-payload" title="Current WordPress payload" data={currentPayload} />
         </aside>
       </div>
 
