@@ -109,6 +109,42 @@ Known gap:
 The workbook response provides selectable post types and the fact schema for the
 selected post type. The Next UI should render facts dynamically from this data.
 
+### Workbook Ownership Split (Current)
+
+Client workbook tabs still used by the backend loader:
+
+- `post_types`
+- `shared_fields_schema`
+- `seo_rules`
+- `ACF_fields_schema`
+- `post_blueprint`
+- `story_patterns`
+- `style_rules`
+- `image_metadata_schema`
+- `image_metadata_rules`
+- `internal_links_database`
+- `validation_lists`
+- `post_examples`
+- `agent_instructions`
+- optional secondary client overlays: any sheet starting with `agent_instructions`
+  except `agent_instructions_app`
+
+App-owned tabs now sourced from typed code and ignored if present in workbook:
+
+- `agent_workflow`
+- `application_state`
+- `context_building`
+- `image_analysis_rules`
+- `image_rules_pillow`
+- `internal_link_rules`
+- `output_specification`
+- `agent_instructions_app`
+
+Loader behavior:
+
+- deprecated app-owned tabs are ignored and a warning is logged
+- missing client-owned required tabs still fail validation
+
 ### Sessions
 
 - `POST /api/content-sessions`
@@ -541,6 +577,15 @@ Current behavior:
 - Targeted revision does not automatically rerank or complete internal-link
   selections. Existing links and links explicitly queued in the Content screen
   are preserved, and link placement is limited to selected ACF fields.
+- The revision stage exposes an `AI-assisted placement` checkbox for queued
+  internal links. When unchecked, a link-only revision skips the content model
+  and only wraps an approved anchor that already exists in the current draft.
+  When checked, the selected fields may be regenerated so the agent can create
+  or rewrite wording for the selected links before the backend wraps the final
+  approved anchor.
+- Internal links are single-use: a target URL or anchor already present in the
+  draft is treated as used and will not be injected again during later placement
+  passes.
 - Omitting `revision_field_ids` preserves the previous full-draft revision
   behavior for older callers.
 - Approval saves pending edits, calls `POST /approve`, and moves to the

@@ -44,7 +44,7 @@ class OpenAILanguageModelProvider(LanguageModelProvider):
         self.client = OpenAI(
             api_key=api_key,
             timeout=float(os.getenv("V2_TEXT_TIMEOUT_SECONDS", "120")),
-            max_retries=int(os.getenv("V2_TEXT_MAX_RETRIES", "0")),
+            max_retries=int(os.getenv("V2_TEXT_MAX_RETRIES", "2")),
         )
         self.model = model
         self.reasoning_effort = (

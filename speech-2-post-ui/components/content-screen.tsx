@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useMemo, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
   Check,
@@ -28,6 +28,7 @@ import {
   type WorkbookStatus,
 } from "@/lib/content-sessions"
 import { ApiError } from "@/lib/api"
+import { statusMessageClass } from "@/lib/status-style"
 
 type FieldScope = "shared" | "acf"
 type ContentSectionId = "wordpress" | "acf"
@@ -122,6 +123,28 @@ function hasDraft(session: ContentSession | null) {
   return Object.keys(session.shared_fields || {}).length > 0 || Object.keys(session.acf_source_fields || {}).length > 0
 }
 
+function hasMissingImageMetadata(session: ContentSession) {
+  if (!session.image_refs.length) return false
+  const completed = new Set(
+    (session.image_metadata || [])
+      .filter((row) => {
+        if (!row || typeof row !== "object") return false
+        const item = row as Record<string, unknown>
+        return !!(
+          item.image_alt ||
+          item.image_title ||
+          item.image_caption ||
+          item.image_description ||
+          item.image_description_wp ||
+          item.image_filename
+        )
+      })
+      .map((row) => String((row as Record<string, unknown>).media_id || ""))
+      .filter(Boolean),
+  )
+  return session.image_refs.some((image) => !completed.has(image.media_id))
+}
+
 function TracePanel({ trace }: { trace: Record<string, unknown> }) {
   if (!Object.keys(trace || {}).length) {
     return <p className="text-sm text-muted-foreground">No generation trace yet.</p>
@@ -145,6 +168,7 @@ export function ContentScreen({
   onSessionChange,
   onRevisionFieldIdsChange,
   onSelectedLinksChange,
+  onAiAssistedLinkPlacementChange,
   onBackToFacts,
   onContinueToWordPress,
 }: {
@@ -154,6 +178,7 @@ export function ContentScreen({
   onSessionChange: (session: ContentSession) => void
   onRevisionFieldIdsChange: (fieldIds: string[]) => void
   onSelectedLinksChange: (links: Record<string, string>[]) => void
+  onAiAssistedLinkPlacementChange: (enabled: boolean) => void
   onBackToFacts: () => void
   onContinueToWordPress: () => void
 }) {
@@ -170,6 +195,14 @@ export function ContentScreen({
   const [search, setSearch] = useState("")
   const [queuedLinks, setQueuedLinks] = useState<Record<string, string>>({})
   const [revisionFieldIds, setRevisionFieldIds] = useState<string[]>([])
+  const [aiAssistedLinkPlacement, setAiAssistedLinkPlacement] = useState(false)
+  const sessionRef = useRef<ContentSession | null>(session)
+  const autosaveTimerRef = useRef<number | null>(null)
+  const autosavePromiseRef = useRef<Promise<ContentSession | null> | null>(null)
+
+  useEffect(() => {
+    sessionRef.current = session
+  }, [session])
 
   useLayoutEffect(() => {
     setDrafts(Object.fromEntries(fields.map((field) => [field.id, field.value])))
@@ -179,7 +212,7 @@ export function ContentScreen({
   const changedCount = Object.keys(changed.shared).length + Object.keys(changed.acf).length
   const changedSignature = JSON.stringify(changed)
   const draftReady = hasDraft(session)
-  const canGenerate = !!auth && !!session && !backgroundMetadata && ["ready_to_generate", "needs_review", "ready_to_publish", "published"].includes(session.state)
+  const canGenerate = !!auth && !!session && ["ready_to_generate", "needs_review", "ready_to_publish", "published"].includes(session.state)
   const canApprove = !!auth && !!session && draftReady && session.state === "needs_review"
   const visibleLinkIds = useMemo(() => {
     const selected = new Set((session?.selected_links || []).map((selection) => selection.link_id))
@@ -234,12 +267,35 @@ export function ContentScreen({
     onSelectedLinksChange(selectedLinksForAgent)
   }, [onSelectedLinksChange, selectedLinksForAgent])
 
+  useEffect(() => {
+    onAiAssistedLinkPlacementChange(aiAssistedLinkPlacement)
+  }, [aiAssistedLinkPlacement, onAiAssistedLinkPlacementChange])
+
   function toggleRevisionField(fieldId: string) {
     setRevisionFieldIds((current) => {
       const next = new Set(current)
       if (next.has(fieldId)) next.delete(fieldId)
       else next.add(fieldId)
       return [...next]
+    })
+  }
+
+  function selectLinkDestinationFields(destination: string) {
+    const matchingFieldIds = fields.filter((field) =>
+      field.scope === "acf" && workbook?.acf_fields?.some((schema) =>
+        schema.field_key === field.key && (
+          destination === "auto"
+            ? workbook.internal_link_acf_fields?.some((item) => item.acf_field_name === schema.acf_field_name)
+            : schema.acf_field_name === destination
+        ),
+      ),
+    ).map((field) => field.id)
+    if (!matchingFieldIds.length) return
+    setRevisionFieldIds((current) => {
+      const fieldsToSelect = destination === "auto"
+        ? [matchingFieldIds.find((fieldId) => !current.includes(fieldId)) || matchingFieldIds[0]]
+        : matchingFieldIds
+      return [...new Set([...current, ...fieldsToSelect])]
     })
   }
 
@@ -250,25 +306,60 @@ export function ContentScreen({
   useEffect(() => {
     if (!auth || !session || !draftReady || !changedCount || operation === "loading") return
     let cancelled = false
-    const timeout = window.setTimeout(() => {
+    autosaveTimerRef.current = window.setTimeout(() => {
+      autosaveTimerRef.current = null
       setAutosave("loading")
-      saveSessionDraftFields(auth, session, changed.shared, changed.acf)
+      const requestSession = sessionRef.current || session
+      const promise = saveSessionDraftFields(auth, requestSession, changed.shared, changed.acf)
         .then((data) => {
-          if (!cancelled) {
+          if (!sessionRef.current || data.session.version >= sessionRef.current.version) {
+            sessionRef.current = data.session
             onSessionChange(data.session)
-            setAutosave("success")
           }
+          if (!cancelled) setAutosave("success")
+          return data.session
+        })
+        .catch(async (error) => {
+          if (!isSessionVersionConflict(error)) {
+            if (!cancelled) setAutosave("error")
+            return null
+          }
+          const latest = await loadContentSession(auth, requestSession.session_id)
+          sessionRef.current = latest.session
+          onSessionChange(latest.session)
+          const retried = await saveSessionDraftFields(auth, latest.session, changed.shared, changed.acf)
+          sessionRef.current = retried.session
+          onSessionChange(retried.session)
+          if (!cancelled) setAutosave("success")
+          return retried.session
         })
         .catch(() => {
           if (!cancelled) setAutosave("error")
+          return null
         })
+        .finally(() => {
+          if (autosavePromiseRef.current === promise) autosavePromiseRef.current = null
+        })
+      autosavePromiseRef.current = promise
     }, 900)
 
     return () => {
       cancelled = true
-      window.clearTimeout(timeout)
+      if (autosaveTimerRef.current !== null) {
+        window.clearTimeout(autosaveTimerRef.current)
+        autosaveTimerRef.current = null
+      }
     }
   }, [auth, changedCount, changedSignature, draftReady, onSessionChange, operation, session])
+
+  async function latestSessionAfterAutosave() {
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current)
+      autosaveTimerRef.current = null
+    }
+    await autosavePromiseRef.current
+    return sessionRef.current || session
+  }
 
   async function pollJob(jobId: string, signal?: AbortSignal) {
     if (!auth) throw new Error("Authentication is required.")
@@ -294,6 +385,7 @@ export function ContentScreen({
   async function reloadLatestSession() {
     if (!auth || !session) throw new Error("Authentication is required.")
     const latest = await loadContentSession(auth, session.session_id)
+    sessionRef.current = latest.session
     onSessionChange(latest.session)
     return latest.session
   }
@@ -341,7 +433,9 @@ export function ContentScreen({
     setActiveAction("generate")
     setMessage("Starting generation...")
     try {
-      const job = await startSessionGeneration(auth, session, [])
+      const currentSession = await latestSessionAfterAutosave()
+      if (!currentSession) throw new Error("Session is unavailable.")
+      const job = await startSessionGeneration(auth, currentSession, [])
       sessionStorage.setItem(
         ACTIVE_JOB_STORAGE,
         JSON.stringify({
@@ -358,18 +452,22 @@ export function ContentScreen({
       setOperation("success")
       setMessage(isFirstGeneration ? "Draft generated. Preparing the WordPress post in the background..." : "Draft regenerated.")
       setQueuedLinks({})
-      if (isFirstGeneration) {
+      const shouldRunBackgroundMetadata = hasMissingImageMetadata(nextSession)
+      if (shouldRunBackgroundMetadata) {
         setBackgroundMetadata(true)
         void Promise.resolve(nextSession)
           .then(async (generatedSession) => {
-            if (!generatedSession.image_refs.length) return generatedSession
-            setMessage("Generating image metadata before publishing...")
+            setMessage(isFirstGeneration ? "Generating image metadata before publishing..." : "Generating image metadata in the background...")
             const metadataJob = await startImageMetadataGeneration(auth, generatedSession)
             const metadataSession = await waitForSessionJob(auth, metadataJob.job_id)
             onSessionChange(metadataSession)
             return metadataSession
           })
           .then(async (metadataSession) => {
+            if (!isFirstGeneration) {
+              setMessage("Draft regenerated. Image metadata updated in the background.")
+              return metadataSession
+            }
             setMessage("Approving the first draft for WordPress...")
             const approved = await approveSessionContent(auth, metadataSession)
             onSessionChange(approved.session)
@@ -390,8 +488,12 @@ export function ContentScreen({
             setMessage("Draft generated and WordPress post created.")
           })
           .catch((error) => {
-            setOperation("error")
-            setMessage(error instanceof Error ? `Draft generated, but automatic WordPress publishing failed: ${error.message}` : "Draft generated, but automatic WordPress publishing failed.")
+            if (isFirstGeneration) {
+              setOperation("error")
+              setMessage(error instanceof Error ? `Draft generated, but automatic WordPress publishing failed: ${error.message}` : "Draft generated, but automatic WordPress publishing failed.")
+              return
+            }
+            setMessage(error instanceof Error ? `Draft regenerated, but background image metadata failed: ${error.message}` : "Draft regenerated, but background image metadata failed.")
           })
           .finally(() => setBackgroundMetadata(false))
       }
@@ -408,15 +510,18 @@ export function ContentScreen({
     setOperation("loading")
     setActiveAction("revise")
     setMessage("Saving draft fields...")
+    const currentSession = await latestSessionAfterAutosave()
+    if (!currentSession) throw new Error("Session is unavailable.")
     let data
     try {
-      data = await saveSessionDraftFields(auth, session, changed.shared, changed.acf)
+      data = await saveSessionDraftFields(auth, currentSession, changed.shared, changed.acf)
     } catch (error) {
       if (!isSessionVersionConflict(error)) throw error
       setMessage("Session updated in the background. Syncing latest version and retrying save...")
       const latestSession = await reloadLatestSession()
       data = await saveSessionDraftFields(auth, latestSession, changed.shared, changed.acf)
     }
+    sessionRef.current = data.session
     onSessionChange(data.session)
     setOperation("success")
     setMessage("Draft fields saved.")
@@ -438,7 +543,7 @@ export function ContentScreen({
     setActiveAction("revise")
     setMessage("Sending instruction to content agent...")
     try {
-      const saved = changedCount ? await handleSave() : session
+      const saved = changedCount ? await handleSave() : await latestSessionAfterAutosave()
       let job
       try {
         job = await regenerateSessionDraft(
@@ -447,6 +552,7 @@ export function ContentScreen({
           agentMessage.trim(),
           selectedRevisionFieldIds,
           selectedLinksForAgent,
+          aiAssistedLinkPlacement,
         )
       } catch (error) {
         if (!isSessionVersionConflict(error)) throw error
@@ -458,6 +564,7 @@ export function ContentScreen({
           agentMessage.trim(),
           selectedRevisionFieldIds,
           selectedLinksForAgent,
+          aiAssistedLinkPlacement,
         )
       }
       sessionStorage.setItem(
@@ -491,7 +598,7 @@ export function ContentScreen({
     setOperation("loading")
     setMessage("Approving content...")
     try {
-      const saved = changedCount ? await handleSave() : session
+      const saved = changedCount ? await handleSave() : await latestSessionAfterAutosave()
       const data = await approveSessionContent(auth, saved || session)
       onSessionChange(data.session)
       setOperation("success")
@@ -537,7 +644,7 @@ export function ContentScreen({
               id="s2p-content-save-edits"
               type="button"
               onClick={runSave}
-              disabled={operation === "loading" || backgroundMetadata || !changedCount || !draftReady}
+              disabled={operation === "loading" || !changedCount || !draftReady}
               className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:opacity-60"
             >
               <Save className="size-4" />
@@ -569,13 +676,7 @@ export function ContentScreen({
 
         {message && (
           <p
-            className={`mt-4 rounded-md px-3 py-2 text-sm ${
-              operation === "error"
-                ? "bg-destructive/10 text-destructive"
-                : message === "Selected fields regenerated."
-                  ? "bg-confirm/15 text-confirm"
-                  : "bg-muted text-muted-foreground"
-            }`}
+            className={`mt-4 rounded-md px-3 py-2 text-sm ${statusMessageClass(operation, message)}`}
           >
             {message}
           </p>
@@ -681,12 +782,31 @@ export function ContentScreen({
                   placeholder="Describe what should change in the draft."
                   className="mt-3 w-full resize-none rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-gold/40"
                 />
+                <label
+                  htmlFor="s2p-content-ai-assisted-placement"
+                  className="mt-3 flex items-start gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground"
+                >
+                  <input
+                    id="s2p-content-ai-assisted-placement"
+                    type="checkbox"
+                    checked={aiAssistedLinkPlacement}
+                    onChange={(event) => setAiAssistedLinkPlacement(event.target.checked)}
+                    disabled={operation === "loading"}
+                    className="mt-0.5 size-4 accent-gold"
+                  />
+                  <span>
+                    <span className="block font-medium text-foreground">AI-assisted placement</span>
+                    <span className="block">
+                      Let the agent place selected links by rewriting text when an exact anchor is not already present.
+                    </span>
+                  </span>
+                </label>
                 <button
                   id="s2p-content-revise-selected-fields"
                   type="button"
                   onClick={handleAgentRegenerate}
                   title="Revises the draft while preserving its candidates and adding checked unused links with their selected ACF destinations."
-                  disabled={operation === "loading" || backgroundMetadata || (!agentMessage.trim() && !hasQueuedLinkInstruction) || !selectedRevisionFieldIds.length}
+                  disabled={operation === "loading" || (!agentMessage.trim() && !hasQueuedLinkInstruction) || !selectedRevisionFieldIds.length}
                   className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ai px-3 py-2.5 text-sm font-semibold text-ai-foreground transition-colors hover:opacity-90 disabled:opacity-60"
                 >
                   {activeAction === "revise" ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
@@ -711,6 +831,7 @@ export function ContentScreen({
                               type="checkbox"
                               checked={queued}
                               onChange={(event) => {
+                                if (event.target.checked) selectLinkDestinationFields("auto")
                                 setQueuedLinks((current) => {
                                   const next = { ...current }
                                   if (event.target.checked) next[candidate.link_id] = "auto"
@@ -734,19 +855,7 @@ export function ContentScreen({
                             onChange={(event) => {
                               const destination = event.target.value
                               setQueuedLinks((current) => ({ ...current, [candidate.link_id]: destination }))
-                              const matchingFieldIds = fields.filter((field) =>
-                                field.scope === "acf" && workbook?.acf_fields?.some((schema) =>
-                                  schema.field_key === field.key && (
-                                    destination === "auto"
-                                      ? workbook.internal_link_acf_fields?.some((item) => item.acf_field_name === schema.acf_field_name)
-                                      : schema.acf_field_name === destination
-                                  ),
-                                ),
-                              ).map((field) => field.id)
-                              if (matchingFieldIds.length) {
-                                const fieldsToSelect = destination === "auto" ? matchingFieldIds.slice(0, 1) : matchingFieldIds
-                                setRevisionFieldIds((current) => [...new Set([...current, ...fieldsToSelect])])
-                              }
+                              selectLinkDestinationFields(destination)
                             }}
                             className="mt-2 w-full rounded-md border border-border bg-card px-2 py-1.5 text-xs text-foreground"
                           >
@@ -803,7 +912,7 @@ export function ContentScreen({
             id="s2p-content-approve"
             type="button"
             onClick={handleApprove}
-            disabled={operation === "loading" || backgroundMetadata || !canApprove}
+            disabled={operation === "loading" || !canApprove}
             className="ml-auto inline-flex items-center gap-2 rounded-md bg-confirm px-4 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 sm:ml-0"
           >
             {operation === "loading" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}

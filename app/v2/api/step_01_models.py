@@ -31,7 +31,7 @@ class GenerationSettingsRequest(VersionedRequest):
         "gpt-5.6",
     ]
     reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"]
-    generation_mode: Literal["batched", "single"] = "batched"
+    generation_mode: Literal["batched", "single"] = "single"
 
 
 class AnalyzeRequest(VersionedRequest):
@@ -48,6 +48,8 @@ class GenerateRequest(VersionedRequest):
     selected_links: list[dict[str, str]] = Field(default_factory=list)
     current_url: str | None = None
     use_vision_for_image_metadata: bool = True
+    ai_assisted_link_placement: bool = False
+    link_placement_only: bool = False
     revision_instruction: str | None = None
 
 

@@ -308,6 +308,50 @@ class InternalLinkInjectionTests(unittest.TestCase):
         )
         self.assertEqual(len(result.injected), 2)
 
+    def test_inject_placements_does_not_reuse_existing_link_target(self) -> None:
+        existing = InternalLinkRecord(
+            sheet_row=1,
+            link_id="mobile-bar",
+            post_type_key="event",
+            keyword="mobile Cocktailbar",
+            anchor_text="mobile Cocktailbar",
+            anchor_variants=(),
+            target_url="https://example.com/mobile-bar/",
+            link_role="service",
+            category="bar",
+            priority="high",
+            active=True,
+            usage_context="Mobile bar",
+            language="de-DE",
+        )
+        eligible = EligibleLinks(candidates=(existing,))
+        field_schema = SimpleNamespace(acf_field_name="cta_text", max_internal_links=3)
+
+        result = InternalLinkService().inject_placements(
+            eligible,
+            [
+                {
+                    "link_id": "mobile-bar",
+                    "field_key": "cta_text",
+                    "match_text": "mobile Cocktailbar",
+                    "anchor_text": "mobile Cocktailbar",
+                    "placement_mode": "wrap_existing_text",
+                },
+            ],
+            acf_source_fields={
+                "hero_intro": 'Die <a href="https://example.com/mobile-bar/">mobile Cocktailbar</a> ist schon verlinkt.',
+                "cta_text": "Jetzt mobile Cocktailbar anfragen.",
+            },
+            linkable_fields={"cta_text": field_schema},
+        )
+
+        self.assertEqual(result.injected, [])
+        self.assertEqual(result.skipped[0]["reason"], "duplicate_target")
+        self.assertEqual(
+            result.acf_source_fields["cta_text"],
+            "Jetzt mobile Cocktailbar anfragen.",
+        )
+
     def test_internal_link_ranking_prefers_smoothie_link_for_smoothie_event(self) -> None:
         smoothie = InternalLinkRecord(
             sheet_row=1,

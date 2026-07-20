@@ -224,8 +224,8 @@ class InternalLinkService:
         updated_acf = dict(acf_source_fields)
         injected: list[dict[str, str]] = []
         skipped: list[dict[str, str]] = []
-        seen_urls: set[str] = set()
-        seen_anchors: set[str] = set()
+        seen_urls = self._existing_link_urls(updated_acf.values())
+        seen_anchors = self._existing_link_anchors(updated_acf.values())
         field_counts: dict[str, int] = {}
 
         for placement in placements:
@@ -355,6 +355,39 @@ class InternalLinkService:
                 if placed:
                     break
         return placements
+
+    @staticmethod
+    def _existing_link_urls(values: Any) -> set[str]:
+        urls: set[str] = set()
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            urls.update(
+                html.unescape(match.group(1))
+                for match in re.finditer(
+                    r"<a\b[^>]*\bhref=[\"']([^\"']+)[\"'][^>]*>",
+                    value,
+                    flags=re.IGNORECASE,
+                )
+            )
+        return urls
+
+    @staticmethod
+    def _existing_link_anchors(values: Any) -> set[str]:
+        anchors: set[str] = set()
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            anchors.update(
+                html.unescape(re.sub(r"<[^>]+>", "", match.group(1))).strip().casefold()
+                for match in re.finditer(
+                    r"<a\b[^>]*>(.*?)</a>",
+                    value,
+                    flags=re.IGNORECASE | re.DOTALL,
+                )
+            )
+        anchors.discard("")
+        return anchors
 
     @staticmethod
     def _replace_sentence(value: str, sentence_index: Any, replacement: str) -> str | None:

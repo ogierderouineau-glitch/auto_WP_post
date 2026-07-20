@@ -102,6 +102,7 @@ export default function Page() {
   const [selectedFactKeys, setSelectedFactKeys] = useState<string[] | null>(null)
   const [contentRevisionFieldIds, setContentRevisionFieldIds] = useState<string[]>([])
   const [contentSelectedLinks, setContentSelectedLinks] = useState<Record<string, string>[]>([])
+  const [contentAiAssistedLinkPlacement, setContentAiAssistedLinkPlacement] = useState(false)
   const sessionRef = useRef<ContentSession | null>(null)
   const pictureTranscriptRef = useRef("")
   const pictureSaveQueue = useRef<Promise<unknown>>(Promise.resolve())
@@ -158,13 +159,12 @@ export default function Page() {
     ].slice(0, 30))
   }
 
-  function handleSessionChange(nextSession: ContentSession) {
+  const handleSessionChange = useCallback((nextSession: ContentSession) => {
     sessionRef.current = nextSession
     setSession(nextSession)
     sessionStorage.setItem(STORAGE_SESSION_ID, nextSession.session_id)
     setStatusText(`Session ${nextSession.state}`)
-    addOperation("Session updated", `${nextSession.session_id.slice(0, 8)} · ${nextSession.state} · v${nextSession.version}`, "success")
-  }
+  }, [])
 
   async function refreshRecent(nextAuth = apiAuth) {
     if (!nextAuth) return
@@ -586,6 +586,7 @@ export default function Page() {
             onSessionChange={handleSessionChange}
             onRevisionFieldIdsChange={setContentRevisionFieldIds}
             onSelectedLinksChange={setContentSelectedLinks}
+            onAiAssistedLinkPlacementChange={setContentAiAssistedLinkPlacement}
             onBackToFacts={() => setScreen("facts")}
             onContinueToWordPress={() => setScreen("wordpress")}
           />
@@ -606,6 +607,7 @@ export default function Page() {
           selectedPictureId={selectedMedia?.mediaId}
           selectedContentFieldIds={contentRevisionFieldIds}
           selectedContentLinks={contentSelectedLinks}
+          contentAiAssistedLinkPlacement={contentAiAssistedLinkPlacement}
           onPictureTranscriptAppend={handlePictureTranscriptAppend}
         />
       )}

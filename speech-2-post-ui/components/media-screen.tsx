@@ -37,6 +37,7 @@ import {
   type SelectedMediaContext,
   type SessionImage,
 } from "@/lib/content-sessions"
+import { statusMessageClass } from "@/lib/status-style"
 
 type OperationState = "idle" | "loading" | "success" | "error"
 
@@ -73,6 +74,26 @@ function metadataFromImage(image: SessionImage | null): MetadataForm {
   }
 }
 
+function metadataFormsEqual(left: MetadataForm, right: MetadataForm) {
+  return (Object.keys(left) as (keyof MetadataForm)[]).every((key) => left[key] === right[key])
+}
+
+function isSessionVersionConflict(error: unknown) {
+  if (!(error instanceof ApiError) || error.status !== 409) return false
+  if (/changed from version/i.test(error.message)) return true
+  const payload = error.payload as { error_code?: unknown; detail?: { error_code?: unknown } | unknown } | null
+  const code = typeof payload?.error_code === "string"
+    ? payload.error_code
+    : (typeof payload?.detail === "object" && payload?.detail && "error_code" in payload.detail && typeof (payload.detail as { error_code?: unknown }).error_code === "string")
+      ? (payload.detail as { error_code: string }).error_code
+      : ""
+  return code === "session_version_conflict"
+}
+
+function waitForMs(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
 function metadataFieldTrace(
   session: ContentSession | null,
   mediaId: string | undefined,
@@ -107,12 +128,14 @@ function ImagePreview({
   filename,
   original,
   label,
+  revision = "",
 }: {
   auth: ApiClientOptions | null
   session: ContentSession | null
   filename: string
   original?: boolean
   label: string
+  revision?: string
 }) {
   const [url, setUrl] = useState("")
   const [failed, setFailed] = useState(false)
@@ -148,9 +171,12 @@ function ImagePreview({
 
     return () => {
       active = false
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      // A session update can replace this preview immediately after React has
+      // mounted the <img>. Give the browser time to consume the old blob URL
+      // before releasing it, otherwise it can fail with ERR_FILE_NOT_FOUND.
+      if (objectUrl) window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
     }
-  }, [auth, filename, original, session])
+  }, [auth?.apiKey, auth?.userId, filename, original, revision, session?.session_id])
 
   if (url) {
     return (
@@ -178,12 +204,14 @@ function ImageThumbnail({
   filename,
   localUrl,
   label,
+  revision = "",
 }: {
   auth: ApiClientOptions | null
   session: ContentSession | null
   filename: string
   localUrl?: string
   label: string
+  revision?: string
 }) {
   const [url, setUrl] = useState(localUrl || "")
 
@@ -219,9 +247,9 @@ function ImageThumbnail({
 
     return () => {
       active = false
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      if (objectUrl) window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
     }
-  }, [auth, filename, localUrl, session])
+  }, [auth?.apiKey, auth?.userId, filename, localUrl, revision, session?.session_id])
 
   return url ? (
     <img src={url} alt={label} className="h-full w-full rounded-[inherit] object-cover" />
@@ -307,7 +335,7 @@ export function MediaScreen({
   const [selectedMediaId, setSelectedMediaId] = useState("")
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
   const [metadata, setMetadata] = useState<MetadataForm>(() => metadataFromImage(null))
-  const [useFocalPointVision, setUseFocalPointVision] = useState(true)
+  const [useFocalPointVision, setUseFocalPointVision] = useState(false)
   const [useMetadataVision, setUseMetadataVision] = useState(false)
   const [operation, setOperation] = useState<OperationState>("idle")
   const [transcriptSaving, setTranscriptSaving] = useState(false)
@@ -319,6 +347,8 @@ export function MediaScreen({
   const pendingTranscripts = useRef<Record<string, string>>({})
   const selectedMediaIdRef = useRef("")
   const sessionRef = useRef<ContentSession | null>(session)
+  const transcriptSaveTimerRef = useRef<number | null>(null)
+  const transcriptSavePromiseRef = useRef<Promise<void> | null>(null)
 
   const selectedIndex = images.findIndex((image) => image.media_id === selectedMediaId)
   const selectedImage = selectedIndex >= 0 ? images[selectedIndex] : null
@@ -358,8 +388,11 @@ export function MediaScreen({
 
   useEffect(() => {
     const nextMetadata = metadataFromImage(selectedImage)
-    setMetadata(nextMetadata)
+    setMetadata((current) => metadataFormsEqual(current, nextMetadata) ? current : nextMetadata)
     setUseMetadataVision(selectedImage?.use_vision_for_metadata === true)
+  }, [selectedImage?.media_id, selectedImage?.metadata, selectedImage?.is_featured, selectedImage?.use_vision_for_metadata])
+
+  useEffect(() => {
     onSelectedMediaChange(
       selectedImage
         ? {
@@ -375,39 +408,74 @@ export function MediaScreen({
             }
         : null,
     )
-  }, [selectedImage?.media_id, selectedPendingImage?.id, session?.version])
+  }, [selectedFilename, selectedImage?.filename, selectedImage?.media_id, selectedPendingImage?.filename, selectedPendingImage?.id])
 
   useEffect(() => {
-    if (!auth || !session || !selectedImage || !selectedOriginalFilename || operation === "loading" || pictureTranscriptSavingImmediately) return
-    const savedTranscript = selectedImage.context_transcript || ""
-    if (pictureTranscript === savedTranscript) return
+    if (!auth || !session || !selectedImage || !selectedOriginalFilename || pictureTranscriptSavingImmediately || transcriptSaving) return
+    const transcriptToSave = pictureTranscript.trim()
+    const savedTranscript = (selectedImage.context_transcript || "").trim()
+    if (transcriptToSave === savedTranscript) return
 
     let cancelled = false
     const timeout = window.setTimeout(() => {
+      transcriptSaveTimerRef.current = null
       setTranscriptSaving(true)
-      saveSessionImageContextTranscript(auth, session, selectedOriginalFilename, pictureTranscript)
-        .then((data) => {
-          if (!cancelled) {
+      const saveTranscript = async () => {
+        let requestSession = session
+        for (let attempt = 0; attempt < 5 && !cancelled; attempt += 1) {
+          try {
+            const data = await saveSessionImageContextTranscript(
+              auth,
+              requestSession,
+              selectedOriginalFilename,
+              transcriptToSave,
+            )
+            if (cancelled) return
             sessionRef.current = data.session
             onSessionChange(data.session)
+            return
+          } catch (error) {
+            if (cancelled) return
+            if (!isSessionVersionConflict(error) || attempt === 4) {
+              setOperation("error")
+              setMessage(error instanceof Error ? error.message : "Picture transcript autosave failed.")
+              return
+            }
+
+            try {
+              const latest = await loadContentSession(auth, requestSession.session_id)
+              if (cancelled) return
+              sessionRef.current = latest.session
+              onSessionChange(latest.session)
+              requestSession = latest.session
+              await waitForMs(250 * (attempt + 1))
+            } catch (reloadError) {
+              if (cancelled) return
+              setOperation("error")
+              setMessage(reloadError instanceof Error ? reloadError.message : "Picture transcript autosave failed.")
+              return
+            }
           }
-        })
-        .catch((error) => {
-          if (!cancelled) {
-            setOperation("error")
-            setMessage(error instanceof Error ? error.message : "Picture transcript autosave failed.")
-          }
-        })
+        }
+      }
+
+      const promise = saveTranscript()
         .finally(() => {
-          if (!cancelled) setTranscriptSaving(false)
+          if (transcriptSavePromiseRef.current === promise) {
+            transcriptSavePromiseRef.current = null
+            setTranscriptSaving(false)
+          }
         })
+      transcriptSavePromiseRef.current = promise
     }, 800)
+    transcriptSaveTimerRef.current = timeout
 
     return () => {
       cancelled = true
       window.clearTimeout(timeout)
+      if (transcriptSaveTimerRef.current === timeout) transcriptSaveTimerRef.current = null
     }
-  }, [auth, onSessionChange, operation, pictureTranscript, pictureTranscriptSavingImmediately, selectedOriginalFilename, selectedImage?.media_id, session])
+  }, [auth, onSessionChange, pictureTranscript, pictureTranscriptSavingImmediately, selectedOriginalFilename, selectedImage?.media_id, session])
 
   useEffect(() => {
     if (!selectedPendingImage) return
@@ -415,19 +483,19 @@ export function MediaScreen({
   }, [pictureTranscript, selectedPendingImage?.id])
 
   async function runAction(action: (currentSession: ContentSession) => Promise<ContentSession>, success: string) {
-    const currentSession = sessionRef.current
-    if (!auth || !currentSession) return
+    if (!auth || !sessionRef.current) return
     const requestAuth = auth
 
     async function preserveSelectedTranscript(nextSession: ContentSession) {
       if (!selectedOriginalFilename) return nextSession
-      const savedTranscript = nextSession.image_context_transcripts?.[selectedMediaIdRef.current] || ""
-      if (pictureTranscript === savedTranscript) return nextSession
+      const transcriptToSave = pictureTranscript.trim()
+      const savedTranscript = (nextSession.image_context_transcripts?.[selectedMediaIdRef.current] || "").trim()
+      if (transcriptToSave === savedTranscript) return nextSession
       const data = await saveSessionImageContextTranscript(
         requestAuth,
         nextSession,
         selectedOriginalFilename,
-        pictureTranscript,
+        transcriptToSave,
       )
       return data.session
     }
@@ -435,16 +503,29 @@ export function MediaScreen({
     setOperation("loading")
     setMessage("")
     try {
-      let nextSession: ContentSession
-      try {
-        nextSession = await action(await preserveSelectedTranscript(currentSession))
-      } catch (error) {
-        if (!(error instanceof ApiError) || error.status !== 409) throw error
-        const latest = await loadContentSession(requestAuth, currentSession.session_id)
-        sessionRef.current = latest.session
-        onSessionChange(latest.session)
-        nextSession = await action(await preserveSelectedTranscript(latest.session))
+      if (transcriptSaveTimerRef.current !== null) {
+        window.clearTimeout(transcriptSaveTimerRef.current)
+        transcriptSaveTimerRef.current = null
       }
+      await transcriptSavePromiseRef.current
+      const currentSession = sessionRef.current
+      if (!currentSession) return
+      let requestSession = currentSession
+      let nextSession: ContentSession | null = null
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          nextSession = await action(await preserveSelectedTranscript(requestSession))
+          break
+        } catch (error) {
+          if (!isSessionVersionConflict(error) || attempt === 4) throw error
+          const latest = await loadContentSession(requestAuth, requestSession.session_id)
+          sessionRef.current = latest.session
+          onSessionChange(latest.session)
+          requestSession = latest.session
+          await waitForMs(250 * (attempt + 1))
+        }
+      }
+      if (!nextSession) throw new Error("Media action retry loop exited unexpectedly.")
       onSessionChange(nextSession)
       sessionRef.current = nextSession
       setOperation("success")
@@ -457,6 +538,7 @@ export function MediaScreen({
 
   async function uploadFiles(event: ChangeEvent<HTMLInputElement>) {
     if (!auth || !session) return
+    const requestAuth = auth
     const files = [...(event.target.files || [])]
     event.target.value = ""
     const imageFiles = files.filter((file) => file.type.startsWith("image/"))
@@ -475,40 +557,88 @@ export function MediaScreen({
     setSelectedMediaId(pending[0].id)
     setOperation("loading")
     setMessage("Uploading selected pictures...")
+    const completedPendingIds = new Set<string>()
 
     try {
-      let nextSession = session
+      let nextSession = sessionRef.current || session
+
+      async function reloadLatestSession(currentSession: ContentSession) {
+        const latest = await loadContentSession(requestAuth, currentSession.session_id)
+        sessionRef.current = latest.session
+        onSessionChange(latest.session)
+        return latest.session
+      }
+
+      async function withConflictRetry<T>(
+        currentSession: ContentSession,
+        action: (requestSession: ContentSession) => Promise<T>,
+      ) {
+        let requestSession = currentSession
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          try {
+            return await action(requestSession)
+          } catch (error) {
+            if (!isSessionVersionConflict(error) || attempt === 4) throw error
+            requestSession = await reloadLatestSession(requestSession)
+            await waitForMs(250 * (attempt + 1))
+          }
+        }
+        throw new Error("Upload retry loop exited unexpectedly.")
+      }
+
       for (const [index, file] of imageFiles.entries()) {
         const pendingImage = pending[index]
-        const beforeIds = new Set(nextSession.image_refs.map((image) => image.media_id))
-        const data = await uploadSessionImage(auth, nextSession, file, useFocalPointVision)
+        let beforeIds = new Set((sessionRef.current || nextSession).image_refs.map((image) => image.media_id))
+        const data = await withConflictRetry(sessionRef.current || nextSession, async (requestSession) => {
+          beforeIds = new Set(requestSession.image_refs.map((image) => image.media_id))
+          return uploadSessionImage(requestAuth, requestSession, file, useFocalPointVision)
+        })
         nextSession = data.session
+        sessionRef.current = nextSession
         // Read this after the upload so notes recorded while it was processing
         // are included in the newly created backend image record.
         const transcript = pendingTranscripts.current[pendingImage.id] || ""
         const uploadedImage = sessionImages(nextSession).find((image) => !beforeIds.has(image.media_id))
         const currentImages = sessionImages(nextSession)
+        if (uploadedImage) {
+          completedPendingIds.add(pendingImage.id)
+          if (selectedMediaIdRef.current === pendingImage.id) {
+            selectedMediaIdRef.current = uploadedImage.media_id
+            setSelectedMediaId(uploadedImage.media_id)
+          }
+          setPendingImages((current) => current.filter((image) => image.id !== pendingImage.id))
+          window.setTimeout(() => URL.revokeObjectURL(pendingImage.url), 1000)
+        }
+        // Publish the backend image in the same React update as removing its
+        // optimistic preview, so the gallery never renders both copies.
+        onSessionChange(nextSession)
         if (!currentImages.some((image) => image.is_featured) && currentImages[0]) {
-          const featuredData = await setSessionFeaturedImage(
-            auth,
-            nextSession,
-            currentImages[0].processed_filename || currentImages[0].filename,
+          const featuredData = await withConflictRetry(nextSession, (requestSession) =>
+            setSessionFeaturedImage(
+              requestAuth,
+              requestSession,
+              currentImages[0].processed_filename || currentImages[0].filename,
+            ),
           )
           nextSession = featuredData.session
+          sessionRef.current = nextSession
+          onSessionChange(nextSession)
         }
         if (uploadedImage && transcript.trim()) {
-          const transcriptData = await saveSessionImageContextTranscript(
-            auth,
-            nextSession,
-            uploadedImage.processed_filename || uploadedImage.filename,
-            transcript,
+          const transcriptData = await withConflictRetry(nextSession, (requestSession) =>
+            saveSessionImageContextTranscript(
+              requestAuth,
+              requestSession,
+              uploadedImage.processed_filename || uploadedImage.filename,
+              transcript,
+            ),
           )
           nextSession = transcriptData.session
+          sessionRef.current = nextSession
+          onSessionChange(nextSession)
         }
-        if (uploadedImage && selectedMediaIdRef.current === pendingImage.id) setSelectedMediaId(uploadedImage.media_id)
         delete pendingTranscripts.current[pendingImage.id]
       }
-      onSessionChange(nextSession)
       setOperation("success")
       setMessage(`${imageFiles.length} image(s) uploaded.`)
     } catch (error) {
@@ -516,7 +646,9 @@ export function MediaScreen({
       setMessage(error instanceof Error ? error.message : "Image upload failed.")
     } finally {
       setPendingImages((current) => current.filter((image) => !pending.some((candidate) => candidate.id === image.id)))
-      pending.forEach((image) => URL.revokeObjectURL(image.url))
+      pending
+        .filter((image) => !completedPendingIds.has(image.id))
+        .forEach((image) => URL.revokeObjectURL(image.url))
     }
   }
 
@@ -662,9 +794,9 @@ export function MediaScreen({
       )}
       <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)_320px]">
         <section aria-label="Media library" className="min-w-0">
-          <label className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-dashed border-gold/70 bg-gold/18 px-3 py-3 text-left text-sm shadow-[0_8px_18px_rgba(170,130,0,0.12)] transition-colors hover:border-gold hover:bg-gold/26">
+          <label className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border bg-card px-3 py-3 text-left text-sm transition-colors hover:border-gold hover:bg-gold/5">
             <input id="s2p-media-upload" type="file" multiple accept="image/*,video/*" onChange={uploadFiles} className="sr-only" />
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gold/25 text-gold">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gold/15 text-gold">
               <ImagePlus className="size-5" aria-hidden="true" />
             </span>
             <span>
@@ -672,22 +804,6 @@ export function MediaScreen({
               <span className="block text-xs text-muted-foreground">Videos are not supported yet</span>
             </span>
           </label>
-          <button
-            id="s2p-media-open-agent"
-            type="button"
-            onClick={onOpenAgent}
-            className="mt-2 flex w-full items-center gap-2 rounded-lg border border-dashed border-ai/50 bg-ai/10 px-3 py-3 text-left text-sm transition-colors hover:border-ai hover:bg-ai/15"
-          >
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-ai text-ai-foreground">
-              <Bot className="size-5" aria-hidden="true" />
-            </span>
-            <span>
-              <span className="block font-medium text-ai">Tell your story</span>
-              <span className="block text-xs text-muted-foreground">
-                Speak to the agent and/or write some text in the Picture transcript directly
-              </span>
-            </span>
-          </button>
           <label className="mt-2 flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
             <input
               id="s2p-media-use-focal-point-vision"
@@ -702,6 +818,22 @@ export function MediaScreen({
               Applied to newly uploaded pictures.
             </span>
           </label>
+          <button
+            id="s2p-media-open-agent"
+            type="button"
+            onClick={onOpenAgent}
+            className="mt-2 flex cursor-pointer w-full items-center gap-2 rounded-lg border border-dashed border-ai/50 bg-ai/10 px-3 py-3 text-left text-sm transition-colors hover:border-ai hover:bg-ai/15"
+          >
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-ai text-ai-foreground">
+              <Bot className="size-5" aria-hidden="true" />
+            </span>
+            <span>
+              <span className="block font-medium text-ai">Tell your story</span>
+              <span className="block text-xs text-muted-foreground">
+                Speak to the agent and/or write some text in the Picture transcript directly
+              </span>
+            </span>
+          </button>
 
           <div className="mt-3 flex items-center gap-2">
             <button
@@ -763,6 +895,7 @@ export function MediaScreen({
                           session={session}
                           filename={image.processed_filename || image.filename}
                           label={image.filename}
+                          revision={image.operations.join("|")}
                         />
                         <span className="absolute left-1 top-1 rounded bg-topbar/80 px-1 text-[10px] font-medium text-topbar-foreground">
                           {pendingImages.length + index + 1}
@@ -844,7 +977,13 @@ export function MediaScreen({
                   </div>
                   <div>
                     <p className="mb-1.5 text-xs font-medium text-muted-foreground">Processed</p>
-                    <ImagePreview auth={auth} session={session} filename={selectedFilename} label="Processed" />
+                    <ImagePreview
+                      auth={auth}
+                      session={session}
+                      filename={selectedFilename}
+                      label="Processed"
+                      revision={selectedImage.operations.join("|")}
+                    />
                   </div>
                 </div>
 
@@ -881,6 +1020,7 @@ export function MediaScreen({
                     filename={mobilePreviewOriginal ? selectedImage.filename : selectedFilename}
                     original={mobilePreviewOriginal}
                     label={mobilePreviewOriginal ? "Original" : selectedImage.processed_filename ? "Processed" : "Original"}
+                    revision={mobilePreviewOriginal ? "" : selectedImage.operations.join("|")}
                   />
                 </div>
 
@@ -995,7 +1135,7 @@ export function MediaScreen({
               <div
                 className={[
                   "mt-4 rounded-lg px-3 py-2 text-xs",
-                  operation === "error" ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground",
+                  statusMessageClass(operation, message),
                 ].join(" ")}
               >
                 {message}

@@ -36,7 +36,6 @@ class WordPressProviderTests(unittest.TestCase):
                     }
                 }
             },
-            [],
             {
                 "id": 123,
                 "status": "draft",
@@ -71,7 +70,7 @@ class WordPressProviderTests(unittest.TestCase):
             idempotency_key="key-1",
         )
         self.assertEqual(result["post_id"], 123)
-        create_call = request_json.call_args_list[2]
+        create_call = request_json.call_args_list[1]
         self.assertEqual(create_call.args[:2], ("POST", "/wp-json/wp/v2/posts"))
         body = create_call.kwargs["json"]
         self.assertEqual(body["meta"]["_yoast_wpseo_title"], "SEO title")
@@ -145,7 +144,6 @@ class WordPressProviderTests(unittest.TestCase):
                     }
                 }
             },
-            [],
             {
                 "id": 123,
                 "status": "draft",
@@ -182,7 +180,7 @@ class WordPressProviderTests(unittest.TestCase):
         )
 
         self.assertEqual(result["post_id"], 123)
-        body = request_json.call_args_list[2].kwargs["json"]
+        body = request_json.call_args_list[1].kwargs["json"]
         self.assertEqual(
             body["meta"]["_yoast_wpseo_opengraph-title"],
             "Social title",

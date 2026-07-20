@@ -380,6 +380,36 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(generated.selected_links, selected)
         self.assertEqual(generated.selected_links[0], selected[0])
 
+    def test_answer_confirms_facts_and_returns_to_ready_to_generate(self) -> None:
+        session = self.service.create(user_id="user-1", post_type_key="event")
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        corrections = {
+            row.field_key: self._value(row.value_type, row.min_words)
+            for row in snapshot.acf_fields
+            if row.enabled
+            and row.post_type_key == "event"
+            and row.field_role == "input_fact"
+            and row.required_for_analysis
+        }
+        session = session.model_copy(
+            update={
+                "state": "needs_input",
+                "clarification_questions": ["Bitte ergänzen oder bestätigen Sie: test."],
+            }
+        )
+        session = self.service.repository.save(session, expected_version=session.version)
+
+        answered = self.service.answer(
+            session.session_id,
+            corrections=corrections,
+            expected_version=session.version,
+        )
+
+        self.assertEqual(answered.state, "ready_to_generate")
+        self.assertFalse(answered.clarification_questions)
+        self.assertTrue(answered.confirmed_facts)
+        self.assertTrue(all(fact.confirmed for fact in answered.confirmed_facts.values()))
+
     @staticmethod
     def _value(
         value_type: str,

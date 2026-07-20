@@ -90,7 +90,7 @@ class ContentSession(BaseModel):
     operation_log: list[OperationRecord] = Field(default_factory=list)
     language_model: str | None = None
     reasoning_effort: str | None = None
-    generation_mode: Literal["batched", "single"] = "batched"
+    generation_mode: Literal["batched", "single"] = "single"
     publication_idempotency_key: str | None = None
     workflow_steps: dict[str, str] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -99,6 +99,36 @@ Run focused structured workflow checks:
 myenv/bin/python -m unittest tests.v2.test_structured_pipeline tests.v2.test_legacy_ui_adapter tests.v2.test_api
 ```
 
+## Generation latency diagnostics
+
+To flag slow generation jobs from local V2 sessions (default threshold: 45 seconds):
+
+```bash
+myenv/bin/python tools/v2_generation_latency_report.py --threshold 45
+```
+
+Useful options:
+
+- `--operation content_generation` (default)
+- `--session-id <session_id>` to inspect one session
+- `--limit 50` to print more rows
+- `--json` for machine-readable output
+
+## Validation References Runbook
+
+Regenerate validation choice references after updating `validation_lists` values:
+
+```bash
+myenv/bin/python tools/v2_export_validation_reference.py data/knowledge/FLAIRLAB_Knowledge_Base_Revised_V7.xlsm
+```
+
+Generated artifacts:
+
+- `docs/v2/validation_choices.md`
+- `docs/v2/validation_choices.csv`
+
+The CSV includes both a human-readable `allowed_value` column and an `allowed_value_json` column that preserves typed values.
+
 ## Adding a new post type
 
 The key idea: `post_type_key` is the beacon. Every workbook tab that supports post-type-specific behavior should use the same `post_type_key` value for the new type.

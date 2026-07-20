@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -10,19 +11,24 @@ from openpyxl import load_workbook
 from pydantic import BaseModel, ValidationError
 
 from app.v2.errors import ErrorDetail, InvalidWorkbookError
+from app.v2.knowledge_base.app_owned import (
+    APP_OWNED_AGENT_INSTRUCTIONS,
+    APP_OWNED_APPLICATION_STATES,
+    APP_OWNED_CONTEXT_MANIFEST,
+    APP_OWNED_IMAGE_ANALYSIS_RULES,
+    APP_OWNED_INTERNAL_LINK_RULES,
+    APP_OWNED_OUTPUT_SPECIFICATIONS,
+    APP_OWNED_PILLOW_RULES,
+    APP_OWNED_WORKFLOW_STEPS,
+    merge_agent_instructions,
+)
 from app.v2.knowledge_base.step_01_models import (
     ACFFieldSchema,
     AgentInstruction,
-    ApplicationState,
     BlueprintRow,
-    ContextManifestRow,
-    ImageAnalysisRule,
     ImageMetadataField,
     ImageMetadataRule,
     InternalLinkRecord,
-    InternalLinkRule,
-    OutputSpecification,
-    PillowRule,
     PostExample,
     PostTypeConfig,
     SEORule,
@@ -32,13 +38,12 @@ from app.v2.knowledge_base.step_01_models import (
     ValidationListValue,
     WorkbookSnapshot,
     WorkbookVersion,
-    WorkflowStep,
 )
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+LOGGER = logging.getLogger(__name__)
 
 REQUIRED_SHEETS = {
-    "agent_workflow",
     "post_types",
     "shared_fields_schema",
     "seo_rules",
@@ -46,18 +51,23 @@ REQUIRED_SHEETS = {
     "post_blueprint",
     "story_patterns",
     "style_rules",
-    "image_rules_pillow",
-    "image_analysis_rules",
     "image_metadata_schema",
     "image_metadata_rules",
     "internal_links_database",
-    "internal_link_rules",
-    "output_specification",
     "validation_lists",
-    "application_state",
     "post_examples",
     "agent_instructions",
+}
+
+DEPRECATED_APP_OWNED_SHEETS = {
+    "agent_workflow",
+    "application_state",
     "context_building",
+    "image_analysis_rules",
+    "image_rules_pillow",
+    "internal_link_rules",
+    "output_specification",
+    "agent_instructions_app",
 }
 
 LIST_COLUMNS = {
@@ -165,6 +175,7 @@ class WorkbookLoader:
                     for name in missing
                 ],
             )
+        self._warn_deprecated_sheets(workbook)
 
         snapshot = WorkbookSnapshot(
             version=WorkbookVersion(
@@ -180,19 +191,22 @@ class WorkbookLoader:
             seo_rules=self._models(workbook["seo_rules"], SEORule),
             style_rules=self._models(workbook["style_rules"], StyleRule),
             story_patterns=self._models(workbook["story_patterns"], StoryPattern),
-            image_analysis_rules=self._models(workbook["image_analysis_rules"], ImageAnalysisRule),
-            pillow_rules=self._models(workbook["image_rules_pillow"], PillowRule),
+            image_analysis_rules=APP_OWNED_IMAGE_ANALYSIS_RULES,
+            pillow_rules=APP_OWNED_PILLOW_RULES,
             image_metadata_fields=self._models(workbook["image_metadata_schema"], ImageMetadataField),
             image_metadata_rules=self._models(workbook["image_metadata_rules"], ImageMetadataRule),
             internal_links=self._models(workbook["internal_links_database"], InternalLinkRecord),
-            internal_link_rules=self._models(workbook["internal_link_rules"], InternalLinkRule),
-            workflow_steps=self._models(workbook["agent_workflow"], WorkflowStep),
-            application_states=self._models(workbook["application_state"], ApplicationState),
-            agent_instructions=self._models(workbook["agent_instructions"], AgentInstruction),
-            context_manifest=self._models(workbook["context_building"], ContextManifestRow),
+            internal_link_rules=APP_OWNED_INTERNAL_LINK_RULES,
+            workflow_steps=APP_OWNED_WORKFLOW_STEPS,
+            application_states=APP_OWNED_APPLICATION_STATES,
+            agent_instructions=merge_agent_instructions(
+                APP_OWNED_AGENT_INSTRUCTIONS,
+                self._client_agent_instructions(workbook),
+            ),
+            context_manifest=APP_OWNED_CONTEXT_MANIFEST,
             validation_values=self._models(workbook["validation_lists"], ValidationListValue),
             post_examples=self._models(workbook["post_examples"], PostExample),
-            output_specifications=self._models(workbook["output_specification"], OutputSpecification),
+            output_specifications=APP_OWNED_OUTPUT_SPECIFICATIONS,
         )
         with self._lock:
             self._cache[digest] = snapshot
@@ -206,6 +220,31 @@ class WorkbookLoader:
             if row and str(row[0] or "").strip().lower() in {"schema_version", "schema version"}:
                 return str(row[1] or "").strip() or None
         return None
+
+    def _client_agent_instructions(self, workbook: Any) -> tuple[AgentInstruction, ...]:
+        sheet_names = ["agent_instructions"]
+        secondary_names = sorted(
+            name
+            for name in workbook.sheetnames
+            if name.startswith("agent_instructions")
+            and name not in {"agent_instructions", "agent_instructions_app"}
+        )
+        sheet_names.extend(secondary_names)
+        rules: list[AgentInstruction] = []
+        for sheet_name in sheet_names:
+            if sheet_name in workbook.sheetnames:
+                rules.extend(self._models(workbook[sheet_name], AgentInstruction))
+        return tuple(rules)
+
+    @staticmethod
+    def _warn_deprecated_sheets(workbook: Any) -> None:
+        present = sorted(DEPRECATED_APP_OWNED_SHEETS.intersection(workbook.sheetnames))
+        if not present:
+            return
+        LOGGER.warning(
+            "Workbook contains deprecated app-owned sheets that are ignored: %s",
+            ", ".join(present),
+        )
 
     def _models(self, worksheet: Any, model: type[ModelT]) -> tuple[ModelT, ...]:
         headers = [str(cell.value).strip() if cell.value is not None else None for cell in worksheet[1]]

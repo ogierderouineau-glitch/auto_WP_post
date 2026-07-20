@@ -2,6 +2,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from app.v2.knowledge_base.app_owned import APP_OWNED_INTERNAL_LINK_RULES
+
 
 HEADER_ALIASES = {
     "user_field_name": {"user field name", "source field name", "source_field_key", "field_key", "field key"},
@@ -57,7 +59,6 @@ POST_TYPES_REQUIRED_COLUMNS = {
 }
 
 INTERNAL_LINKS_DATABASE_TAB = "internal_links_database"
-INTERNAL_LINK_RULES_TAB = "internal_link_rules"
 
 
 def normalize_key(value: str) -> str:
@@ -543,7 +544,22 @@ def load_internal_links_context(workbook_path: str | Path | None) -> dict[str, A
 
     workbook = load_workbook(path, read_only=False, data_only=True, keep_vba=True)
     database: list[dict[str, Any]] = []
-    rules: list[dict[str, Any]] = []
+    # Rules are app-owned in V2. This legacy bridge keeps workbook-driven link records
+    # but reads rule defaults from typed code to avoid config drift.
+    rules: list[dict[str, Any]] = [
+        {
+            "rule_id": row.rule_id,
+            "rule_type": row.action_type,
+            "operator": row.operator,
+            "value": str(row.value),
+            "value_type": row.value_type,
+            "instruction": row.instruction_de,
+            "priority": row.priority,
+            "enabled": bool(row.enabled),
+        }
+        for row in APP_OWNED_INTERNAL_LINK_RULES
+        if row.enabled and str(row.applies_to or "").lower() == "internal_links"
+    ]
 
     if INTERNAL_LINKS_DATABASE_TAB in workbook.sheetnames:
         ws = workbook[INTERNAL_LINKS_DATABASE_TAB]
@@ -583,43 +599,6 @@ def load_internal_links_context(workbook_path: str | Path | None) -> dict[str, A
             target_url = item["target_url"].lower()
             if item["target_url"] and item["anchor_text"] and target_url.startswith(("http://", "https://")):
                 database.append(item)
-
-    if INTERNAL_LINK_RULES_TAB in workbook.sheetnames:
-        ws = workbook[INTERNAL_LINK_RULES_TAB]
-        header = [normalize_key(str(ws.cell(1, col).value or "")).replace(" ", "_") for col in range(1, ws.max_column + 1)]
-        idx = {name: pos for pos, name in enumerate(header)}
-        for row_index in range(2, ws.max_row + 1):
-            raw = [ws.cell(row_index, col).value for col in range(1, ws.max_column + 1)]
-            if not any(str(value or "").strip() for value in raw):
-                continue
-
-            enabled_idx = idx.get("enabled")
-            enabled_value = raw[enabled_idx] if enabled_idx is not None else True
-            if not parse_boolish(enabled_value, default=True):
-                continue
-
-            def get(name: str) -> str:
-                pos = idx.get(name)
-                if pos is None:
-                    return ""
-                return str(raw[pos] or "").strip()
-
-            applies_to = get("applies_to").lower()
-            if applies_to and applies_to != "internal_links":
-                continue
-
-            rules.append(
-                {
-                    "rule_id": get("rule_id"),
-                    "rule_type": get("rule_type"),
-                    "operator": get("operator"),
-                    "value": get("value"),
-                    "value_type": get("value_type"),
-                    "instruction": get("instruction"),
-                    "priority": get("priority"),
-                    "enabled": True,
-                }
-            )
 
     return {
         "source": str(path),

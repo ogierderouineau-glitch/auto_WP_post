@@ -19,6 +19,7 @@ import {
   waitForSessionJob,
   type ContentSession,
 } from "@/lib/content-sessions"
+import { statusMessageClass } from "@/lib/status-style"
 
 type OperationState = "idle" | "loading" | "success" | "error"
 type PublishStatus = "draft" | "private" | "publish"
@@ -273,7 +274,7 @@ export function WordPressScreen({
               <div
                 className={[
                   "mb-3 rounded-md px-3 py-2 text-sm",
-                  operation === "error" ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground",
+                  statusMessageClass(operation, message),
                 ].join(" ")}
               >
                 {message}

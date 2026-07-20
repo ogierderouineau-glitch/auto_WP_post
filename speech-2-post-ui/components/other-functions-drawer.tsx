@@ -44,6 +44,7 @@ type StoredJob = {
 }
 
 const ACTIVE_JOB_STORAGE = "speech2post_active_job"
+const SLOW_OPERATION_THRESHOLD_SECONDS = 45
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -611,7 +612,14 @@ export function OtherFunctionsDrawer({
                 {session.operation_log.map((entry) => (
                   <li key={entry.operation_id} className="rounded-md border border-border bg-panel px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium text-foreground">{formatOperation(entry.operation)}</span>
+                      <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        {formatOperation(entry.operation)}
+                        {entry.duration_seconds >= SLOW_OPERATION_THRESHOLD_SECONDS ? (
+                          <span className="rounded bg-warn/20 px-1.5 py-0.5 text-[10px] font-semibold text-warn-foreground">
+                            &gt;45s
+                          </span>
+                        ) : null}
+                      </span>
                       <span className="text-xs text-muted-foreground">{formatTime(entry.finished_at)}</span>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">

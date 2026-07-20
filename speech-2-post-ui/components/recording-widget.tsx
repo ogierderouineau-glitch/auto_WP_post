@@ -85,6 +85,7 @@ export function RecordingWidget({
   selectedPictureId,
   selectedContentFieldIds,
   selectedContentLinks,
+  contentAiAssistedLinkPlacement,
   onPictureTranscriptAppend,
 }: {
   auth: ApiClientOptions | null
@@ -100,6 +101,7 @@ export function RecordingWidget({
   selectedPictureId?: string
   selectedContentFieldIds: string[]
   selectedContentLinks: Record<string, string>[]
+  contentAiAssistedLinkPlacement: boolean
   onPictureTranscriptAppend: (text: string) => Promise<void>
 }) {
   const [recording, setRecording] = useState(false)
@@ -263,8 +265,12 @@ export function RecordingWidget({
       return
     }
     const pictureTranscripts = activeScreen === "media" ? combinedPictureTranscripts(session) : ""
-    if (!transcript.trim() && !pictureTranscripts) {
+    if (activeScreen !== "content" && !transcript.trim() && !pictureTranscripts) {
       setStatus("Add an instruction or describe at least one picture first.")
+      return
+    }
+    if (activeScreen === "content" && !hasContentInstruction) {
+      setStatus("Add an instruction or select an unused internal link first.")
       return
     }
     setSubmitting(true)
@@ -290,7 +296,14 @@ export function RecordingWidget({
       } else if (activeScreen === "content") {
         const fieldIds = selectedContentFieldIds
         if (!fieldIds.length) throw new Error("Generate a draft before asking the content agent to revise it.")
-        const job = await regenerateSessionDraft(auth, session, transcript, fieldIds, selectedContentLinks)
+        const job = await regenerateSessionDraft(
+          auth,
+          session,
+          transcript,
+          fieldIds,
+          selectedContentLinks,
+          contentAiAssistedLinkPlacement,
+        )
         sessionStorage.setItem("speech2post_active_job", JSON.stringify({
           jobId: job.job_id,
           operation: "regenerate",

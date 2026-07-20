@@ -568,6 +568,7 @@ export async function regenerateSessionDraft(
   message: string,
   revisionFieldIds: string[],
   selectedLinks = session.selected_links || [],
+  aiAssistedLinkPlacement = false,
 ) {
   const linkInstructions = selectedLinks
     .filter((link) => link.revision_requested === "true")
@@ -578,6 +579,7 @@ export async function regenerateSessionDraft(
           : `Inject the internal link using the approved anchor "${link.anchor_text}" into the most suitable eligible ACF field.`,
     )
   const revisionInstruction = [message.trim(), ...linkInstructions].filter(Boolean).join("\n")
+  const linkPlacementOnly = !message.trim() && linkInstructions.length > 0
 
   return apiRequest<SessionJob>(`/api/content-sessions/${session.session_id}/draft-chat-job`, auth, {
     method: "POST",
@@ -588,6 +590,8 @@ export async function regenerateSessionDraft(
       selected_links: selectedLinks,
       current_url: null,
       use_vision_for_image_metadata: false,
+      ai_assisted_link_placement: aiAssistedLinkPlacement,
+      link_placement_only: linkPlacementOnly,
       message: revisionInstruction,
       revision_field_ids: revisionFieldIds,
     },

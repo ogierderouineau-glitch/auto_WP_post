@@ -147,13 +147,12 @@ class ExistingWordPressProvider(WordPressProvider):
             post = request_json("POST", f"{endpoint}/{int(target_post_id)}", json=body)
             mode = "updated_linked_post"
         else:
-            existing = None if force_create_new else self._find_existing(endpoint, wordpress.slug, idempotency_key)
-            if existing:
-                post = request_json("POST", f"{endpoint}/{existing['id']}", json=body)
-                mode = "updated_idempotently"
-            else:
-                post = request_json("POST", endpoint, json=body)
-                mode = "created"
+            # A slug describes content; it does not establish session ownership.
+            # Different sessions may legitimately generate the same slug, and
+            # WordPress will make a newly created post slug unique. Existing
+            # posts are updated only through an explicit target_post_id.
+            post = request_json("POST", endpoint, json=body)
+            mode = "created"
         post_id = int(post["id"])
         for item in media:
             if item.get("image_usage") != "featured":
@@ -254,17 +253,6 @@ class ExistingWordPressProvider(WordPressProvider):
             "missing_acf_fields": acf_missing,
             "meta_resolution": meta_resolution,
         }
-
-    @staticmethod
-    def _find_existing(endpoint: str, slug: str, idempotency_key: str) -> dict[str, Any] | None:
-        if not slug:
-            return None
-        rows = request_json(
-            "GET",
-            endpoint,
-            params={"slug": slug, "status": "any", "context": "edit", "per_page": 1},
-        )
-        return rows[0] if rows else None
 
     @staticmethod
     def _rest_schema(session: ContentSession) -> dict[str, set[str]]:

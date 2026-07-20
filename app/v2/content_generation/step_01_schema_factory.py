@@ -66,6 +66,10 @@ def _field_definition(
     description_parts = [schema.description_de]
     if getattr(schema, "min_words", None) is not None:
         description_parts.append(f"Minimum {schema.min_words} words.")
+        safe_minimum = _effective_minimum_words(schema.min_words)
+        description_parts.append(
+            f"Write a little longer than the minimum so the final draft stays safely above {safe_minimum} words."
+        )
     if getattr(schema, "max_words", None) is not None:
         description_parts.append(f"Maximum {schema.max_words} words.")
     if getattr(schema, "min_characters", None) is not None:
@@ -189,24 +193,6 @@ class LinkSelectionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     selections: list[LinkSelection] = Field(default_factory=list)
-
-
-class LinkPlacement(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    link_id: str
-    field_key: str
-    match_text: str
-    anchor_text: str
-    placement_mode: Literal["wrap_existing_text", "rewrite_single_sentence"] = "wrap_existing_text"
-    sentence_index: int | None = None
-    replacement_sentence: str | None = None
-
-
-class LinkPlacementResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    placements: list[LinkPlacement] = Field(default_factory=list)
 
 
 def build_image_analysis_model(

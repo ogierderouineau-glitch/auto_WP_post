@@ -3,12 +3,13 @@ from __future__ import annotations
 import uuid
 import json
 import os
+import re
 from datetime import date, datetime, timezone
 from typing import Any
 from pathlib import Path
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from time import perf_counter
+from time import perf_counter, sleep
 
 from pydantic import ValidationError
 
@@ -19,7 +20,6 @@ except Exception:
 
 from app.v2.context.step_01_builder import GenerationContextBuilder
 from app.v2.content_generation.step_01_schema_factory import (
-    LinkPlacementResponse,
     build_fact_extraction_model,
     build_generation_model,
     build_image_analysis_model,
@@ -65,6 +65,7 @@ from app.v2.sessions.step_02_state_machine import SessionStateMachine
 from app.v2.storage.step_02_uploads import safe_upload_name
 from app.v2.workflow.step_04_generation_conditions import (
     GenerationConditionEvaluator,
+    fact_is_usable,
     source_fact_dependencies_are_available,
 )
 from app.v2.workflow.step_02_clarification import ClarificationService
@@ -291,7 +292,7 @@ class ContentSessionService:
         *,
         language_model: str,
         reasoning_effort: str,
-        generation_mode: str = "batched",
+        generation_mode: str = "single",
         expected_version: int,
     ) -> ContentSession:
         # Settings are a field-scoped merge. Re-read the latest session so an
@@ -348,16 +349,31 @@ class ContentSessionService:
             updated = SessionStateMachine(
                 self.knowledge.by_hash(updated.workbook_hash)
             ).transition(updated, "uploading")
+        persisted = self.repository.save(updated, expected_version=expected_version)
         if kind == "image":
-            snapshot = self.knowledge.by_hash(updated.workbook_hash)
-            if use_vision:
-                self._milestone(updated, "image Vision analysis started")
-                updated = self._analyze_missing_images(snapshot, updated)
-                self._milestone(updated, "image Vision analysis finished")
-            self._milestone(updated, "Pillow processing started")
-            updated = self._process_missing_images(snapshot, updated)
-            self._milestone(updated, "Pillow processing finished")
-        return self.repository.save(updated, expected_version=expected_version)
+            snapshot = self.knowledge.by_hash(persisted.workbook_hash)
+            enriched = persisted
+            try:
+                if use_vision:
+                    self._milestone(enriched, "image Vision analysis started")
+                    enriched = self._analyze_missing_images(
+                        snapshot,
+                        enriched,
+                        media_ids={reference.media_id},
+                    )
+                    self._milestone(enriched, "image Vision analysis finished")
+                self._milestone(enriched, "Pillow processing started")
+                enriched = self._process_missing_images(
+                    snapshot,
+                    enriched,
+                    media_ids={reference.media_id},
+                )
+                self._milestone(enriched, "Pillow processing finished")
+            except Exception as exc:
+                self._milestone(persisted, f"image enrichment deferred after upload: {exc}")
+                return persisted
+            return self.repository.save(enriched, expected_version=persisted.version)
+        return persisted
 
     def add_inputs(
         self,
@@ -538,6 +554,7 @@ class ContentSessionService:
     ) -> ContentSession:
         session = self.repository.get(session_id)
         snapshot = self.knowledge.by_hash(session.workbook_hash)
+        state_machine = SessionStateMachine(snapshot)
         corrections = self._normalize_fact_values(
             snapshot,
             session.post_type_key,
@@ -545,8 +562,15 @@ class ContentSessionService:
         )
         updated = self.clarification.apply_corrections(session, corrections)
         updated = updated.model_copy(update={"clarification_questions": []})
-        if session.state == "needs_input":
-            updated = SessionStateMachine(snapshot).transition(updated, "analyzing")
+        missing = self.clarification.missing_required_dependencies(snapshot, updated)
+        if missing:
+            updated = updated.model_copy(
+                update={"clarification_questions": self.clarification.bundled_questions(missing)}
+            )
+            if updated.state != "needs_input":
+                updated = state_machine.transition(updated, "needs_input")
+        elif updated.state in {"needs_input", "analyzing", "uploading"}:
+            updated = state_machine.transition(updated, "ready_to_generate")
         return self.repository.save(updated, expected_version=expected_version)
 
     def update_image_metadata(
@@ -660,6 +684,8 @@ class ContentSessionService:
         reference, _ = self._find_image_reference_and_processed(session, filename)
         image_context_transcripts = dict(session.image_context_transcripts)
         cleaned = str(transcript or "").strip()
+        if str(image_context_transcripts.get(reference.media_id) or "") == cleaned:
+            return session
         if cleaned:
             image_context_transcripts[reference.media_id] = cleaned
         else:
@@ -1085,6 +1111,8 @@ class ContentSessionService:
         selected_links: list[dict[str, str]],
         current_url: str | None,
         use_vision_for_image_metadata: bool = True,
+        ai_assisted_link_placement: bool = False,
+        link_placement_only: bool = False,
         revision_instruction: str | None = None,
         revision_field_ids: list[str] | None = None,
         expected_version: int,
@@ -1148,27 +1176,40 @@ class ContentSessionService:
             self._milestone(session, "deterministic internal link ranking finished")
         if maximum_links is not None and len(selected_links) > maximum_links:
             selected_links = selected_links[:maximum_links]
+        explicitly_requested_link_ids = {
+            str(selection.get("link_id") or "")
+            for selection in selected_links
+            if selection.get("revision_requested") == "true"
+        }
         if self.language_model is not None:
             enum_families = {
                 row.list_name: tuple(snapshot.validation_family(row.list_name))
                 for row in snapshot.validation_values
             }
-            should_generate = targeted_revision or not shared_fields or not acf_source_fields
+            should_generate = (
+                (targeted_revision and (not link_placement_only or ai_assisted_link_placement))
+                or not shared_fields
+                or not acf_source_fields
+            )
             if should_generate:
                 shared_rows = [
                     row for row in snapshot.shared_fields
                     if row.enabled and row.include_in_ai_schema
                     and (not targeted_revision or row.field_key in selected_shared_keys)
                 ]
+                derived_acf_fields = self._derive_acf_fields_from_facts(snapshot, session)
                 acf_rows = [
                     row for row in snapshot.acf_fields
                     if row.enabled
                     and row.post_type_key == session.post_type_key
                     and row.field_role != "input_fact"
                     and row.include_in_ai_schema
+                    and row.field_key not in derived_acf_fields
                     and self._acf_field_is_eligible(row, session)
                     and (not targeted_revision or row.field_key in selected_acf_keys)
                 ]
+                if not targeted_revision:
+                    acf_source_fields = {**derived_acf_fields, **acf_source_fields}
                 records = {row.link_id: row for row in eligible.candidates}
                 selected_link_context = [
                     {
@@ -1199,11 +1240,18 @@ class ContentSessionService:
                     ]
                 )
                 shared_row_keys = {row.field_key for row in shared_rows}
-                for generation_task, model_name, batch_name, rows in generation_groups:
+
+                def run_generation_group(
+                    generation_task: str,
+                    model_name: str,
+                    batch_name: str,
+                    rows: list[Any],
+                    provider: LanguageModelProvider,
+                    shared_values: dict[str, Any],
+                ) -> tuple[str, str, dict[str, Any], Any]:
                     if not rows:
-                        continue
+                        return generation_task, batch_name, {}, provider
                     field_keys = [row.field_key for row in rows]
-                    self._milestone(session, f"{generation_task} batch={batch_name} started")
                     context = self.context_builder.build(
                         snapshot=snapshot,
                         task="generation",
@@ -1214,11 +1262,20 @@ class ContentSessionService:
                     context_payload = context.model_dump(by_alias=True)
                     if targeted_revision:
                         context_payload["examples"] = []
-                    context_payload["selected_internal_links"] = selected_link_context
-                    context_payload["internal_link_output_contract"] = (
-                        "Where natural and relevant, use one approved anchor phrase verbatim in an "
-                        "internal-link-enabled body field. Do not add HTML or URLs and never force a phrase."
-                    )
+                    if not targeted_revision or ai_assisted_link_placement:
+                        context_payload["selected_internal_links"] = selected_link_context
+                        if targeted_revision and ai_assisted_link_placement and explicitly_requested_link_ids:
+                            context_payload["internal_link_output_contract"] = (
+                                "Rewrite the selected internal-link-enabled body fields naturally so every "
+                                "explicitly requested link is represented by exactly one of its approved anchor "
+                                "phrases verbatim. Every requested link is mandatory. Do not add HTML or URLs; "
+                                "the application will inject them after generation."
+                            )
+                        else:
+                            context_payload["internal_link_output_contract"] = (
+                                "Where natural and relevant, use one approved anchor phrase verbatim in an "
+                                "internal-link-enabled body field. Do not add HTML or URLs and never force a phrase."
+                            )
                     context_payload["current_shared_fields"] = {
                         key: value
                         for key, value in session.shared_fields.items()
@@ -1232,7 +1289,7 @@ class ContentSessionService:
                         and (not targeted_revision or key in selected_acf_keys)
                     }
                     if generation_task == "acf_field_generation" and shared_fields:
-                        context_payload["shared_fields_generated_this_run"] = shared_fields
+                        context_payload["shared_fields_generated_this_run"] = shared_values
                         context_payload["acf_generation_batch"] = batch_name
                     if revision_instruction:
                         context_payload["draft_revision"] = {
@@ -1241,13 +1298,6 @@ class ContentSessionService:
                             "selected_acf_field_keys": sorted(selected_acf_keys),
                             "unchecked_fields_must_not_change": True,
                         }
-                    generation_trace.update(
-                        self._generation_trace_from_context(
-                            context,
-                            field_keys=field_keys,
-                            generation_task=generation_task,
-                        )
-                    )
                     model = build_generation_model(
                         rows,
                         name=model_name,
@@ -1266,9 +1316,39 @@ class ContentSessionService:
                             context=context_payload,
                         ),
                         schema=model,
-                        provider=generation_provider,
+                        provider=provider,
                     )
-                    generated_values = generated.model_dump(exclude_none=True)
+                    return generation_task, batch_name, generated.model_dump(exclude_none=True), provider
+
+                for generation_task, model_name, batch_name, rows in generation_groups:
+                    if not rows:
+                        continue
+                    if generation_task == "acf_field_generation" and self._can_parallelize_provider(generation_provider):
+                        break
+                    field_keys = [row.field_key for row in rows]
+                    context = self.context_builder.build(
+                        snapshot=snapshot,
+                        task="generation",
+                        post_type_key=session.post_type_key,
+                        session=session,
+                        field_keys=field_keys,
+                    )
+                    generation_trace.update(
+                        self._generation_trace_from_context(
+                            context,
+                            field_keys=field_keys,
+                            generation_task=generation_task,
+                        )
+                    )
+                    self._milestone(session, f"{generation_task} batch={batch_name} started")
+                    generation_task, batch_name, generated_values, provider_used = run_generation_group(
+                        generation_task,
+                        model_name,
+                        batch_name,
+                        rows,
+                        generation_provider,
+                        shared_fields,
+                    )
                     if generation_task == "content_generation":
                         shared_fields = {
                             **shared_fields,
@@ -1282,24 +1362,58 @@ class ContentSessionService:
                         shared_fields = {**shared_fields, **generated_values}
                     else:
                         acf_source_fields = {**acf_source_fields, **generated_values}
-                    session = self._record_provider_usage(session, generation_provider)
+                    session = self._record_provider_usage(session, provider_used)
                     self._milestone(session, f"{generation_task} batch={batch_name} finished")
+                else:
+                    generation_groups = ()
+
+                parallel_acf_groups = [
+                    group for group in generation_groups
+                    if group[0] == "acf_field_generation" and group[3]
+                ]
+                if parallel_acf_groups and self._can_parallelize_provider(generation_provider):
+                    max_workers = max(1, min(len(parallel_acf_groups), int(os.getenv("V2_ACF_GENERATION_WORKERS", "6"))))
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        futures = {}
+                        for generation_task, model_name, batch_name, rows in parallel_acf_groups:
+                            field_keys = [row.field_key for row in rows]
+                            context = self.context_builder.build(
+                                snapshot=snapshot,
+                                task="generation",
+                                post_type_key=session.post_type_key,
+                                session=session,
+                                field_keys=field_keys,
+                            )
+                            generation_trace.update(
+                                self._generation_trace_from_context(
+                                    context,
+                                    field_keys=field_keys,
+                                    generation_task=generation_task,
+                                )
+                            )
+                            self._milestone(session, f"{generation_task} batch={batch_name} started")
+                            provider = self._clone_language_provider(generation_provider)
+                            future = executor.submit(
+                                run_generation_group,
+                                generation_task,
+                                model_name,
+                                batch_name,
+                                rows,
+                                provider,
+                                shared_fields,
+                            )
+                            futures[future] = batch_name
+                        for future in as_completed(futures):
+                            generation_task, batch_name, generated_values, provider_used = future.result()
+                            acf_source_fields = {**acf_source_fields, **generated_values}
+                            session = self._record_provider_usage(session, provider_used)
+                            self._milestone(session, f"{generation_task} batch={batch_name} finished")
         routed_shared = dict(shared_fields)
         routed_acf = dict(acf_source_fields)
         plain_acf_source_fields = dict(routed_acf)
-        explicitly_requested_link_ids = {
-            str(selection.get("link_id") or "")
-            for selection in selected_links
-            if selection.get("revision_requested") == "true"
-        }
-        placement_provider = (
-            self.revision_language_model
-            if targeted_revision
-            else self._session_language_provider(session)
-        )
         try:
             linkable_fields = self._linkable_acf_fields(snapshot, session)
-            if self.language_model is not None and selected_links and linkable_fields:
+            if selected_links and linkable_fields:
                 minimum_words_between_links = self._minimum_words_between_internal_links(snapshot)
                 deterministic_placements = self.internal_links.existing_anchor_placements(
                     eligible,
@@ -1326,88 +1440,23 @@ class ContentSessionService:
                     if str(selection.get("link_id") or "") in eligible_records
                     and eligible_records[str(selection.get("link_id"))].target_url not in deterministic_content
                 ]
-                placements: list[dict[str, Any]] = []
-                if remaining_selections:
-                    placements = self._plan_internal_link_placements(
-                        snapshot,
-                        session,
-                        eligible=eligible,
-                        selected_links=remaining_selections,
-                        acf_source_fields=deterministic_result.acf_source_fields,
-                        linkable_fields=linkable_fields,
-                        minimum_words_between_links=minimum_words_between_links,
-                        provider=placement_provider,
-                    )
-                    session = self._record_provider_usage(session, placement_provider)
-                planned_link_ids = {str(placement.get("link_id") or "") for placement in placements}
-                omitted_selections = [
-                    selection
+                skipped = [
+                    {
+                        "link_id": str(selection.get("link_id") or ""),
+                        "field_key": str(selection.get("destination_acf") or ""),
+                        "reason": (
+                            "approved_anchor_not_found_for_requested_link"
+                            if str(selection.get("link_id") or "") in explicitly_requested_link_ids
+                            else "approved_anchor_not_found"
+                        ),
+                    }
                     for selection in remaining_selections
-                    if selection.get("link_id") in explicitly_requested_link_ids - planned_link_ids
                 ]
-                if omitted_selections:
-                    placements.extend(self._plan_internal_link_placements(
-                        snapshot,
-                        session,
-                        eligible=eligible,
-                        selected_links=omitted_selections,
-                        acf_source_fields=deterministic_result.acf_source_fields,
-                        linkable_fields=linkable_fields,
-                        minimum_words_between_links=minimum_words_between_links,
-                        provider=placement_provider,
-                    ))
-                    session = self._record_provider_usage(session, placement_provider)
-                planned_result = self.internal_links.inject_placements(
-                    eligible,
-                    placements,
-                    acf_source_fields=deterministic_result.acf_source_fields,
-                    linkable_fields=linkable_fields,
-                    minimum_words_between_links=minimum_words_between_links,
-                )
-                planned_content = "\n".join(
-                    str(value)
-                    for value in planned_result.acf_source_fields.values()
-                    if isinstance(value, str)
-                )
-                fallback_selections = [
-                    {key: value for key, value in selection.items() if key != "destination_acf"}
-                    for selection in remaining_selections
-                    if str(selection.get("link_id") or "") in explicitly_requested_link_ids
-                    and eligible_records[str(selection.get("link_id"))].target_url not in planned_content
-                ]
-                fallback_result = None
-                if fallback_selections:
-                    fallback_placements = self._plan_internal_link_placements(
-                        snapshot,
-                        session,
-                        eligible=eligible,
-                        selected_links=fallback_selections,
-                        acf_source_fields=planned_result.acf_source_fields,
-                        linkable_fields=linkable_fields,
-                        minimum_words_between_links=minimum_words_between_links,
-                        provider=placement_provider,
-                    )
-                    session = self._record_provider_usage(session, placement_provider)
-                    fallback_result = self.internal_links.inject_placements(
-                        eligible,
-                        fallback_placements,
-                        acf_source_fields=planned_result.acf_source_fields,
-                        linkable_fields=linkable_fields,
-                        minimum_words_between_links=minimum_words_between_links,
-                    )
                 injected_links = InternalLinkInjectionResult(
                     shared_fields={},
-                    acf_source_fields=(fallback_result or planned_result).acf_source_fields,
-                    injected=[
-                        *deterministic_result.injected,
-                        *planned_result.injected,
-                        *(fallback_result.injected if fallback_result else []),
-                    ],
-                    skipped=[
-                        *deterministic_result.skipped,
-                        *planned_result.skipped,
-                        *(fallback_result.skipped if fallback_result else []),
-                    ],
+                    acf_source_fields=deterministic_result.acf_source_fields,
+                    injected=deterministic_result.injected,
+                    skipped=[*deterministic_result.skipped, *skipped],
                 )
             else:
                 injected_links = self.internal_links.inject(
@@ -1602,12 +1651,55 @@ class ContentSessionService:
         return provider
 
     @staticmethod
+    def _can_parallelize_provider(provider: LanguageModelProvider | None) -> bool:
+        return (
+            provider is not None
+            and hasattr(provider, "with_settings")
+            and hasattr(provider, "model")
+            and hasattr(provider, "reasoning_effort")
+        )
+
+    @staticmethod
+    def _clone_language_provider(provider: LanguageModelProvider) -> LanguageModelProvider:
+        if not ContentSessionService._can_parallelize_provider(provider):
+            return provider
+        return provider.with_settings(
+            model=getattr(provider, "model"),
+            reasoning_effort=getattr(provider, "reasoning_effort"),
+        )
+
+    @staticmethod
     def _acf_generation_batches(rows: list[Any]) -> list[tuple[str, list[Any]]]:
         batches: dict[str, list[Any]] = {}
         for row in rows:
             batch_name = str(row.section or row.group or "content").strip().lower()
             batches.setdefault(batch_name, []).append(row)
         return list(batches.items())
+
+    @staticmethod
+    def _derive_acf_fields_from_facts(
+        snapshot: Any,
+        session: ContentSession,
+    ) -> dict[str, str]:
+        values: dict[str, str] = {}
+        for row in snapshot.acf_fields:
+            if (
+                not row.enabled
+                or row.post_type_key != session.post_type_key
+                or row.field_role == "input_fact"
+                or row.source_mode != "derived_from_facts"
+                or not row.source_fact_keys
+                or not ContentSessionService._acf_field_is_eligible(row, session)
+            ):
+                continue
+            parts = [
+                str(session.confirmed_facts[key].value).strip()
+                for key in row.source_fact_keys
+                if fact_is_usable(session, key)
+            ]
+            if parts:
+                values[row.field_key] = ", ".join(parts)
+        return values
 
     def _structured(
         self,
@@ -1622,7 +1714,12 @@ class ContentSessionService:
             raise RuntimeError("A LanguageModelProvider is not configured.")
         current_messages = list(messages)
         validation_errors: list[str] = []
-        max_attempts = 2
+        max_attempts = max(1, int(os.getenv("V2_MODEL_PROVIDER_MAX_ATTEMPTS", "3")))
+        max_retry_wait_budget_seconds = max(
+            0,
+            int(os.getenv("V2_MODEL_PROVIDER_MAX_RETRY_WAIT_BUDGET_SECONDS", "45")),
+        )
+        waited_seconds = 0
         for attempt in range(1, max_attempts + 1):
             started_at = perf_counter()
             try:
@@ -1667,6 +1764,24 @@ class ContentSessionService:
                     },
                 ]
             except Exception as provider_error:
+                if self._is_transient_provider_error(provider_error) and attempt < max_attempts:
+                    wait_seconds = self._provider_retry_delay_seconds(provider_error, attempt)
+                    remaining_wait_budget = max_retry_wait_budget_seconds - waited_seconds
+                    if remaining_wait_budget <= 0:
+                        raise ModelProviderError(
+                            f"Model provider retry budget exhausted for {task} after "
+                            f"{attempt} attempts: {provider_error}"
+                        ) from provider_error
+                    wait_seconds = min(wait_seconds, remaining_wait_budget)
+                    print(
+                        f"[model retry] task={task} attempt={attempt} "
+                        f"seconds={perf_counter() - started_at:.2f} "
+                        f"provider_error={provider_error} wait_seconds={wait_seconds}",
+                        flush=True,
+                    )
+                    sleep(wait_seconds)
+                    waited_seconds += wait_seconds
+                    continue
                 raise ModelProviderError(
                     f"Model provider failed for {task} on attempt {attempt}: "
                     f"{provider_error}"
@@ -1674,6 +1789,28 @@ class ContentSessionService:
         raise ModelOutputValidationError(
             f"Structured output failed validation for {task}: {validation_errors}"
         )
+
+    @staticmethod
+    def _is_transient_provider_error(error: Exception) -> bool:
+        message = str(error).lower()
+        return (
+            "temporarily unavailable" in message
+            or "http 5" in message
+            or "rate limit" in message
+            or "timed out" in message
+            or "connection" in message
+        )
+
+    @staticmethod
+    def _provider_retry_delay_seconds(error: Exception, attempt: int) -> int:
+        max_wait_seconds = max(1, int(os.getenv("V2_MODEL_PROVIDER_MAX_WAIT_SECONDS", "20")))
+        # Respect explicit wait hints from provider messages when available.
+        message = str(error)
+        match = re.search(r"wait at least\s+(\d+)\s+seconds", message, re.IGNORECASE)
+        if match:
+            hinted = int(match.group(1))
+            return max(1, min(hinted, max_wait_seconds))
+        return min(max_wait_seconds, 4 * (2 ** (attempt - 1)))
 
     @staticmethod
     def _record_provider_usage(
@@ -1834,6 +1971,8 @@ class ContentSessionService:
         self,
         snapshot: Any,
         session: ContentSession,
+        *,
+        media_ids: set[str] | None = None,
     ) -> ContentSession:
         if self.image_processor is None or self.object_storage is None or not session.image_refs:
             return session
@@ -1847,6 +1986,7 @@ class ContentSessionService:
             reference
             for reference in session.image_refs
             if reference.media_id not in processed_media_ids
+            and (media_ids is None or reference.media_id in media_ids)
         ]
         if not unprocessed_refs:
             return session
@@ -1977,7 +2117,10 @@ class ContentSessionService:
                     "images": list(metadata_contexts.values()),
                     "output_contract": (
                         "Return exactly one images item for every supplied media_id. "
-                        "Do not copy visual details from one image to another."
+                        "Do not copy visual details from one image to another. "
+                        "Write human-readable German metadata with correct Unicode spelling "
+                        "(including ä, ö, ü, Ä, Ö, Ü, and ß); only technical filename or slug "
+                        "fields may use ASCII transliteration."
                     ),
                 },
             ),
@@ -2383,81 +2526,6 @@ class ContentSessionService:
             )
         )
 
-    def _plan_internal_link_placements(
-        self,
-        snapshot: Any,
-        session: ContentSession,
-        *,
-        eligible: Any,
-        selected_links: list[dict[str, str]],
-        acf_source_fields: dict[str, Any],
-        linkable_fields: dict[str, Any],
-        minimum_words_between_links: int,
-        provider: LanguageModelProvider | None = None,
-    ) -> list[dict[str, Any]]:
-        records = {row.link_id: row for row in eligible.candidates}
-        context = self.context_builder.build(
-            snapshot=snapshot,
-            task="internal_links",
-            post_type_key=session.post_type_key,
-            session=session,
-        )
-        messages = structured_task_input(
-            task="internal_link_placement_planning",
-            instructions=context.instructions,
-            context={
-                "confirmed_facts": context.confirmed_facts,
-                "rules": [
-                    row.model_dump(exclude={"sheet_row"})
-                    for row in snapshot.internal_link_rules
-                    if row.enabled and row.applies_to == "internal_links"
-                ],
-                "minimum_words_between_links": minimum_words_between_links,
-                "selected_links": [
-                    {
-                        "link_id": selection.get("link_id"),
-                        "anchor_text": selection.get("anchor_text"),
-                        "anchor_variants": records[selection.get("link_id")].anchor_variants
-                        if selection.get("link_id") in records else (),
-                        "usage_context": records[selection.get("link_id")].usage_context
-                        if selection.get("link_id") in records else "",
-                        "requested_destination_acf": selection.get("destination_acf") or None,
-                    }
-                    for selection in selected_links
-                    if selection.get("link_id") in records
-                ],
-                "eligible_acf_fields": [
-                    {
-                        "field_key": field_key,
-                        "destination_acf": getattr(row, "acf_field_name", None) or field_key,
-                        "value": acf_source_fields.get(field_key, ""),
-                        "max_internal_links": getattr(row, "max_internal_links", None),
-                        "internal_link_priority": getattr(row, "internal_link_priority", None),
-                    }
-                    for field_key, row in linkable_fields.items()
-                    if isinstance(acf_source_fields.get(field_key), str)
-                    and str(acf_source_fields.get(field_key) or "").strip()
-                ],
-                "output_contract": (
-                    "Return only precise placement instructions. Prefer placement_mode=wrap_existing_text. "
-                    "When requested_destination_acf is present, prefer a matching destination, but choose another "
-                    "eligible field when the preferred destination cannot accept the link safely. "
-                    "If no approved anchor phrase exists, placement_mode=rewrite_single_sentence may replace "
-                    "one existing sentence: provide its zero-based sentence_index, the complete replacement_sentence, "
-                    "and use an anchor_text or anchor_variant verbatim as match_text. "
-                    "Do not return URLs or HTML. Use only field_key values from eligible_acf_fields and "
-                    "link_id values from selected_links. match_text must appear exactly once in the resulting field."
-                ),
-            },
-        )
-        planned = self._structured(
-            task="internal_link_placement_planning",
-            messages=messages,
-            schema=LinkPlacementResponse,
-            provider=provider,
-        )
-        return [row.model_dump(exclude_none=True) for row in planned.placements]
-
     @staticmethod
     def _complete_internal_link_selection(
         eligible: Any,
@@ -2611,7 +2679,7 @@ class ContentSessionService:
         refined = self._generate_missing_image_metadata(
             snapshot,
             session,
-            overwrite_existing=True,
+            overwrite_existing=False,
         )
         if shared_fields or acf_source_fields:
             refined = refined.model_copy(

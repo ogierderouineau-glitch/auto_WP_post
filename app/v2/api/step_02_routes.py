@@ -848,7 +848,7 @@ def _regenerate_draft_chat(
 ) -> Any:
     data = dict(payload)
     message = str(data.pop("message", "")).strip()
-    if not message:
+    if not message and not data.get("link_placement_only"):
         raise InvalidUploadError("Draft chat message is required.")
     revision_field_ids = data.get("revision_field_ids")
     if not revision_field_ids:

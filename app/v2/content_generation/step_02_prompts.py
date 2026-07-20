@@ -25,7 +25,7 @@ def structured_task_input(
             "Do not invent facts, URLs, identities, destinations, or field keys.",
         ],
     }
-    if task == "image_metadata":
+    if task in {"image_metadata", "image_metadata_batch"}:
         system["constraints"].extend(
             [
                 "Treat image_context_transcript as the primary description of the selected picture.",
@@ -34,6 +34,7 @@ def structured_task_input(
                 "Use approved_context_facts only when they are relevant to what image_context_transcript says this selected picture shows.",
                 "If context.must_use_when_natural contains matching rules with confirmed_source_facts, apply those workbook rules in the target fields whenever the wording remains natural.",
                 "When image_analysis is absent, apply a transcript_match_rule only if image_context_transcript clearly establishes the subject or action described by that rule; then use its confirmed_source_facts naturally in its target fields.",
+                "For German human-readable metadata, use standard German Unicode orthography, including ä, ö, ü, Ä, Ö, Ü, and ß where linguistically correct; do not transliterate umlauts as ae, oe, or ue, or ß as ss. Technical filename/slug fields are exempt.",
             ]
         )
     user = {
