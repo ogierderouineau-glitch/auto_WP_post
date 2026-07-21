@@ -439,107 +439,62 @@ export function OtherFunctionsDrawer({
             {settingsMessage ? <p className="mt-2 text-xs text-muted-foreground">{settingsMessage}</p> : null}
           </Section>
 
-          <Section title="Global status" icon={<Server className="size-4 text-gold" aria-hidden="true" />}>
-            <div className="divide-y divide-border rounded-md border border-border bg-panel px-3">
-              <InfoRow
-                label="Frontend"
-                value={
-                  <span className="inline-flex items-center gap-1.5">
-                    {loading ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5 text-confirm" />}
-                    {loading ? "Working" : statusText}
-                  </span>
-                }
-              />
-              <InfoRow label="Backend session" value={session ? `v${session.version} · ${session.state}` : "No session"} />
-              <InfoRow label="Error" value={error || "None"} />
-            </div>
-          </Section>
-
-          <Section title="Credentials" icon={<KeyRound className="size-4 text-gold" aria-hidden="true" />}>
-            <div className="divide-y divide-border rounded-md border border-border bg-panel px-3">
-              <InfoRow label="Client" value={auth?.client.client_id || "-"} />
-              <InfoRow label="User ID" value={auth?.userId || "-"} />
-              <InfoRow label="Access key" value={auth ? "Stored in sessionStorage for this browser tab" : "Not connected"} />
-            </div>
-          </Section>
-
-          <Section title="Workbook config" icon={<Database className="size-4 text-gold" aria-hidden="true" />}>
-            <div className="divide-y divide-border rounded-md border border-border bg-panel px-3">
-              <InfoRow label="File" value={workbook?.filename || "-"} />
-              <InfoRow label="Storage" value={workbook?.storage_mode || "-"} />
-              <InfoRow label="Hash" value={workbook?.sha256 ? workbook.sha256.slice(0, 12) : "-"} />
-              <InfoRow label="Post types" value={workbook?.post_types.length ?? 0} />
-              <InfoRow label="Fact fields" value={workbook?.fact_schema.length ?? 0} />
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-center text-sm font-semibold text-foreground hover:bg-muted has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
-                {workbookOperation === "uploading" ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-                Database Datei aktualisieren
-                <input
-                  id="s2p-other-workbook-upload"
-                  type="file"
-                  accept=".xlsm,.xlsx"
-                  className="sr-only"
-                  disabled={!auth || workbookOperation !== "idle"}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0]
-                    event.target.value = ""
-                    if (file) void runWorkbookAction("uploading", () => onUploadWorkbook(file))
-                  }}
-                />
-              </label>
-              <button
-                id="s2p-other-workbook-download"
-                type="button"
-                disabled={!auth || workbookOperation !== "idle"}
-                onClick={() => void runWorkbookAction("downloading", onDownloadWorkbook)}
-                className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {workbookOperation === "downloading" ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-                Aktuelle Database Datei herunterladen
-              </button>
-            </div>
-            {workbookMessage && <p className="mt-2 text-xs text-muted-foreground">{workbookMessage}</p>}
-          </Section>
-
-          <Section title="Current session" icon={<Info className="size-4 text-gold" aria-hidden="true" />}>
-            {session ? (
-              <div className="divide-y divide-border rounded-md border border-border bg-panel px-3">
-                <InfoRow label="Session ID" value={<span className="font-mono text-xs">{session.session_id}</span>} />
-                <InfoRow label="Post type" value={session.post_type_key} />
-                <InfoRow label="Images" value={session.image_refs.length} />
-                <InfoRow label="Audio" value={session.audio_refs.length} />
-                <InfoRow label="Confirmed facts" value={Object.keys(session.confirmed_facts || {}).length} />
-                <InfoRow label="Generated fields" value={Object.keys(session.shared_fields || {}).length + Object.keys(session.acf_source_fields || {}).length} />
-                <InfoRow label="WordPress post" value={session.wordpress_result?.post_id ? `#${session.wordpress_result.post_id}` : "-"} />
-              </div>
+          <Section title="Usage" icon={<FileClock className="size-4 text-gold" aria-hidden="true" />}>
+            {session?.ai_usage && Object.keys(session.ai_usage).length ? (
+              <UsageSummary usage={session.ai_usage} />
             ) : (
-              <p className="text-sm text-muted-foreground">No active session.</p>
+              <p className="text-sm text-muted-foreground">No AI usage recorded for this session yet.</p>
             )}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                id="s2p-other-reload-session"
-                type="button"
-                onClick={onReloadSession}
-                disabled={!session || loading}
-                className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:opacity-60"
-              >
-                <RefreshCw className="size-4" />
-                Reload session
-              </button>
-              <button
-                id="s2p-other-open-session-menu"
-                type="button"
-                onClick={onOpenSessionMenu}
-                className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground hover:bg-muted"
-              >
-                <FolderOpen className="size-4" />
-                Session menu
-              </button>
-            </div>
           </Section>
 
-          <Section title="Session archive" icon={<FolderOpen className="size-4 text-gold" aria-hidden="true" />}>
+          <Section title="Operations log" icon={<FileClock className="size-4 text-gold" aria-hidden="true" />}>
+            {session?.operation_log?.length ? (
+              <ol className="mb-3 space-y-2">
+                {session.operation_log.map((entry) => (
+                  <li key={entry.operation_id} className="rounded-md border border-border bg-panel px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        {formatOperation(entry.operation)}
+                        {entry.duration_seconds >= SLOW_OPERATION_THRESHOLD_SECONDS ? (
+                          <span className="rounded bg-warn/20 px-1.5 py-0.5 text-[10px] font-semibold text-warn-foreground">
+                            &gt;45s
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="text-xs text-muted-foreground">{formatTime(entry.finished_at)}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {entry.status} · {formatDuration(entry.duration_seconds)}
+                      {entry.total_tokens ? ` · ${formatInteger(entry.total_tokens)} tokens` : ""}
+                      {entry.estimated_cost_usd != null ? ` · ${formatUsd(entry.estimated_cost_usd)}` : ""}
+                      {entry.details?.model ? ` · ${String(entry.details.model)}` : ""}
+                      {entry.details?.reasoning_effort ? ` · reasoning ${String(entry.details.reasoning_effort)}` : ""}
+                      {entry.details?.generation_mode ? ` · ${String(entry.details.generation_mode)}` : ""}
+                    </p>
+                    <OperationModelCalls operationId={entry.operation_id} details={entry.details || {}} />
+                    {entry.error ? <p className="mt-1 text-xs text-destructive">{entry.error}</p> : null}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+            {operationLog.length ? (
+              <ol className="space-y-2">
+                {operationLog.map((entry) => (
+                  <li key={entry.id} className="rounded-md border border-border bg-panel px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-foreground">{entry.label}</span>
+                      <span className="text-xs text-muted-foreground">{formatTime(entry.at)}</span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{entry.detail}</p>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              !session?.operation_log?.length ? <p className="text-sm text-muted-foreground">No session operations recorded yet.</p> : null
+            )}
+          </Section>
+
+          <Section title="Sessions archive" icon={<FolderOpen className="size-4 text-gold" aria-hidden="true" />}>
             <div className="mb-3 flex justify-end">
               <button
                 id="s2p-other-refresh-archive"
@@ -598,59 +553,104 @@ export function OtherFunctionsDrawer({
             </div>
           </Section>
 
-          <Section title="Usage" icon={<FileClock className="size-4 text-gold" aria-hidden="true" />}>
-            {session?.ai_usage && Object.keys(session.ai_usage).length ? (
-              <UsageSummary usage={session.ai_usage} />
-            ) : (
-              <p className="text-sm text-muted-foreground">No AI usage recorded for this session yet.</p>
-            )}
+          <Section title="Workbook config" icon={<Database className="size-4 text-gold" aria-hidden="true" />}>
+            <div className="divide-y divide-border rounded-md border border-border bg-panel px-3">
+              <InfoRow label="File" value={workbook?.filename || "-"} />
+              <InfoRow label="Storage" value={workbook?.storage_mode || "-"} />
+              <InfoRow label="Hash" value={workbook?.sha256 ? workbook.sha256.slice(0, 12) : "-"} />
+              <InfoRow label="Post types" value={workbook?.post_types.length ?? 0} />
+              <InfoRow label="Fact fields" value={workbook?.fact_schema.length ?? 0} />
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-center text-sm font-semibold text-foreground hover:bg-muted has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
+                {workbookOperation === "uploading" ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                Database Datei aktualisieren
+                <input
+                  id="s2p-other-workbook-upload"
+                  type="file"
+                  accept=".xlsm,.xlsx"
+                  className="sr-only"
+                  disabled={!auth || workbookOperation !== "idle"}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    event.target.value = ""
+                    if (file) void runWorkbookAction("uploading", () => onUploadWorkbook(file))
+                  }}
+                />
+              </label>
+              <button
+                id="s2p-other-workbook-download"
+                type="button"
+                disabled={!auth || workbookOperation !== "idle"}
+                onClick={() => void runWorkbookAction("downloading", onDownloadWorkbook)}
+                className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {workbookOperation === "downloading" ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+                Aktuelle Database Datei herunterladen
+              </button>
+            </div>
+            {workbookMessage && <p className="mt-2 text-xs text-muted-foreground">{workbookMessage}</p>}
           </Section>
 
-          <Section title="Operation log" icon={<FileClock className="size-4 text-gold" aria-hidden="true" />}>
-            {session?.operation_log?.length ? (
-              <ol className="mb-3 space-y-2">
-                {session.operation_log.map((entry) => (
-                  <li key={entry.operation_id} className="rounded-md border border-border bg-panel px-3 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-                        {formatOperation(entry.operation)}
-                        {entry.duration_seconds >= SLOW_OPERATION_THRESHOLD_SECONDS ? (
-                          <span className="rounded bg-warn/20 px-1.5 py-0.5 text-[10px] font-semibold text-warn-foreground">
-                            &gt;45s
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="text-xs text-muted-foreground">{formatTime(entry.finished_at)}</span>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {entry.status} · {formatDuration(entry.duration_seconds)}
-                      {entry.total_tokens ? ` · ${formatInteger(entry.total_tokens)} tokens` : ""}
-                      {entry.estimated_cost_usd != null ? ` · ${formatUsd(entry.estimated_cost_usd)}` : ""}
-                      {entry.details?.model ? ` · ${String(entry.details.model)}` : ""}
-                      {entry.details?.reasoning_effort ? ` · reasoning ${String(entry.details.reasoning_effort)}` : ""}
-                      {entry.details?.generation_mode ? ` · ${String(entry.details.generation_mode)}` : ""}
-                    </p>
-                    <OperationModelCalls operationId={entry.operation_id} details={entry.details || {}} />
-                    {entry.error ? <p className="mt-1 text-xs text-destructive">{entry.error}</p> : null}
-                  </li>
-                ))}
-              </ol>
-            ) : null}
-            {operationLog.length ? (
-              <ol className="space-y-2">
-                {operationLog.map((entry) => (
-                  <li key={entry.id} className="rounded-md border border-border bg-panel px-3 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium text-foreground">{entry.label}</span>
-                      <span className="text-xs text-muted-foreground">{formatTime(entry.at)}</span>
-                    </div>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{entry.detail}</p>
-                  </li>
-                ))}
-              </ol>
+          <Section title="Credentials" icon={<KeyRound className="size-4 text-gold" aria-hidden="true" />}>
+            <div className="divide-y divide-border rounded-md border border-border bg-panel px-3">
+              <InfoRow label="Client" value={auth?.client.client_id || "-"} />
+              <InfoRow label="User ID" value={auth?.userId || "-"} />
+              <InfoRow label="Access key" value={auth ? "Stored in sessionStorage for this browser tab" : "Not connected"} />
+            </div>
+          </Section>
+
+          <Section title="Current session" icon={<Info className="size-4 text-gold" aria-hidden="true" />}>
+            {session ? (
+              <div className="divide-y divide-border rounded-md border border-border bg-panel px-3">
+                <InfoRow label="Session ID" value={<span className="font-mono text-xs">{session.session_id}</span>} />
+                <InfoRow label="Post type" value={session.post_type_key} />
+                <InfoRow label="Images" value={session.image_refs.length} />
+                <InfoRow label="Audio" value={session.audio_refs.length} />
+                <InfoRow label="Confirmed facts" value={Object.keys(session.confirmed_facts || {}).length} />
+                <InfoRow label="Generated fields" value={Object.keys(session.shared_fields || {}).length + Object.keys(session.acf_source_fields || {}).length} />
+                <InfoRow label="WordPress post" value={session.wordpress_result?.post_id ? `#${session.wordpress_result.post_id}` : "-"} />
+              </div>
             ) : (
-              !session?.operation_log?.length ? <p className="text-sm text-muted-foreground">No session operations recorded yet.</p> : null
+              <p className="text-sm text-muted-foreground">No active session.</p>
             )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                id="s2p-other-reload-session"
+                type="button"
+                onClick={onReloadSession}
+                disabled={!session || loading}
+                className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:opacity-60"
+              >
+                <RefreshCw className="size-4" />
+                Reload session
+              </button>
+              <button
+                id="s2p-other-open-session-menu"
+                type="button"
+                onClick={onOpenSessionMenu}
+                className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground hover:bg-muted"
+              >
+                <FolderOpen className="size-4" />
+                Session menu
+              </button>
+            </div>
+          </Section>
+
+          <Section title="Global status" icon={<Server className="size-4 text-gold" aria-hidden="true" />}>
+            <div className="divide-y divide-border rounded-md border border-border bg-panel px-3">
+              <InfoRow
+                label="Frontend"
+                value={
+                  <span className="inline-flex items-center gap-1.5">
+                    {loading ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5 text-confirm" />}
+                    {loading ? "Working" : statusText}
+                  </span>
+                }
+              />
+              <InfoRow label="Backend session" value={session ? `v${session.version} · ${session.state}` : "No session"} />
+              <InfoRow label="Error" value={error || "None"} />
+            </div>
           </Section>
 
           <Section title="Recovery note" icon={<Info className="size-4 text-gold" aria-hidden="true" />}>

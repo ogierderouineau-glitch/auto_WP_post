@@ -698,9 +698,9 @@ Implemented frontend files:
 Current behavior:
 
 - The top bar has an Other Functions button that opens a right-side drawer.
-- The drawer shows global frontend/backend status, current errors, auth/client
-  context, workbook metadata, current session details, recent V2 sessions,
-  AI usage, and a compact operation log.
+- The drawer orders its tools as Generation settings, Usage, Operations log,
+  Sessions archive, Workbook config, Credentials, Current session, Global
+  status, and Recovery note.
 - Session archive actions can refresh recent sessions and load a selected V2
   session without leaving the workflow.
 - Current session recovery can reload the active session from the backend.
