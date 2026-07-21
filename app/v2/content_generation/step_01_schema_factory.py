@@ -121,12 +121,6 @@ def build_generation_model(
     enum_families: dict[str, tuple[Any, ...]] | None = None,
 ) -> type[BaseModel]:
     enum_families = enum_families or {}
-    limits = {
-        row.field_key: (row.min_words, row.max_words)
-        for row in rows
-        if row.value_type == "string"
-        and (row.min_words is not None or row.max_words is not None)
-    }
     raw_aggregation_fields = {
         row.field_key
         for row in rows
@@ -135,28 +129,11 @@ def build_generation_model(
         and row.transform_key
     }
 
-    class WordLimitModel(BaseModel):
+    class StructuredOutputModel(BaseModel):
         model_config = ConfigDict(extra="forbid")
 
         @model_validator(mode="after")
-        def validate_word_limits(self) -> "WordLimitModel":
-            for field_key, (minimum, maximum) in limits.items():
-                value = getattr(self, field_key, None)
-                if not value:
-                    continue
-                count = len(str(value).split())
-                if minimum is not None and count < _effective_minimum_words(minimum):
-                    raise ValueError(
-                        f"{field_key} targets at least {minimum} words "
-                        f"(minimum accepted with 20% tolerance: {_effective_minimum_words(minimum)}); "
-                        f"received {count}."
-                    )
-                if maximum is not None and count > _effective_maximum_words(maximum):
-                    raise ValueError(
-                        f"{field_key} targets at most {maximum} words "
-                        f"(maximum accepted with 20% tolerance: {_effective_maximum_words(maximum)}); "
-                        f"received {count}."
-                    )
+        def reject_html_in_aggregation_sources(self) -> "StructuredOutputModel":
             for field_key in raw_aggregation_fields:
                 value = getattr(self, field_key, None)
                 if isinstance(value, str) and ("<" in value or ">" in value):
@@ -177,7 +154,7 @@ def build_generation_model(
     }
     return create_model(
         name,
-        __base__=WordLimitModel,
+        __base__=StructuredOutputModel,
         **fields,
     )
 

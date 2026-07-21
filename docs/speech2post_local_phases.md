@@ -537,6 +537,9 @@ Outcome:
 - Edited fields autosave/debounced through `/draft-fields`.
 - Draft revision supports field-level include/exclude selection.
 - Prompt trace is shown from `generation_trace`.
+- Generated text outside workbook `min_words`/`max_words` targets is retained
+  and reported through non-blocking `validation_report.warnings`; required-field,
+  character-limit, and structured-schema failures remain blocking.
 - Agent regeneration uses `/draft-chat`.
 - Approval uses `/approve`.
 

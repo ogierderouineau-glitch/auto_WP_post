@@ -27,6 +27,7 @@ class DraftValidator:
         session: ContentSession | None = None,
     ) -> dict[str, Any]:
         errors: list[ErrorDetail] = []
+        warnings: list[ErrorDetail] = []
         for row in snapshot.shared_fields:
             if not row.enabled:
                 continue
@@ -43,7 +44,7 @@ class DraftValidator:
                     "missing_required_field",
                     "Required shared field is empty.",
                 ))
-            self._limits(errors, "shared_fields_schema", row.sheet_row, row.field_key, value,
+            self._limits(errors, warnings, "shared_fields_schema", row.sheet_row, row.field_key, value,
                          row.min_words, row.max_words, row.min_characters, row.max_characters)
         for row in snapshot.acf_fields:
             if not row.enabled or row.post_type_key != post_type_key or row.field_role == "input_fact":
@@ -59,14 +60,18 @@ class DraftValidator:
                     "missing_required_field",
                     "Required ACF source field is empty.",
                 ))
-            self._limits(errors, "ACF_fields_schema", row.sheet_row, row.field_key, value,
+            self._limits(errors, warnings, "ACF_fields_schema", row.sheet_row, row.field_key, value,
                          row.min_words, row.max_words, None, None)
         if errors:
             raise DraftValidationError(
                 f"Draft validation failed with {len(errors)} error(s).",
                 details=errors,
             )
-        return {"valid": True, "errors": []}
+        return {
+            "valid": True,
+            "errors": [],
+            "warnings": [warning.model_dump() for warning in warnings],
+        }
 
     @staticmethod
     def _acf_field_is_eligible(row: Any, session: ContentSession) -> bool:
@@ -84,6 +89,7 @@ class DraftValidator:
     @staticmethod
     def _limits(
         errors: list[ErrorDetail],
+        warnings: list[ErrorDetail],
         sheet: str,
         row: int,
         field_key: str,
@@ -97,13 +103,13 @@ class DraftValidator:
             return
         word_count = len(value.split())
         if min_words is not None and word_count < _effective_minimum_words(min_words):
-            errors.append(DraftValidator._detail(
+            warnings.append(DraftValidator._detail(
                 sheet, row, field_key, "minimum_words_not_met",
                 f"Target is {min_words} words; minimum accepted with 20% tolerance is "
                 f"{_effective_minimum_words(min_words)}; received {word_count}.",
             ))
         if max_words is not None and word_count > _effective_maximum_words(max_words):
-            errors.append(DraftValidator._detail(
+            warnings.append(DraftValidator._detail(
                 sheet, row, field_key, "maximum_words_exceeded",
                 f"Target is {max_words} words; maximum accepted with 20% tolerance is "
                 f"{_effective_maximum_words(max_words)}; received {word_count}.",
