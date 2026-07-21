@@ -118,6 +118,8 @@ export default function Page() {
     workbook?.post_types.find((item) => item.post_type_key === selectedPostType)?.display_name_de ||
     selectedPostType ||
     "-"
+  const selectedPostTypeVoiceInstructions =
+    workbook?.post_types.find((item) => item.post_type_key === selectedPostType)?.voice_instructions || ""
   const availableFactKeys = (workbook?.fact_schema || []).map((field) => field.field_key)
   const emptyFactKeys = availableFactKeys.filter((key) => {
     const fact = session?.confirmed_facts?.[key] || session?.extracted_facts?.[key]
@@ -608,6 +610,8 @@ export default function Page() {
           selectedContentFieldIds={contentRevisionFieldIds}
           selectedContentLinks={contentSelectedLinks}
           contentAiAssistedLinkPlacement={contentAiAssistedLinkPlacement}
+          postTypeLabel={selectedPostTypeLabel}
+          voiceInstructions={selectedPostTypeVoiceInstructions}
           onPictureTranscriptAppend={handlePictureTranscriptAppend}
         />
       )}

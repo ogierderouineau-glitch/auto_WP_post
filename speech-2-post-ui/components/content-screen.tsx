@@ -194,7 +194,8 @@ export function ContentScreen({
   const [openTrace, setOpenTrace] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [queuedLinks, setQueuedLinks] = useState<Record<string, string>>({})
-  const [revisionFieldIds, setRevisionFieldIds] = useState<string[]>([])
+  const [manualRevisionFieldIds, setManualRevisionFieldIds] = useState<string[]>([])
+  const [linkRevisionFieldIds, setLinkRevisionFieldIds] = useState<Record<string, string[]>>({})
   const [aiAssistedLinkPlacement, setAiAssistedLinkPlacement] = useState(false)
   const sessionRef = useRef<ContentSession | null>(session)
   const autosaveTimerRef = useRef<number | null>(null)
@@ -233,7 +234,13 @@ export function ContentScreen({
   const normalizedSearch = search.trim().toLowerCase()
   const filteredFields = fields.filter((field) => !normalizedSearch || `${field.label} ${field.key} ${drafts[field.id] ?? field.value}`.toLowerCase().includes(normalizedSearch))
   const groupedFields = Object.fromEntries((Object.keys(CONTENT_SECTIONS) as ContentSectionId[]).map((id) => [id, filteredFields.filter((field) => field.section === id)])) as Record<ContentSectionId, DraftField[]>
-  const selectedRevisionFieldIds = revisionFieldIds
+  const selectedRevisionFieldIds = useMemo(
+    () => [...new Set([
+      ...manualRevisionFieldIds,
+      ...Object.values(linkRevisionFieldIds).flat(),
+    ])],
+    [linkRevisionFieldIds, manualRevisionFieldIds],
+  )
   const selectedRevisionFields = new Set(selectedRevisionFieldIds)
   const allRevisionFieldsSelected = fields.length > 0 && selectedRevisionFieldIds.length === fields.length
   const hasQueuedLinkInstruction = Object.values(queuedLinks).some(Boolean)
@@ -254,10 +261,9 @@ export function ContentScreen({
         ...existing,
         link_id: linkId,
         anchor_text: existing?.anchor_text || candidate?.anchor_text || "",
-        ...(destination === "auto" ? {} : { destination_acf: destination }),
+        destination_acf: destination,
         revision_requested: "true",
       }
-      if (destination === "auto") delete selection.destination_acf
       selections.set(linkId, selection)
     }
     return [...selections.values()]
@@ -272,7 +278,7 @@ export function ContentScreen({
   }, [aiAssistedLinkPlacement, onAiAssistedLinkPlacementChange])
 
   function toggleRevisionField(fieldId: string) {
-    setRevisionFieldIds((current) => {
+    setManualRevisionFieldIds((current) => {
       const next = new Set(current)
       if (next.has(fieldId)) next.delete(fieldId)
       else next.add(fieldId)
@@ -280,22 +286,34 @@ export function ContentScreen({
     })
   }
 
-  function selectLinkDestinationFields(destination: string) {
+  function linkDestinationFieldIds(destination: string) {
+    if (!destination) return []
     const matchingFieldIds = fields.filter((field) =>
       field.scope === "acf" && workbook?.acf_fields?.some((schema) =>
-        schema.field_key === field.key && (
-          destination === "auto"
-            ? workbook.internal_link_acf_fields?.some((item) => item.acf_field_name === schema.acf_field_name)
-            : schema.acf_field_name === destination
-        ),
+        schema.field_key === field.key && schema.acf_field_name === destination,
       ),
     ).map((field) => field.id)
-    if (!matchingFieldIds.length) return
-    setRevisionFieldIds((current) => {
-      const fieldsToSelect = destination === "auto"
-        ? [matchingFieldIds.find((fieldId) => !current.includes(fieldId)) || matchingFieldIds[0]]
-        : matchingFieldIds
-      return [...new Set([...current, ...fieldsToSelect])]
+    return matchingFieldIds
+  }
+
+  function setLinkDestination(linkId: string, destination: string) {
+    setQueuedLinks((current) => ({ ...current, [linkId]: destination }))
+    setLinkRevisionFieldIds((current) => ({
+      ...current,
+      [linkId]: linkDestinationFieldIds(destination),
+    }))
+  }
+
+  function removeQueuedLink(linkId: string) {
+    setQueuedLinks((current) => {
+      const next = { ...current }
+      delete next[linkId]
+      return next
+    })
+    setLinkRevisionFieldIds((current) => {
+      const next = { ...current }
+      delete next[linkId]
+      return next
     })
   }
 
@@ -581,7 +599,8 @@ export function ContentScreen({
       sessionStorage.removeItem(ACTIVE_JOB_STORAGE)
       onSessionChange(nextSession)
       setAgentMessage("")
-      setRevisionFieldIds([])
+      setManualRevisionFieldIds([])
+      setLinkRevisionFieldIds({})
       setQueuedLinks({})
       setOperation("success")
       setMessage("Selected fields regenerated.")
@@ -705,7 +724,7 @@ export function ContentScreen({
                   <button
                     id="s2p-content-toggle-all-revision-fields"
                     type="button"
-                    onClick={() => setRevisionFieldIds(allRevisionFieldsSelected ? [] : fields.map((field) => field.id))}
+                    onClick={() => setManualRevisionFieldIds(allRevisionFieldsSelected ? [] : fields.map((field) => field.id))}
                     className="ml-auto rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
                   >
                     {allRevisionFieldsSelected ? "Clear revision selection" : "Select all for revision"}
@@ -831,14 +850,14 @@ export function ContentScreen({
                               type="checkbox"
                               checked={queued}
                               onChange={(event) => {
-                                if (event.target.checked) selectLinkDestinationFields("auto")
-                                setQueuedLinks((current) => {
-                                  const next = { ...current }
-                                  if (event.target.checked) next[candidate.link_id] = "auto"
-                                  else delete next[candidate.link_id]
-                                  return next
-                                })
+                                const firstDestination = workbook?.internal_link_acf_fields?.[0]?.acf_field_name || ""
+                                if (event.target.checked && firstDestination) {
+                                  setLinkDestination(candidate.link_id, firstDestination)
+                                } else {
+                                  removeQueuedLink(candidate.link_id)
+                                }
                               }}
+                              disabled={!workbook?.internal_link_acf_fields?.length}
                               className="mt-0.5 size-4 accent-gold"
                             />
                           )}
@@ -854,12 +873,10 @@ export function ContentScreen({
                             value={queuedLinks[candidate.link_id]}
                             onChange={(event) => {
                               const destination = event.target.value
-                              setQueuedLinks((current) => ({ ...current, [candidate.link_id]: destination }))
-                              selectLinkDestinationFields(destination)
+                              setLinkDestination(candidate.link_id, destination)
                             }}
                             className="mt-2 w-full rounded-md border border-border bg-card px-2 py-1.5 text-xs text-foreground"
                           >
-                            <option value="auto">Auto — let the agent choose</option>
                             {(workbook?.internal_link_acf_fields || []).map((field) => (
                               <option key={field.acf_field_name} value={field.acf_field_name}>{field.acf_field_name}</option>
                             ))}
@@ -867,9 +884,7 @@ export function ContentScreen({
                         )}
                         {!used && queued && queuedLinks[candidate.link_id] && (
                           <p className="mt-2 text-[11px] text-muted-foreground">
-                            {queuedLinks[candidate.link_id] === "auto"
-                              ? "The agent will choose a suitable link-enabled ACF field."
-                              : "This ACF is preferred; the agent may fall back to another suitable field."}
+                            This ACF is preferred; the agent may fall back to another suitable field.
                           </p>
                         )}
                       </div>

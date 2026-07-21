@@ -9,6 +9,64 @@ from app.v2.providers.step_03_wordpress import ExistingWordPressProvider
 
 
 class WordPressProviderTests(unittest.TestCase):
+    @patch("app.v2.providers.step_03_wordpress.update_media_metadata")
+    @patch("app.v2.providers.step_03_wordpress.upload_media")
+    @patch("app.v2.providers.step_03_wordpress.resolve_tag_ids", return_value=[])
+    @patch("app.v2.providers.step_03_wordpress.find_term", return_value={"id": 10})
+    @patch("app.v2.providers.step_03_wordpress.request_json")
+    def test_publish_builds_gallery_html_from_uploaded_wordpress_urls(
+        self,
+        request_json,
+        _find_term,
+        _resolve_tags,
+        upload_media_mock,
+        _update_metadata,
+    ) -> None:
+        request_json.side_effect = [
+            {
+                "schema": {
+                    "properties": {
+                        "acf": {"properties": {"gallery_html": {}}},
+                        "meta": {"properties": {}},
+                    }
+                }
+            },
+            {"id": 123, "status": "draft", "link": "https://example.test/post/"},
+            {},
+        ]
+        upload_media_mock.side_effect = [
+            (101, "https://example.test/featured.jpg"),
+            (102, "https://example.test/gallery.jpg"),
+        ]
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            wordpress_post_type="post",
+            state="publishing",
+            workbook_hash="hash",
+            language="de-DE",
+            approval=Approval(approved=True),
+        )
+        payload = WordPressPayload(
+            wordpress=WordPressFields(
+                title="Test Event",
+                status="draft",
+                categories=["auto event post"],
+            ),
+            media=[
+                {"path": "/tmp/featured.jpg", "image_usage": "featured", "image_alt": "Hero"},
+                {"path": "/tmp/gallery.jpg", "image_usage": "gallery", "image_alt": "Gallery alt"},
+            ],
+        )
+
+        ExistingWordPressProvider().publish(session=session, payload=payload, idempotency_key="key-1")
+
+        gallery_html = request_json.call_args_list[1].kwargs["json"]["acf"]["gallery_html"]
+        self.assertIn('src="https://example.test/gallery.jpg"', gallery_html)
+        self.assertIn('alt="Gallery alt"', gallery_html)
+        self.assertNotIn("featured.jpg", gallery_html)
+
     @patch("app.v2.providers.step_03_wordpress.resolve_tag_ids", return_value=[20])
     @patch("app.v2.providers.step_03_wordpress.find_term", return_value={"id": 10})
     @patch("app.v2.providers.step_03_wordpress.request_json")

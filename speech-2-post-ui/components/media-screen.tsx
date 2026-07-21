@@ -794,30 +794,32 @@ export function MediaScreen({
       )}
       <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)_320px]">
         <section aria-label="Media library" className="min-w-0">
-          <label className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border bg-card px-3 py-3 text-left text-sm transition-colors hover:border-gold hover:bg-gold/5">
-            <input id="s2p-media-upload" type="file" multiple accept="image/*,video/*" onChange={uploadFiles} className="sr-only" />
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gold/15 text-gold">
-              <ImagePlus className="size-5" aria-hidden="true" />
-            </span>
-            <span>
-              <span className="block font-medium text-foreground">Add pictures</span>
-              <span className="block text-xs text-muted-foreground">Videos are not supported yet</span>
-            </span>
-          </label>
-          <label className="mt-2 flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
-            <input
-              id="s2p-media-use-focal-point-vision"
-              type="checkbox"
-              checked={useFocalPointVision}
-              onChange={(event) => setUseFocalPointVision(event.target.checked)}
-              disabled={operation === "loading"}
-              className="mt-0.5 size-4 accent-gold"
-            />
-            <span>
-              <span className="block font-medium text-foreground">Find focal points with Vision</span>
-              Applied to newly uploaded pictures.
-            </span>
-          </label>
+          <div className="overflow-hidden rounded-lg border border-dashed border-gold/50 bg-gold/10 text-foreground transition-colors hover:border-gold hover:bg-gold/15">
+            <label className="flex w-full cursor-pointer items-center gap-2 px-3 py-3 text-left text-sm">
+              <input id="s2p-media-upload" type="file" multiple accept="image/*,video/*" onChange={uploadFiles} className="sr-only" />
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gold text-gold-foreground">
+                <ImagePlus className="size-5" aria-hidden="true" />
+              </span>
+              <span>
+                <span className="block font-semibold text-gold">Add pictures</span>
+                <span className="block text-xs text-muted-foreground">Videos are not supported yet</span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2 border-t border-gold/20 px-3 py-2.5 text-xs">
+              <input
+                id="s2p-media-use-focal-point-vision"
+                type="checkbox"
+                checked={useFocalPointVision}
+                onChange={(event) => setUseFocalPointVision(event.target.checked)}
+                disabled={operation === "loading"}
+                className="mt-0.5 size-4 accent-gold"
+              />
+              <span>
+                <span className="block font-semibold text-foreground">Find focal points with Vision ($)</span>
+                <span className="text-muted-foreground">Used for re-cropping around the subject.</span>
+              </span>
+            </label>
+          </div>
           <button
             id="s2p-media-open-agent"
             type="button"
@@ -1044,7 +1046,7 @@ export function MediaScreen({
                     className="inline-flex items-center gap-2 rounded-md bg-ai px-3.5 py-2.5 text-sm font-semibold text-ai-foreground transition-colors hover:opacity-90 disabled:opacity-60"
                   >
                     <Sparkles className="size-4" aria-hidden="true" />
-                    Edit with AI
+                    Edit with AI ($)
                   </button>
                   <button
                     id="s2p-media-restore-original"

@@ -71,6 +71,21 @@ function combinedPictureTranscripts(session: ContentSession) {
     .join("\n\n")
 }
 
+function voiceInstructionItems(value: string) {
+  const listItems = [...value.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)]
+  const parts = listItems.length ? listItems.map((match) => match[1]) : [value]
+  return parts
+    .map((part) => part
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .trim())
+    .filter(Boolean)
+}
+
 export function RecordingWidget({
   auth,
   session,
@@ -86,6 +101,8 @@ export function RecordingWidget({
   selectedContentFieldIds,
   selectedContentLinks,
   contentAiAssistedLinkPlacement,
+  postTypeLabel,
+  voiceInstructions,
   onPictureTranscriptAppend,
 }: {
   auth: ApiClientOptions | null
@@ -102,6 +119,8 @@ export function RecordingWidget({
   selectedContentFieldIds: string[]
   selectedContentLinks: Record<string, string>[]
   contentAiAssistedLinkPlacement: boolean
+  postTypeLabel: string
+  voiceInstructions: string
   onPictureTranscriptAppend: (text: string) => Promise<void>
 }) {
   const [recording, setRecording] = useState(false)
@@ -118,6 +137,7 @@ export function RecordingWidget({
   const hasContentInstruction = transcript.trim() || selectedContentLinks.some(
     (link) => link.revision_requested === "true",
   )
+  const speechStructure = voiceInstructionItems(voiceInstructions)
 
   function setSyncedTranscript(value: string) {
     transcriptRef.current = value
@@ -390,6 +410,17 @@ export function RecordingWidget({
               {copy.action}
             </button>
           </div>
+
+          {activeScreen === "media" && speechStructure.length > 0 && (
+            <details className="mt-3 rounded-lg border border-gold/30 bg-gold/5 px-3 py-2">
+              <summary className="cursor-pointer text-xs font-semibold text-foreground">
+                Speech structure for {postTypeLabel} post
+              </summary>
+              <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-xs leading-relaxed text-muted-foreground">
+                {speechStructure.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+              </ol>
+            </details>
+          )}
 
           {activeScreen === "facts" && (
             <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2">

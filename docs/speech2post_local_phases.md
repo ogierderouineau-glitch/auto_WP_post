@@ -360,6 +360,11 @@ Current behavior:
 - The Media screen uses the active V2 session and updates the parent shell after
   each backend response so the session version stays current.
 - Image uploads call `POST /api/content-sessions/{session_id}/uploads`.
+- The gold Add pictures control contains the independently clickable focal-point
+  Vision option, which applies to newly uploaded pictures.
+- On the Media screen only, the recording agent shows the active post type's
+  workbook `voice_instructions` in a collapsed speech-structure panel below the
+  Record controls.
 - Images are fetched as authenticated blobs because current image routes require
   `X-API-Key`/`X-User-ID` headers and plain `<img src>` cannot send those.
 - Original and processed images are shown side by side on desktop.
@@ -583,6 +588,10 @@ Current behavior:
   When checked, the selected fields may be regenerated so the agent can create
   or rewrite wording for the selected links before the backend wraps the final
   approved anchor.
+- Queued links require an explicit ACF destination. Their destination fields are
+  included in revision selection separately from manual field selections, so a
+  dropdown change moves only the link-owned selection and preserves fields the
+  user had already checked.
 - Internal links are single-use: a target URL or anchor already present in the
   draft is treated as used and will not be injected again during later placement
   passes.
@@ -645,6 +654,8 @@ Current behavior:
   show pending changed payload fields or a no-change/synced state.
 - Sent and current WordPress payloads are visible for inspection.
 - Retryable errors from failed publish jobs are shown in the screen status area.
+- Full publication rebuilds the exposed `gallery_html` ACF value after media
+  upload, using the final WordPress URLs of all non-featured session images.
 - The screen represents the current backend model honestly: one current
   `wordpress_result` per session, not a history of multiple targets.
 

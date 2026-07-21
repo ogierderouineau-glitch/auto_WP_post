@@ -7,6 +7,7 @@ from typing import Any
 
 from app.v2.models.step_01_session import ContentSession
 from app.v2.models.step_02_payload import WordPressPayload
+from app.v2.payloads.step_01_transforms import build_gallery_html
 from app.v2.providers.step_01_interfaces import WordPressProvider
 from config import get_active_client_config, set_active_client
 from step_40_wordpress_api import (
@@ -93,6 +94,10 @@ class ExistingWordPressProvider(WordPressProvider):
             else []
         )
         media = [] if partial_update_fields else self._upload_media(payload.media)
+        if not partial_update_fields and "gallery_html" in schema["acf"]:
+            acf_payload["gallery_html"] = build_gallery_html(
+                [item for item in media if item.get("image_usage") != "featured"]
+            )
         featured_id = next(
             (
                 item["media_id"]
