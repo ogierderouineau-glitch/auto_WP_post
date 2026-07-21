@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from app.v2.content_generation.step_01_schema_factory import (
     _effective_maximum_words,
     _effective_minimum_words,
@@ -49,3 +51,29 @@ def test_final_draft_validation_uses_the_same_maximum_tolerance() -> None:
     )
     assert rejected_errors == []
     assert rejected_warnings[0].error_code == "maximum_words_exceeded"
+
+
+def test_word_limit_warning_is_serialized_in_non_blocking_report() -> None:
+    row = SimpleNamespace(
+        enabled=True,
+        field_key="hero_intro",
+        validation_rule=None,
+        required_for_output=False,
+        sheet_row=3,
+        min_words=70,
+        max_words=80,
+        min_characters=None,
+        max_characters=None,
+    )
+    snapshot = SimpleNamespace(shared_fields=[row], acf_fields=[])
+
+    report = DraftValidator().validate(
+        snapshot,
+        post_type_key="event",
+        shared_values={"hero_intro": "Too short"},
+        acf_source_values={},
+    )
+
+    assert report["valid"] is True
+    assert report["errors"] == []
+    assert report["warnings"][0]["error_code"] == "minimum_words_not_met"

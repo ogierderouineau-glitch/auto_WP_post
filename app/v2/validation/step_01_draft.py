@@ -70,7 +70,7 @@ class DraftValidator:
         return {
             "valid": True,
             "errors": [],
-            "warnings": [warning.model_dump() for warning in warnings],
+            "warnings": [warning.as_dict() for warning in warnings],
         }
 
     @staticmethod
