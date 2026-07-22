@@ -133,6 +133,52 @@ export default function Page() {
     setSelectedFactKeys(null)
   }, [session?.session_id, workbook?.selected_post_type_key])
 
+  useEffect(() => {
+    if (!session) return
+
+    const guardStateKey = "speech2post_navigation_guard"
+    const allowNavigation = { current: false }
+    const currentState = window.history.state as Record<string, unknown> | null
+    if (currentState?.[guardStateKey] !== true) {
+      window.history.pushState(
+        { ...(currentState || {}), [guardStateKey]: true },
+        "",
+        window.location.href,
+      )
+    }
+
+    const confirmLeaving = () => window.confirm(
+      "Leave SPEECH2POST? Make sure the current operation has finished before navigating away.",
+    )
+
+    const handlePopState = () => {
+      if (allowNavigation.current) return
+      if (confirmLeaving()) {
+        allowNavigation.current = true
+        window.history.back()
+        return
+      }
+      window.history.pushState(
+        { ...(window.history.state || {}), [guardStateKey]: true },
+        "",
+        window.location.href,
+      )
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (allowNavigation.current) return
+      event.preventDefault()
+      event.returnValue = ""
+    }
+
+    window.addEventListener("popstate", handlePopState)
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => {
+      window.removeEventListener("popstate", handlePopState)
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+    }
+  }, [session?.session_id])
+
   const completedSteps = useMemo(
     () => ({
       media: (session?.image_refs?.length || 0) > 0,
