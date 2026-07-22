@@ -388,7 +388,7 @@ export function MediaScreen({
         setSelectedMediaId(pendingImages[0].id)
         return
       }
-      setSelectedMediaId(images[0].media_id)
+      setSelectedMediaId((images.find((image) => image.is_featured) || images[0]).media_id)
     }
   }, [images, pendingImages, selectedMediaId])
 
