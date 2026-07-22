@@ -9,13 +9,10 @@ import {
   CircleAlert,
   CircleHelp,
   Loader2,
-  RefreshCw,
-  Save,
   Sparkles,
 } from "lucide-react"
 import type { ApiClientOptions } from "@/lib/api"
 import {
-  analyzeSessionInputs,
   saveSessionFactCorrections,
   type ContentSession,
   type FactSchemaField,
@@ -377,24 +374,6 @@ export function FactsScreen({
     }
   }
 
-  async function handleRecheck() {
-    if (!auth || !session) return
-    setOperation("loading")
-    setMessage("Rechecking facts...")
-    try {
-      const saved = await saveCorrections(false)
-      if (!selectedFactKeys.length) throw new Error("Select at least one fact for AI review.")
-      const data = await analyzeSessionInputs(auth, saved || session, selectedFactKeys)
-      onSessionChange(data.session)
-      setDrafts(Object.fromEntries(buildRows(workbook?.fact_schema || [], data.session).map((row) => [row.key, row.value])))
-      setOperation("success")
-      setMessage("Facts rechecked.")
-    } catch (error) {
-      setOperation("error")
-      setMessage(error instanceof Error ? error.message : "Could not recheck facts.")
-    }
-  }
-
   async function handleConfirm() {
     if (!auth || !session || !allRequiredDone) return
     setOperation("loading")
@@ -452,46 +431,22 @@ export function FactsScreen({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              id="s2p-facts-toggle-all"
-              type="button"
-              onClick={() => onSelectedFactKeysChange(allFactsSelected ? [] : rows.map((row) => row.key))}
-              title={allFactsSelected ? "Exclude every fact from the next AI review" : "Include every fact in the next AI review"}
-              className="inline-flex items-center rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
-            >
-              {allFactsSelected ? "Uncheck all facts" : "Check all facts"}
-            </button>
-            <button
-              id="s2p-facts-save"
-              type="button"
-              data-facts-action
-              onClick={handleSave}
-              disabled={operation === "loading" || !changed.length}
-              className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:opacity-60"
-            >
-              {operation === "loading" ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-              Save changes
-            </button>
-            <button
-              id="s2p-facts-recheck"
-              type="button"
-              data-facts-action
-              onClick={handleRecheck}
-              disabled={operation === "loading" || !selectedFactKeys.length}
-              className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:opacity-60"
-            >
-              {operation === "loading" ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-              Recheck facts
-            </button>
-          </div>
         </div>
 
         <div className="mt-4 rounded-xl border border-border bg-card p-4">
-          <p className="mb-3 text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             {selectedFactKeys.length} of {rows.length} facts selected for AI review.
           </p>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <button
+            id="s2p-facts-toggle-all"
+            type="button"
+            onClick={() => onSelectedFactKeysChange(allFactsSelected ? [] : rows.map((row) => row.key))}
+            title={allFactsSelected ? "Exclude every fact from the next AI review" : "Include every fact in the next AI review"}
+            className="mt-2 inline-flex items-center rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+          >
+            {allFactsSelected ? "Unselect all facts for revision" : "Select all facts for revision"}
+          </button>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <button id="s2p-facts-summary-required" type="button" onClick={() => toggleSection("required")} aria-pressed={openSection === "required"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "required" ? "bg-destructive/15 ring-1 ring-destructive/30" : "bg-destructive/5 hover:bg-destructive/10"}`}>
               <CircleAlert className="size-4 shrink-0 text-destructive" aria-hidden="true" />
               <span className="text-sm text-foreground">

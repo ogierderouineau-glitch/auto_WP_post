@@ -13,7 +13,6 @@ import {
   ImagePlus,
   Loader2,
   RotateCcw,
-  Save,
   Sparkles,
   Star,
   Trash2,
@@ -266,12 +265,14 @@ function MetadataInput({
   rows,
   trace,
   onChange,
+  onBlur,
 }: {
   label: string
   value: string
   rows?: number
   trace?: Record<string, unknown> | null
   onChange: (value: string) => void
+  onBlur?: () => void
 }) {
   const [traceOpen, setTraceOpen] = useState(false)
   return (
@@ -295,6 +296,7 @@ function MetadataInput({
           value={value}
           rows={rows}
           onChange={(event) => onChange(event.target.value)}
+          onBlur={onBlur}
           className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-gold/40"
         />
       ) : (
@@ -302,6 +304,7 @@ function MetadataInput({
           id={`s2p-media-metadata-${label.toLowerCase().replaceAll(" ", "-")}`}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          onBlur={onBlur}
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-gold/40"
         />
       )}
@@ -1232,12 +1235,14 @@ export function MediaScreen({
                   value={metadata.image_alt}
                   trace={metadataFieldTrace(session, selectedImage.media_id, "image_alt")}
                   onChange={(value) => setMetadata((current) => ({ ...current, image_alt: value }))}
+                  onBlur={savePictureData}
                 />
                 <MetadataInput
                   label="Title"
                   value={metadata.image_title}
                   trace={metadataFieldTrace(session, selectedImage.media_id, "image_title")}
                   onChange={(value) => setMetadata((current) => ({ ...current, image_title: value }))}
+                  onBlur={savePictureData}
                 />
                 <MetadataInput
                   label="Caption"
@@ -1245,6 +1250,7 @@ export function MediaScreen({
                   rows={2}
                   trace={metadataFieldTrace(session, selectedImage.media_id, "image_caption")}
                   onChange={(value) => setMetadata((current) => ({ ...current, image_caption: value }))}
+                  onBlur={savePictureData}
                 />
                 <MetadataInput
                   label="Description"
@@ -1252,17 +1258,8 @@ export function MediaScreen({
                   rows={2}
                   trace={metadataFieldTrace(session, selectedImage.media_id, "image_description", "image_description_wp")}
                   onChange={(value) => setMetadata((current) => ({ ...current, image_description: value }))}
+                  onBlur={savePictureData}
                 />
-                <button
-                  id="s2p-media-save-picture-data"
-                  type="button"
-                  onClick={savePictureData}
-                  disabled={operation === "loading" || transcriptSaving}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-confirm px-3.5 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:opacity-60 sm:col-span-2"
-                >
-                  <Save className="size-4" aria-hidden="true" />
-                  Save picture data
-                </button>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">No image selected.</p>

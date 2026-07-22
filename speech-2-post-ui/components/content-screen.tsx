@@ -9,7 +9,6 @@ import {
   FileText,
   Loader2,
   Search,
-  Save,
   Send,
   Sparkles,
 } from "lucide-react"
@@ -542,15 +541,6 @@ export function ContentScreen({
     return data.session
   }
 
-  async function runSave() {
-    try {
-      await handleSave()
-    } catch (error) {
-      setOperation("error")
-      setMessage(error instanceof Error ? error.message : "Could not save draft fields.")
-    }
-  }
-
   async function handleApprove() {
     if (!auth || !session) return
     setOperation("loading")
@@ -597,16 +587,6 @@ export function ContentScreen({
             >
               {activeAction === "generate" ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
               {draftReady ? "Regenerate draft" : "Generate draft"}
-            </button>
-            <button
-              id="s2p-content-save-edits"
-              type="button"
-              onClick={runSave}
-              disabled={operation === "loading" || !changedCount || !draftReady}
-              className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:opacity-60"
-            >
-              <Save className="size-4" />
-              Save edits
             </button>
           </div>
         </div>
@@ -822,7 +802,7 @@ export function ContentScreen({
             Back to Facts
           </button>
           <div className="hidden flex-1 text-sm text-muted-foreground sm:block">
-            {session.approval.approved ? "Content is approved." : draftReady ? "Save edits before approving." : "Generate a draft to continue."}
+            {session.approval.approved ? "Content is approved." : draftReady ? "Edits save automatically before approval." : "Generate a draft to continue."}
           </div>
           <button
             id="s2p-content-approve"
