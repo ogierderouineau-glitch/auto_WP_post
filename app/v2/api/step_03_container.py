@@ -31,6 +31,7 @@ from config import (
     V2_KNOWLEDGE_WORKBOOK_PATH,
     V2_LANGUAGE_MODEL,
     V2_IMAGE_EDIT_MODEL,
+    V2_IMAGE_EDIT_QUALITY,
     V2_TRANSCRIPTION_MODEL,
     V2_VISION_MODEL,
     V2_SESSION_GCS_PREFIX,
@@ -145,6 +146,7 @@ def get_v2_service() -> ContentSessionService:
             OpenAIImageEditingProvider(
                 api_key=OPENAI_API_KEY,
                 model=V2_IMAGE_EDIT_MODEL,
+                quality=V2_IMAGE_EDIT_QUALITY,
             )
             if OPENAI_API_KEY and V2_IMAGE_EDIT_MODEL
             else None

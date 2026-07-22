@@ -13,6 +13,7 @@ from app.v2.content_generation.step_01_schema_factory import (
     build_image_analysis_model,
 )
 from app.v2.images.step_02_processor import PillowProcessor
+from app.v2.knowledge_base.app_owned.pillow_rules import APP_OWNED_PILLOW_RULES
 from app.v2.knowledge_base.step_01_models import PillowRule
 from app.v2.knowledge_base.step_02_loader import WorkbookLoader
 from app.v2.knowledge_base.step_03_validator import WorkbookValidator
@@ -44,6 +45,27 @@ def _crop_rule() -> PillowRule:
 
 
 class PillowCropFocalPointTests(unittest.TestCase):
+    def test_process_can_override_workbook_aspect_ratio_for_an_upload(self) -> None:
+        snapshot = type("Snapshot", (), {"pillow_rules": APP_OWNED_PILLOW_RULES})()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.jpg"
+            destination = root / "processed.jpg"
+            Image.new("RGB", (1000, 1000), "navy").save(source)
+
+            result = PillowProcessor().process(
+                snapshot,
+                source=source,
+                destination=destination,
+                aspect_ratio="4:5",
+            )
+
+        self.assertEqual((result["width"], result["height"]), (800, 1000))
+        self.assertEqual(result["aspect_ratio"], "4:5")
+        self.assertTrue(
+            any(operation.startswith("crop.aspect_ratio=4:5") for operation in result["operations"])
+        )
+
     def test_wide_crop_places_vision_subject_as_close_to_center_as_possible(self) -> None:
         image = Image.new("RGB", (1200, 600), "black")
         subject_x = round(1200 * 0.82)
@@ -97,6 +119,57 @@ class PillowCropFocalPointTests(unittest.TestCase):
 
         self.assertEqual(cropped.size, (600, 450))
 
+    def test_vision_focal_point_allows_safe_panorama_normalization(self) -> None:
+        image = Image.new("RGB", (1600, 600), "navy")
+        values, operations = PillowProcessor._values_with_analysis(
+            {"crop.mode": "cover", "crop.min_retained_area": 0.60},
+            {"crop_recommendation": {"x": 0.75, "y": 0.45}},
+        )
+
+        cropped = PillowProcessor._apply(image, _crop_rule(), values)
+
+        self.assertEqual(cropped.size, (800, 600))
+        self.assertEqual(values["crop.min_retained_area"], 0.35)
+        self.assertIn("min_retained_area=35%", operations[0])
+
+
+class PillowAdaptiveExposureTests(unittest.TestCase):
+    def test_backlit_image_lifts_shadows_without_brightening_clipped_highlights(self) -> None:
+        image = Image.new("RGB", (400, 200), (45, 45, 45))
+        for x in range(200, 400):
+            for y in range(200):
+                image.putpixel((x, y), (255, 255, 255))
+        values: dict[str, object] = {}
+
+        corrected = PillowProcessor._adaptive_exposure(image, values)
+
+        self.assertGreater(corrected.getpixel((40, 100))[0], 45)
+        self.assertEqual(corrected.getpixel((360, 100)), (255, 255, 255))
+        self.assertTrue(values["_adaptive_exposure_applied"])
+        self.assertIn("shadow_lift", values["_adaptive_exposure_summary"])
+
+    def test_dark_image_gets_gentle_global_gamma(self) -> None:
+        image = Image.new("RGB", (100, 100), (60, 60, 60))
+        values: dict[str, object] = {}
+
+        corrected = PillowProcessor._adaptive_exposure(image, values)
+
+        self.assertGreater(corrected.getpixel((50, 50))[0], 60)
+        self.assertIn("dark_image_gamma", values["_adaptive_exposure_summary"])
+
+    def test_well_exposed_image_is_not_exposure_corrected(self) -> None:
+        image = Image.new("RGB", (256, 32))
+        for x in range(256):
+            value = 40 + round(x * 180 / 255)
+            for y in range(32):
+                image.putpixel((x, y), (value, value, value))
+        values: dict[str, object] = {}
+
+        corrected = PillowProcessor._adaptive_exposure(image, values)
+
+        self.assertIs(corrected, image)
+        self.assertNotIn("_adaptive_exposure_applied", values)
+
 
 @unittest.skipUnless(WORKBOOK.is_file(), f"V2 test workbook not found: {WORKBOOK}")
 class GenerationAndImageTests(unittest.TestCase):
@@ -117,11 +190,10 @@ class GenerationAndImageTests(unittest.TestCase):
         self.assertIn("fact_bar", schema["required"])
         self.assertIsNone(model.model_validate({"fact_bar": None}).fact_bar)
 
-    def test_word_limits_are_enforced(self) -> None:
+    def test_word_limits_are_prompt_guidance_not_structured_output_blockers(self) -> None:
         row = next(item for item in self.snapshot.acf_fields if item.field_key == "event_story")
         model = build_generation_model([row], name="EventStoryResponse")
-        with self.assertRaises(ValidationError):
-            model.model_validate({"event_story": "too short"})
+        self.assertEqual(model.model_validate({"event_story": "too short"}).event_story, "too short")
 
     def test_word_limits_are_visible_in_structured_schema(self) -> None:
         row = next(item for item in self.snapshot.acf_fields if item.field_key == "event_story")
@@ -203,7 +275,7 @@ class GenerationAndImageTests(unittest.TestCase):
             self.assertTrue(output.is_file())
             operations = "\n".join(result["operations"])
             self.assertIn("vision.crop_recommendation focal_x=0.82, focal_y=0.35", operations)
-            self.assertIn("enhance.brightness_factor", operations)
+            self.assertIn("enhance.adaptive_exposure", operations)
             self.assertIn("filter.median_size", operations)
             self.assertIn("crop.aspect_ratio=4:3", operations)
 

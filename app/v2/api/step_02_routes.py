@@ -128,6 +128,16 @@ def create_router(
                     "field_key": row.field_key,
                     "label": row.description_de or row.field_key,
                     "required": bool(row.required_for_analysis),
+                    "enum_options": [
+                        {
+                            "value": str(option.allowed_value),
+                            "label": option.description_de or str(option.allowed_value),
+                        }
+                        for option in snapshot.validation_values
+                        if row.value_type == "enum"
+                        and row.format_or_enum
+                        and option.list_name == row.format_or_enum
+                    ],
                 }
                 for row in snapshot.acf_fields
                 if row.enabled
@@ -234,6 +244,7 @@ def create_router(
         expected_version: int = Form(...),
         kind: str = Form(..., pattern="^(audio|image)$"),
         use_vision: bool = Form(default=True),
+        aspect_ratio: str | None = Form(default=None, pattern="^(4:5|4:3|1:1|16:9)$"),
         upload: UploadFile = File(...),
         x_user_id: str | None = Header(default=None, alias="X-User-ID"),
     ) -> SessionResponse:
@@ -279,6 +290,7 @@ def create_router(
                 content_type=content_type,
                 expected_version=expected_version,
                 use_vision=use_vision,
+                aspect_ratio=aspect_ratio,
             )
             session = service.record_operation(
                 session_id,
@@ -287,7 +299,12 @@ def create_router(
                 started_at=started_at,
                 duration_seconds=perf_counter() - started_clock,
                 usage_before=usage_before,
-                details={"filename": safe_name, "size_bytes": size, "use_vision": use_vision},
+                details={
+                    "filename": safe_name,
+                    "size_bytes": size,
+                    "use_vision": use_vision,
+                    "aspect_ratio": aspect_ratio,
+                },
             )
             return SessionResponse(session=session)
         finally:
@@ -616,6 +633,25 @@ def create_router(
         )
         return job
 
+    @router.post("/{session_id}/images/recrop-job")
+    async def start_recrop_image_job(
+        session_id: str,
+        payload: VersionedRequest,
+        filename: str = Query(...),
+        x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    ) -> dict[str, Any]:
+        service_provider().require_owner(session_id, x_user_id)
+        job = _create_session_job(session_id, "recrop_image")
+        _SESSION_JOB_EXECUTOR.submit(
+            _run_session_job,
+            job["job_id"],
+            service_provider,
+            session_id,
+            "recrop_image",
+            {**payload.model_dump(), "filename": filename},
+        )
+        return job
+
     @router.post("/{session_id}/images/restore-original", response_model=SessionResponse)
     async def restore_image_original(
         session_id: str,
@@ -766,17 +802,25 @@ def _run_session_job(
     service = service_provider()
     starting_session = service.get(session_id)
     usage_before = dict(starting_session.ai_usage or {})
-    provider = (
-        service.revision_language_model
-        if operation == "draft_chat"
-        else service._session_language_provider(starting_session)
-    )
+    if operation == "draft_chat":
+        provider = service.revision_language_model
+    elif operation == "optimize_image":
+        provider = service.image_editor
+    elif operation == "recrop_image":
+        provider = service.vision
+    else:
+        provider = service._session_language_provider(starting_session)
     operation_details = {
         "job_id": job_id,
         "model": getattr(provider, "model", None),
-        "reasoning_effort": getattr(provider, "reasoning_effort", None),
-        "generation_mode": starting_session.generation_mode,
     }
+    if operation in {"generate", "draft_chat", "image_metadata"}:
+        operation_details.update({
+            "reasoning_effort": getattr(provider, "reasoning_effort", None),
+            "generation_mode": starting_session.generation_mode,
+        })
+    if operation == "optimize_image":
+        operation_details["quality"] = getattr(provider, "quality", None)
     try:
         if operation == "generate":
             session = service.generate(session_id, **payload)
@@ -786,6 +830,8 @@ def _run_session_job(
             session = service.publish(session_id, **payload)
         elif operation == "optimize_image":
             session = service.optimize_image(session_id, **payload)
+        elif operation == "recrop_image":
+            session = service.recrop_image_with_vision(session_id, **payload)
         elif operation == "image_metadata":
             session = service.generate_image_metadata(session_id, **payload)
         else:
@@ -797,6 +843,7 @@ def _run_session_job(
                 "draft_chat": "content_revision",
                 "publish": "wordpress_publish",
                 "optimize_image": "image_optimization",
+                "recrop_image": "vision_focal_recrop",
                 "image_metadata": "image_metadata_generation",
             }.get(operation, operation),
             status="success",

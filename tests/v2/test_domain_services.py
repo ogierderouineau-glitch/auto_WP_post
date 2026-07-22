@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -747,6 +748,74 @@ class FeaturedImageMetadataRegressionTests(unittest.TestCase):
             updated.processed_images[0]["image_optimization"]["effective_prompt"],
             editor.instructions[0]["prompt"],
         )
+
+    def test_vision_recrop_reanalyzes_original_and_overwrites_processed_record(self) -> None:
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            state="uploading",
+            workbook_hash="hash",
+            language="de-DE",
+            image_refs=[
+                MediaReference(
+                    media_id="image-1",
+                    filename="first.jpg",
+                    storage_uri="gs://bucket/session/images/first.jpg",
+                    content_type="image/jpeg",
+                    size_bytes=5,
+                ),
+            ],
+            image_analysis={"image-1": {"focal_point": "old"}},
+            processed_images=[
+                {
+                    "media_id": "image-1",
+                    "filename": "first.webp",
+                    "path": "gs://bucket/session/processed/first.webp",
+                    "operations": ["old_crop"],
+                },
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = FileSessionRepository(temporary)
+            repository.create(session)
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(SimpleNamespace()),
+                repository=repository,
+                object_storage=FakeObjectStorage(),
+                vision=SimpleNamespace(),
+                image_processor=SimpleNamespace(),
+            )
+
+            def analyze(_snapshot: object, working: ContentSession, **_kwargs: object) -> ContentSession:
+                self.assertNotIn("image-1", working.image_analysis)
+                self.assertFalse(working.processed_images)
+                return working.model_copy(update={"image_analysis": {"image-1": {"focal_point": "new"}}})
+
+            def process(_snapshot: object, working: ContentSession, **_kwargs: object) -> ContentSession:
+                self.assertEqual(working.image_analysis["image-1"]["focal_point"], "new")
+                return working.model_copy(update={"processed_images": [{
+                    "media_id": "image-1",
+                    "filename": "first.webp",
+                    "path": "gs://bucket/session/processed/first.webp",
+                    "operations": ["crop_to_target"],
+                }]})
+
+            with patch.object(service, "_analyze_missing_images", side_effect=analyze), patch.object(
+                service,
+                "_process_missing_images",
+                side_effect=process,
+            ):
+                updated = service.recrop_image_with_vision(
+                    session.session_id,
+                    filename="first.jpg",
+                    expected_version=session.version,
+                )
+
+        self.assertEqual(updated.image_analysis["image-1"]["focal_point"], "new")
+        self.assertEqual(len(updated.processed_images), 1)
+        self.assertEqual(updated.processed_images[0]["path"], "gs://bucket/session/processed/first.webp")
+        self.assertIn("vision_focal_recrop", updated.processed_images[0]["operations"])
 
 
 @unittest.skipUnless(WORKBOOK.is_file(), f"V2 test workbook not found: {WORKBOOK}")

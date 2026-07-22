@@ -7,6 +7,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Crop,
   FileText,
   Image as ImageIcon,
   ImagePlus,
@@ -26,6 +27,7 @@ import {
   imageUrl,
   loadContentSession,
   optimizeSessionImage,
+  recropSessionImageWithAi,
   removeSessionImage,
   restoreSessionImageOriginal,
   saveSessionImageMetadata,
@@ -335,7 +337,7 @@ export function MediaScreen({
   const [selectedMediaId, setSelectedMediaId] = useState("")
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
   const [metadata, setMetadata] = useState<MetadataForm>(() => metadataFromImage(null))
-  const [useFocalPointVision, setUseFocalPointVision] = useState(false)
+  const [uploadAspectRatio, setUploadAspectRatio] = useState("4:5")
   const [useMetadataVision, setUseMetadataVision] = useState(false)
   const [operation, setOperation] = useState<OperationState>("idle")
   const [transcriptSaving, setTranscriptSaving] = useState(false)
@@ -591,7 +593,7 @@ export function MediaScreen({
         let beforeIds = new Set((sessionRef.current || nextSession).image_refs.map((image) => image.media_id))
         const data = await withConflictRetry(sessionRef.current || nextSession, async (requestSession) => {
           beforeIds = new Set(requestSession.image_refs.map((image) => image.media_id))
-          return uploadSessionImage(requestAuth, requestSession, file, useFocalPointVision)
+          return uploadSessionImage(requestAuth, requestSession, file, false, uploadAspectRatio)
         })
         nextSession = data.session
         sessionRef.current = nextSession
@@ -703,6 +705,15 @@ export function MediaScreen({
     setEditPromptOpen(true)
   }
 
+  function recropWithAi() {
+    if (!auth || !session || !selectedImage) return
+    void runAction(async (currentSession) => {
+      setMessage("Finding the focal point and recropping...")
+      const data = await recropSessionImageWithAi(auth, currentSession, selectedOriginalFilename)
+      return data.session
+    }, "Image recropped around the AI focal point.")
+  }
+
   function submitImageOptimization() {
     if (!auth || !session || !selectedImage || !editPrompt.trim()) return
     const prompt = editPrompt.trim()
@@ -805,20 +816,21 @@ export function MediaScreen({
                 <span className="block text-xs text-muted-foreground">Videos are not supported yet</span>
               </span>
             </label>
-            <label className="flex cursor-pointer items-start gap-2 border-t border-gold/20 px-3 py-2.5 text-xs">
-              <input
-                id="s2p-media-use-focal-point-vision"
-                type="checkbox"
-                checked={useFocalPointVision}
-                onChange={(event) => setUseFocalPointVision(event.target.checked)}
+            <div className="flex border-t border-gold/20 px-3 py-2.5 text-xs">
+              <select
+                id="s2p-media-upload-aspect-ratio"
+                aria-label="Picture format"
+                value={uploadAspectRatio}
+                onChange={(event) => setUploadAspectRatio(event.target.value)}
                 disabled={operation === "loading"}
-                className="mt-0.5 size-4 accent-gold"
-              />
-              <span>
-                <span className="block font-semibold text-foreground">Find focal points with Vision ($)</span>
-                <span className="text-muted-foreground">Used for re-cropping around the subject.</span>
-              </span>
-            </label>
+                className="w-full rounded-md border border-gold/30 bg-background px-2.5 py-1.5 font-semibold text-foreground outline-none focus:ring-2 focus:ring-gold/40 disabled:opacity-60"
+              >
+                <option value="4:5">Portrait 4:5 (e.g. 768 × 960)</option>
+                <option value="4:3">Landscape 4:3</option>
+                <option value="1:1">Square 1:1</option>
+                <option value="16:9">Widescreen 16:9</option>
+              </select>
+            </div>
           </div>
           <button
             id="s2p-media-open-agent"
@@ -943,18 +955,38 @@ export function MediaScreen({
 
         <section aria-label="Image workspace" className="min-w-0">
           <div className="rounded-xl border border-border bg-card p-3 sm:p-4">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="truncate text-sm font-semibold">
-                {selectedImage
-                  ? `${selectedImage.filename} - image ${selectedIndex + 1}`
-                  : selectedPendingImage
-                    ? `${selectedPendingImage.filename} - uploading`
-                    : "No image selected"}
-              </h2>
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-semibold">
+                  {selectedImage
+                    ? `${selectedImage.filename} - image ${selectedIndex + 1}`
+                    : selectedPendingImage
+                      ? `${selectedPendingImage.filename} - uploading`
+                      : "No image selected"}
+                </h2>
+                {selectedImage && (
+                  <button
+                    id="s2p-media-set-featured"
+                    type="button"
+                    onClick={setFeatured}
+                    disabled={operation === "loading" || selectedImage.is_featured}
+                    aria-pressed={selectedImage.is_featured}
+                    title={selectedImage.is_featured ? "This is the featured image" : "Set as featured image"}
+                    className={`mt-1 inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold transition-colors disabled:cursor-default ${
+                      selectedImage.is_featured
+                        ? "bg-gold/20 text-gold ring-1 ring-gold/40"
+                        : "text-muted-foreground hover:bg-gold/10 hover:text-gold"
+                    }`}
+                  >
+                    <Star className={`size-3.5 ${selectedImage.is_featured ? "fill-current" : ""}`} aria-hidden="true" />
+                    Featured
+                  </button>
+                )}
+              </div>
               {operation === "loading" ? (
                 <span className="inline-flex items-center gap-1.5 rounded-md bg-warn/20 px-2 py-1 text-xs font-medium text-warn-foreground">
                   <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-                  Uploading
+                  Processing
                 </span>
               ) : selectedImage?.processed_filename ? (
                 <span className="inline-flex items-center gap-1.5 rounded-md bg-confirm/15 px-2 py-1 text-xs font-medium text-confirm">
@@ -1026,48 +1058,55 @@ export function MediaScreen({
                   />
                 </div>
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    id="s2p-media-set-featured"
-                    type="button"
-                    onClick={setFeatured}
-                    disabled={operation === "loading"}
-                    aria-pressed={selectedImage.is_featured}
-                    className="inline-flex items-center gap-2 rounded-md bg-confirm px-3.5 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:opacity-60"
-                  >
-                    <Star className={`size-4 ${selectedImage.is_featured ? "fill-current" : ""}`} aria-hidden="true" />
-                    Featured
-                  </button>
-                  <button
-                    id="s2p-media-edit-with-ai"
-                    type="button"
-                    onClick={optimizeImage}
-                    disabled={operation === "loading" || !selectedImage.processed_filename}
-                    className="inline-flex items-center gap-2 rounded-md bg-ai px-3.5 py-2.5 text-sm font-semibold text-ai-foreground transition-colors hover:opacity-90 disabled:opacity-60"
-                  >
-                    <Sparkles className="size-4" aria-hidden="true" />
-                    Edit with AI ($)
-                  </button>
-                  <button
-                    id="s2p-media-restore-original"
-                    type="button"
-                    onClick={restoreOriginal}
-                    disabled={operation === "loading" || !selectedImage.processed_filename}
-                    className="inline-flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3.5 py-2.5 text-sm font-semibold text-destructive transition-colors hover:bg-destructive/15 disabled:opacity-60"
-                  >
-                    <RotateCcw className="size-4" aria-hidden="true" />
-                    Restore original
-                  </button>
-                  <button
-                    id="s2p-media-remove"
-                    type="button"
-                    onClick={removeImage}
-                    disabled={operation === "loading"}
-                    className="inline-flex items-center gap-2 rounded-md border border-destructive/40 bg-card px-3.5 py-2.5 text-sm font-semibold text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-60"
-                  >
-                    <Trash2 className="size-4" aria-hidden="true" />
-                    Remove
-                  </button>
+                <div className="mt-4 space-y-3">
+                  <div className="rounded-lg border border-border bg-muted/30 p-3">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Edit picture</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        id="s2p-media-recrop-with-ai"
+                        type="button"
+                        onClick={recropWithAi}
+                        disabled={operation === "loading" || !selectedImage.processed_filename}
+                        title="Use AI Vision to find the subject, then overwrite the processed image with a fresh focal-point crop."
+                        className="inline-flex items-center gap-2 rounded-md border border-gold/40 bg-gold/15 px-3.5 py-2.5 text-sm font-semibold text-gold transition-colors hover:bg-gold/25 disabled:opacity-60"
+                      >
+                        <Crop className="size-4" aria-hidden="true" />
+                        Recrop with AI ($)
+                      </button>
+                      <button
+                        id="s2p-media-edit-with-ai"
+                        type="button"
+                        onClick={optimizeImage}
+                        disabled={operation === "loading" || !selectedImage.processed_filename}
+                        className="inline-flex items-center gap-2 rounded-md bg-ai px-3.5 py-2.5 text-sm font-semibold text-ai-foreground shadow-sm transition hover:brightness-105 disabled:opacity-60"
+                      >
+                        <Sparkles className="size-4" aria-hidden="true" />
+                        Edit with AI ($)
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-2 border-t border-destructive/20 pt-3">
+                    <button
+                      id="s2p-media-restore-original"
+                      type="button"
+                      onClick={restoreOriginal}
+                      disabled={operation === "loading" || !selectedImage.processed_filename}
+                      className="inline-flex items-center gap-2 rounded-md border border-destructive/35 bg-destructive/5 px-3.5 py-2.5 text-sm font-semibold text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-60"
+                    >
+                      <RotateCcw className="size-4" aria-hidden="true" />
+                      Restore original
+                    </button>
+                    <button
+                      id="s2p-media-remove"
+                      type="button"
+                      onClick={removeImage}
+                      disabled={operation === "loading"}
+                      className="inline-flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3.5 py-2.5 text-sm font-semibold text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-60"
+                    >
+                      <Trash2 className="size-4" aria-hidden="true" />
+                      Remove picture
+                    </button>
+                  </div>
                 </div>
               </>
             ) : (

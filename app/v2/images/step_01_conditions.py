@@ -24,7 +24,10 @@ IMAGE_CONDITION_HANDLERS: dict[str, ImageCondition] = {
         ctx.filesize_bytes > int(ctx.values.get("compression.target_kb", 0)) * 1024
     ),
     "crop_mode_equals_cover": lambda ctx, _value: ctx.values.get("crop.mode") == "cover",
-    "image_dark": lambda ctx, _value: float(ctx.analysis.get("brightness_score", 100)) < 45,
+    "image_dark": lambda ctx, _value: (
+        not ctx.values.get("_adaptive_exposure_applied")
+        and float(ctx.analysis.get("brightness_score", 100)) < 45
+    ),
     "noise_score_gt_20": lambda ctx, _value: float(ctx.analysis.get("noise_score", 0)) > 20,
     "subject_mask_available": lambda ctx, _value: bool(ctx.analysis.get("subject_mask")),
 }

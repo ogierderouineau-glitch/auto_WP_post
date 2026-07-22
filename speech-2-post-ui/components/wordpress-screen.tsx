@@ -23,6 +23,7 @@ import {
 import { statusMessageClass } from "@/lib/status-style"
 
 type OperationState = "idle" | "loading" | "success" | "error"
+type PublishAction = "create" | "update"
 type PublishStatus = "draft" | "private" | "publish"
 const ACTIVE_JOB_STORAGE = "speech2post_active_job"
 
@@ -90,6 +91,7 @@ export function WordPressScreen({
 }) {
   const [postStatus, setPostStatus] = useState<PublishStatus>("draft")
   const [operation, setOperation] = useState<OperationState>("idle")
+  const [activePublishAction, setActivePublishAction] = useState<PublishAction | null>(null)
   const [message, setMessage] = useState("")
 
   const wordpressResult = session?.wordpress_result || {}
@@ -121,7 +123,7 @@ export function WordPressScreen({
     const rawJob = sessionStorage.getItem(ACTIVE_JOB_STORAGE)
     if (!rawJob) return
 
-    let storedJob: { jobId?: string; operation?: string; sessionId?: string }
+    let storedJob: { jobId?: string; operation?: string; sessionId?: string; action?: PublishAction }
     try {
       storedJob = JSON.parse(rawJob) as typeof storedJob
     } catch {
@@ -132,17 +134,20 @@ export function WordPressScreen({
 
     const controller = new AbortController()
     setOperation("loading")
+    setActivePublishAction(storedJob.action || null)
     setMessage("Checking WordPress publication...")
     void pollPublishJob(storedJob.jobId, controller.signal)
       .then((nextSession) => {
         sessionStorage.removeItem(ACTIVE_JOB_STORAGE)
         onSessionChange(nextSession)
         setOperation("success")
+        setActivePublishAction(null)
         setMessage("WordPress post created.")
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return
         setOperation("error")
+        setActivePublishAction(null)
         setMessage(error instanceof Error ? error.message : "WordPress action failed.")
       })
 
@@ -151,7 +156,9 @@ export function WordPressScreen({
 
   async function runPublish(options: { targetPostId?: number | null; forceCreateNew?: boolean; partialUpdate?: boolean }) {
     if (!auth || !session) return
+    const action: PublishAction = options.partialUpdate ? "update" : "create"
     setOperation("loading")
+    setActivePublishAction(action)
     setMessage(options.partialUpdate ? "Updating WordPress post..." : "Creating WordPress post...")
     try {
       const sharedFields =
@@ -170,6 +177,7 @@ export function WordPressScreen({
         JSON.stringify({
           jobId: job.job_id,
           operation: "publish",
+          action,
           sessionId: session.session_id,
           at: new Date().toISOString(),
         }),
@@ -182,6 +190,8 @@ export function WordPressScreen({
     } catch (error) {
       setOperation("error")
       setMessage(error instanceof Error ? error.message : "WordPress action failed.")
+    } finally {
+      setActivePublishAction(null)
     }
   }
 
@@ -257,16 +267,28 @@ export function WordPressScreen({
                 </select>
               </div>
 
-              <button
-                id="s2p-wordpress-create-post"
-                type="button"
-                onClick={() => runPublish({ forceCreateNew: true })}
-                disabled={operation === "loading" || !canCreatePost}
-                className="inline-flex items-center justify-center gap-2 rounded-md bg-confirm px-4 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {operation === "loading" ? <Loader2 className="size-4 animate-spin" /> : <CloudUpload className="size-4" />}
-                {postId ? "Re-create Post" : "Create post"}
-              </button>
+              <span className="group relative inline-flex" tabIndex={postId ? 0 : undefined}>
+                <button
+                  id="s2p-wordpress-create-post"
+                  type="button"
+                  onClick={() => runPublish({ forceCreateNew: true })}
+                  disabled={operation === "loading" || !canCreatePost}
+                  aria-describedby={postId ? "s2p-wordpress-recreate-tooltip" : undefined}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-confirm px-4 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {activePublishAction === "create" ? <Loader2 className="size-4 animate-spin" /> : <CloudUpload className="size-4" />}
+                  {postId ? "Re-create Post" : "Create post"}
+                </button>
+                {postId && (
+                  <span
+                    id="s2p-wordpress-recreate-tooltip"
+                    role="tooltip"
+                    className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 w-72 rounded-md bg-topbar px-3 py-2 text-xs font-normal leading-relaxed text-topbar-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                  >
+                    Creates a new WordPress post from the complete current payload and uploads the session media again. The existing post is not overwritten.
+                  </span>
+                )}
+              </span>
             </div>
           </section>
 
@@ -342,7 +364,7 @@ export function WordPressScreen({
                     disabled={operation === "loading" || !canPublish || noChange}
                     className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-ai px-3.5 py-2 text-sm font-semibold text-ai-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {operation === "loading" ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                    {activePublishAction === "update" ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
                     Update post
                   </button>
                 </div>

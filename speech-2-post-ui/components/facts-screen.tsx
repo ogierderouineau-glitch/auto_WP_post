@@ -35,6 +35,7 @@ type FactRowModel = {
   source: string
   confidence: "High" | "Medium" | "Low"
   section: SectionId
+  enumOptions: { value: string; label: string }[]
 }
 
 const TONE = {
@@ -132,20 +133,43 @@ function FactRow({
       </label>
 
       <div className="mt-2 lg:mt-0">
-        <input
-          id={`s2p-facts-value-${fact.key}`}
-          type="text"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onBlur={(event) => onBlur(event.relatedTarget)}
-          aria-label={fact.label}
-          aria-invalid={missingRequired}
-          placeholder={fact.required ? "Required" : "Optional"}
-          className={[
-            "w-full rounded-md border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none transition-colors focus:ring-2 focus:ring-gold/40",
-            missingRequired ? "border-destructive/50" : "border-border",
-          ].join(" ")}
-        />
+        {fact.enumOptions.length ? (
+          <select
+            id={`s2p-facts-value-${fact.key}`}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onBlur={(event) => onBlur(event.relatedTarget)}
+            aria-label={fact.label}
+            aria-invalid={missingRequired}
+            className={[
+              "w-full rounded-md border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none transition-colors focus:ring-2 focus:ring-gold/40",
+              missingRequired ? "border-destructive/50" : "border-border",
+            ].join(" ")}
+          >
+            <option value="">{fact.required ? "Select a value" : "Not specified"}</option>
+            {value && !fact.enumOptions.some((option) => option.value === value) && (
+              <option value={value}>{value}</option>
+            )}
+            {fact.enumOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        ) : (
+          <input
+            id={`s2p-facts-value-${fact.key}`}
+            type="text"
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onBlur={(event) => onBlur(event.relatedTarget)}
+            aria-label={fact.label}
+            aria-invalid={missingRequired}
+            placeholder={fact.required ? "Required" : "Optional"}
+            className={[
+              "w-full rounded-md border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none transition-colors focus:ring-2 focus:ring-gold/40",
+              missingRequired ? "border-destructive/50" : "border-border",
+            ].join(" ")}
+          />
+        )}
         {missingRequired && (
           <p className="mt-1 flex items-center gap-1 text-xs text-destructive">
             <CircleAlert className="size-3.5" aria-hidden="true" />
@@ -254,6 +278,7 @@ function buildRows(schema: FactSchemaField[], session: ContentSession | null): F
       source: sourceLabel(fact),
       confidence: confidenceLabel(fact),
       section,
+      enumOptions: field.enum_options || [],
     }
   })
 }

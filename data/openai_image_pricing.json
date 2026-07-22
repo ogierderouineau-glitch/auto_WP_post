@@ -1,0 +1,227 @@
+{
+  "schema_version": 1,
+  "source_url": "https://developers.openai.com/api/docs/guides/image-generation#calculating-costs",
+  "retrieved_at": "2026-07-22T13:27:38.481026+00:00",
+  "source_sha256": "52034c4f797e6f5a2352aa0b1d3c2dda9966777e27505b860a37cc636d302a7d",
+  "currency": "USD",
+  "unit": "per_output_image",
+  "notes": "Output-image estimates only; text and image input tokens may add cost.",
+  "prices": [
+    {
+      "model": "gpt-image-2",
+      "quality": "low",
+      "size": "1024x1024",
+      "usd_per_image": 0.006
+    },
+    {
+      "model": "gpt-image-2",
+      "quality": "low",
+      "size": "1024x1536",
+      "usd_per_image": 0.005
+    },
+    {
+      "model": "gpt-image-2",
+      "quality": "low",
+      "size": "1536x1024",
+      "usd_per_image": 0.005
+    },
+    {
+      "model": "gpt-image-2",
+      "quality": "medium",
+      "size": "1024x1024",
+      "usd_per_image": 0.053
+    },
+    {
+      "model": "gpt-image-2",
+      "quality": "medium",
+      "size": "1024x1536",
+      "usd_per_image": 0.041
+    },
+    {
+      "model": "gpt-image-2",
+      "quality": "medium",
+      "size": "1536x1024",
+      "usd_per_image": 0.041
+    },
+    {
+      "model": "gpt-image-2",
+      "quality": "high",
+      "size": "1024x1024",
+      "usd_per_image": 0.211
+    },
+    {
+      "model": "gpt-image-2",
+      "quality": "high",
+      "size": "1024x1536",
+      "usd_per_image": 0.165
+    },
+    {
+      "model": "gpt-image-2",
+      "quality": "high",
+      "size": "1536x1024",
+      "usd_per_image": 0.165
+    },
+    {
+      "model": "gpt-image-1.5",
+      "quality": "low",
+      "size": "1024x1024",
+      "usd_per_image": 0.009
+    },
+    {
+      "model": "gpt-image-1.5",
+      "quality": "low",
+      "size": "1024x1536",
+      "usd_per_image": 0.013
+    },
+    {
+      "model": "gpt-image-1.5",
+      "quality": "low",
+      "size": "1536x1024",
+      "usd_per_image": 0.013
+    },
+    {
+      "model": "gpt-image-1.5",
+      "quality": "medium",
+      "size": "1024x1024",
+      "usd_per_image": 0.034
+    },
+    {
+      "model": "gpt-image-1.5",
+      "quality": "medium",
+      "size": "1024x1536",
+      "usd_per_image": 0.05
+    },
+    {
+      "model": "gpt-image-1.5",
+      "quality": "medium",
+      "size": "1536x1024",
+      "usd_per_image": 0.05
+    },
+    {
+      "model": "gpt-image-1.5",
+      "quality": "high",
+      "size": "1024x1024",
+      "usd_per_image": 0.133
+    },
+    {
+      "model": "gpt-image-1.5",
+      "quality": "high",
+      "size": "1024x1536",
+      "usd_per_image": 0.2
+    },
+    {
+      "model": "gpt-image-1.5",
+      "quality": "high",
+      "size": "1536x1024",
+      "usd_per_image": 0.2
+    },
+    {
+      "model": "gpt-image-1",
+      "quality": "low",
+      "size": "1024x1024",
+      "usd_per_image": 0.011
+    },
+    {
+      "model": "gpt-image-1",
+      "quality": "low",
+      "size": "1024x1536",
+      "usd_per_image": 0.016
+    },
+    {
+      "model": "gpt-image-1",
+      "quality": "low",
+      "size": "1536x1024",
+      "usd_per_image": 0.016
+    },
+    {
+      "model": "gpt-image-1",
+      "quality": "medium",
+      "size": "1024x1024",
+      "usd_per_image": 0.042
+    },
+    {
+      "model": "gpt-image-1",
+      "quality": "medium",
+      "size": "1024x1536",
+      "usd_per_image": 0.063
+    },
+    {
+      "model": "gpt-image-1",
+      "quality": "medium",
+      "size": "1536x1024",
+      "usd_per_image": 0.063
+    },
+    {
+      "model": "gpt-image-1",
+      "quality": "high",
+      "size": "1024x1024",
+      "usd_per_image": 0.167
+    },
+    {
+      "model": "gpt-image-1",
+      "quality": "high",
+      "size": "1024x1536",
+      "usd_per_image": 0.25
+    },
+    {
+      "model": "gpt-image-1",
+      "quality": "high",
+      "size": "1536x1024",
+      "usd_per_image": 0.25
+    },
+    {
+      "model": "gpt-image-1-mini",
+      "quality": "low",
+      "size": "1024x1024",
+      "usd_per_image": 0.005
+    },
+    {
+      "model": "gpt-image-1-mini",
+      "quality": "low",
+      "size": "1024x1536",
+      "usd_per_image": 0.006
+    },
+    {
+      "model": "gpt-image-1-mini",
+      "quality": "low",
+      "size": "1536x1024",
+      "usd_per_image": 0.006
+    },
+    {
+      "model": "gpt-image-1-mini",
+      "quality": "medium",
+      "size": "1024x1024",
+      "usd_per_image": 0.011
+    },
+    {
+      "model": "gpt-image-1-mini",
+      "quality": "medium",
+      "size": "1024x1536",
+      "usd_per_image": 0.015
+    },
+    {
+      "model": "gpt-image-1-mini",
+      "quality": "medium",
+      "size": "1536x1024",
+      "usd_per_image": 0.015
+    },
+    {
+      "model": "gpt-image-1-mini",
+      "quality": "high",
+      "size": "1024x1024",
+      "usd_per_image": 0.036
+    },
+    {
+      "model": "gpt-image-1-mini",
+      "quality": "high",
+      "size": "1024x1536",
+      "usd_per_image": 0.052
+    },
+    {
+      "model": "gpt-image-1-mini",
+      "quality": "high",
+      "size": "1536x1024",
+      "usd_per_image": 0.052
+    }
+  ]
+}

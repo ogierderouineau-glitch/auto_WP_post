@@ -266,6 +266,9 @@ class ContentSessionService:
         estimated_cost = max(0.0, after_cost - before_cost)
         call_delta = max(0, int(after.get("call_count") or 0) - int(before.get("call_count") or 0))
         operation_calls = list(after.get("calls") or [])[-call_delta:] if call_delta else []
+        cost_known = bool(operation_calls) and all(
+            call.get("estimated_cost_usd") is not None for call in operation_calls
+        )
         finished_at = datetime.now(timezone.utc)
         record = OperationRecord.model_validate({
             "operation_id": uuid.uuid4().hex,
@@ -277,7 +280,7 @@ class ContentSessionService:
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
-            "estimated_cost_usd": round(estimated_cost, 8) if total_tokens else None,
+            "estimated_cost_usd": round(estimated_cost, 8) if cost_known else None,
             "error": error,
             "details": {**(details or {}), "model_calls": operation_calls},
         })
@@ -319,6 +322,7 @@ class ContentSessionService:
         content_type: str,
         expected_version: int,
         use_vision: bool = True,
+        aspect_ratio: str | None = None,
     ) -> ContentSession:
         if self.object_storage is None:
             raise RuntimeError("An ObjectStorageProvider is not configured.")
@@ -367,6 +371,7 @@ class ContentSessionService:
                     snapshot,
                     enriched,
                     media_ids={reference.media_id},
+                    aspect_ratio=aspect_ratio,
                 )
                 self._milestone(enriched, "Pillow processing finished")
             except Exception as exc:
@@ -1012,6 +1017,66 @@ class ContentSessionService:
             )
         return self.repository.save(
             session.model_copy(
+                update={
+                    "processed_images": processed_images,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            ),
+            expected_version=expected_version,
+        )
+
+    def recrop_image_with_vision(
+        self,
+        session_id: str,
+        *,
+        filename: str,
+        expected_version: int,
+    ) -> ContentSession:
+        if self.vision is None or self.image_processor is None or self.object_storage is None:
+            raise ImageProcessingError("Vision recropping is not configured.")
+        session = self.repository.get(session_id)
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        reference, processed = self._find_image_reference_and_processed(session, filename)
+        if processed is None:
+            raise ValueError(f"Processed image not found in this session: {filename}")
+
+        image_analysis = dict(session.image_analysis)
+        image_analysis.pop(reference.media_id, None)
+        working = session.model_copy(
+            update={
+                "image_analysis": image_analysis,
+                "processed_images": [
+                    item
+                    for item in session.processed_images
+                    if item.get("media_id") != reference.media_id
+                ],
+            }
+        )
+        working = self._analyze_missing_images(
+            snapshot,
+            working,
+            media_ids={reference.media_id},
+        )
+        working = self._process_missing_images(
+            snapshot,
+            working,
+            media_ids={reference.media_id},
+            aspect_ratio=str(processed.get("aspect_ratio") or "") or None,
+        )
+        processed_images = []
+        for item in working.processed_images:
+            if item.get("media_id") != reference.media_id:
+                processed_images.append(item)
+                continue
+            operations = [
+                str(operation)
+                for operation in item.get("operations", item.get("applied_operations", []))
+                if str(operation).strip()
+            ]
+            operations.append("vision_focal_recrop")
+            processed_images.append({**item, "operations": operations[-20:]})
+        return self.repository.save(
+            working.model_copy(
                 update={
                     "processed_images": processed_images,
                     "updated_at": datetime.now(timezone.utc),
@@ -1973,6 +2038,7 @@ class ContentSessionService:
         session: ContentSession,
         *,
         media_ids: set[str] | None = None,
+        aspect_ratio: str | None = None,
     ) -> ContentSession:
         if self.image_processor is None or self.object_storage is None or not session.image_refs:
             return session
@@ -2010,6 +2076,7 @@ class ContentSessionService:
                         source=source,
                         destination=output,
                         analysis=session.image_analysis.get(reference.media_id, {}),
+                        aspect_ratio=aspect_ratio,
                     )
                 except Exception as exc:
                     raise ImageProcessingError(

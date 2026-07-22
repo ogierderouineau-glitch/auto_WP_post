@@ -86,6 +86,14 @@ function voiceInstructionItems(value: string) {
     .filter(Boolean)
 }
 
+function contentFieldLabel(fieldId: string) {
+  const separator = fieldId.indexOf(":")
+  const key = separator >= 0 ? fieldId.slice(separator + 1) : fieldId
+  return key
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
 export function RecordingWidget({
   auth,
   session,
@@ -437,6 +445,25 @@ export function RecordingWidget({
                 {allFactsSelected ? "Uncheck all facts" : "Check all facts"}
               </button>
             </div>
+          )}
+
+          {activeScreen === "content" && (
+            <details className="mt-3 rounded-lg border border-ai/30 bg-ai/5 px-3 py-2">
+              <summary className="cursor-pointer text-xs font-semibold text-foreground">
+                {selectedContentFieldIds.length} {selectedContentFieldIds.length === 1 ? "field" : "fields"} selected for revision
+              </summary>
+              {selectedContentFieldIds.length ? (
+                <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
+                  {selectedContentFieldIds.map((fieldId) => (
+                    <li key={fieldId} className="rounded-md border border-border bg-background px-2.5 py-1.5">
+                      {contentFieldLabel(fieldId)}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-xs text-muted-foreground">Select fields on the Content screen to revise them.</p>
+              )}
+            </details>
           )}
 
           <textarea

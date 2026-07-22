@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
+from app.v2.providers.image_pricing import image_output_price_usd
+
 from openai import APIStatusError, OpenAI
 
 try:
@@ -155,13 +157,16 @@ class OpenAIVisionProvider(VisionProvider):
 
 
 class OpenAIImageEditingProvider(ImageEditingProvider):
-    def __init__(self, *, api_key: str, model: str = "gpt-image-2") -> None:
+    def __init__(self, *, api_key: str, model: str = "gpt-image-2", quality: str = "medium") -> None:
+        if quality not in {"low", "medium", "high"}:
+            raise ValueError("Image edit quality must be low, medium, or high.")
         self.client = OpenAI(
             api_key=api_key,
             timeout=float(os.getenv("V2_IMAGE_EDIT_TIMEOUT_SECONDS", "150")),
             max_retries=int(os.getenv("V2_IMAGE_EDIT_MAX_RETRIES", "1")),
         )
         self.model = model
+        self.quality = quality
         self.last_usage: dict[str, Any] | None = None
 
     def edit(self, source: Path, destination: Path, instructions: dict[str, Any]) -> Path:
@@ -182,12 +187,25 @@ class OpenAIImageEditingProvider(ImageEditingProvider):
             except Exception:
                 edit_input = source
         try:
+            if Image is not None:
+                with Image.open(edit_input) as opened:
+                    request_size = (
+                        "1024x1536"
+                        if opened.height > opened.width
+                        else "1536x1024"
+                        if opened.width > opened.height
+                        else "1024x1024"
+                    )
+            else:
+                request_size = "1024x1024"
             with edit_input.open("rb") as image_file:
                 try:
                     response = self.client.images.edit(
                         model=self.model,
                         image=image_file,
                         prompt=prompt,
+                        quality=self.quality,
+                        size=request_size,
                     )
                 except APIStatusError as exc:
                     if exc.status_code >= 500:
@@ -209,6 +227,8 @@ class OpenAIImageEditingProvider(ImageEditingProvider):
             model=self.model,
             service="openai_images",
             call_name="image_optimization",
+            estimated_cost_usd=image_output_price_usd(self.model, self.quality, request_size),
+            extra={"quality": self.quality, "size": request_size, "pricing_unit": "per_output_image"},
         )
         data_items = getattr(response, "data", None) or []
         if not data_items:
@@ -254,6 +274,8 @@ def _usage_event(
     model: str,
     service: str,
     call_name: str,
+    estimated_cost_usd: float | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     usage = getattr(response, "usage", None)
     if usage is None:
@@ -264,7 +286,8 @@ def _usage_event(
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
-            "estimated_cost_usd": None,
+            "estimated_cost_usd": estimated_cost_usd,
+            **(extra or {}),
         }
     prompt_tokens = int(
         getattr(usage, "prompt_tokens", None)
@@ -276,7 +299,9 @@ def _usage_event(
         or getattr(usage, "output_tokens", 0)
         or 0
     )
-    estimated_cost = _estimate_cost_usd(model, prompt_tokens, completion_tokens)
+    estimated_cost = estimated_cost_usd
+    if estimated_cost is None:
+        estimated_cost = _estimate_cost_usd(model, prompt_tokens, completion_tokens)
     return {
         "service": service,
         "call_name": call_name,
@@ -285,6 +310,7 @@ def _usage_event(
         "completion_tokens": completion_tokens,
         "total_tokens": int(getattr(usage, "total_tokens", 0) or prompt_tokens + completion_tokens),
         "estimated_cost_usd": estimated_cost,
+        **(extra or {}),
     }
 
 

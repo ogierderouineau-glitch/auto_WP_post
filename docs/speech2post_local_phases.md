@@ -360,16 +360,19 @@ Current behavior:
 - The Media screen uses the active V2 session and updates the parent shell after
   each backend response so the session version stays current.
 - Image uploads call `POST /api/content-sessions/{session_id}/uploads`.
-- The gold Add pictures control contains the independently clickable focal-point
-  Vision option, which applies to newly uploaded pictures.
+- The gold Add pictures control uploads pictures through the standard local
+  Pillow pipeline without making a paid Vision request. Its format dropdown
+  selects a per-upload Pillow crop ratio: portrait `4:5` (the default),
+  landscape `4:3`, square `1:1`, or widescreen `16:9`. The ratio is stored on
+  the processed record and reused by a later AI recrop.
 - On the Media screen only, the recording agent shows the active post type's
   workbook `voice_instructions` in a collapsed speech-structure panel below the
   Record controls.
 - Images are fetched as authenticated blobs because current image routes require
   `X-API-Key`/`X-User-ID` headers and plain `<img src>` cannot send those.
 - Original and processed images are shown side by side on desktop.
-- Featured image, metadata save, image optimize, restore original, and remove
-  image actions call the real V2 endpoints.
+- Featured image, metadata save, per-picture Vision recrop, image optimize,
+  restore original, and remove image actions call the real V2 endpoints.
 - Video selection displays a clear unsupported message; no fake video endpoint
   is used.
 - Recording/transcript controls remain disabled until Phase 5.
@@ -430,13 +433,25 @@ Risk:
   Image metadata generation uses this picture-level context as its primary
   description together with workbook metadata rules. Broad post fields and the
   WordPress payload are intentionally excluded from the metadata prompt.
-- The Media screen has two independent Vision controls:
-  - The general focal-point checkbox is checked by default and applies Vision
-    before processing newly uploaded pictures.
+- The Media screen has two explicit, per-picture Vision actions:
+  - `Recrop with AI ($)` requests a fresh focal point, then reprocesses the
+    original upload through the standard Pillow pipeline and overwrites the
+    current processed object. Starting from the original avoids cumulative
+    crop and JPEG quality loss.
   - Each saved picture has an unchecked-by-default metadata Vision checkbox.
     Only opted-in pictures may expose their stored Vision analysis to metadata
     generation. The choice is persisted in `image_metadata_vision` by
     `media_id`.
+- Pillow keeps its conservative 60% retained-area crop guard when no focal
+  point is available. A valid Vision focal point permits a subject-centered
+  4:3 crop down to 35% retained area, allowing panoramic landscape images to
+  normalize instead of remaining visibly shorter than the other pictures.
+- Pillow measures luminance percentiles and clipped highlights locally before
+  enhancement. Backlit images receive a masked shadow lift with protected
+  highlights, generally dark images receive bounded gamma correction, and
+  low-contrast images receive a mild 20% autocontrast blend. Well-exposed
+  images skip adaptive exposure; conservative color, contrast, and sharpness
+  finishing remains deterministic and local.
 - Generated picture metadata stores a field-addressable rules trace in
   `generation_trace.image_metadata`, keyed by media ID. Alt text, title,
   caption, and description expose this context through `Rules trace` controls
@@ -522,6 +537,9 @@ Current behavior:
   moves directly to the Content screen once required facts are complete. It
   does not rerun `/analyze`.
 - The shell reloads workbook schema when the active session post type changes.
+- Enum-backed facts render as selects using `validation_lists.description_de`
+  for their visible labels while saving `allowed_value` as the stable session
+  value.
 
 Risk:
 
@@ -649,6 +667,8 @@ Current behavior:
   after content changes; this uses `force_create_new: true` to publish the full
   current content and media to a new WordPress post ID and replaces the
   session's current `wordpress_result`.
+- Re-create Post explains this new-post behavior in its tooltip, and only the
+  publish action actually running displays a loading spinner.
 - Update Post uses the stored `wordpress_result.post_id` as `target_post_id`
   with `partial_update: true`.
 - Returned WordPress post ID, status, view link, edit link, and idempotency key
@@ -805,3 +825,41 @@ These behaviors are intentional and should be preserved during later cleanup:
 - Keep all new frontend network calls in one API client.
 - Keep the current live UI untouched until the Next version is ready to replace
   it.
+
+## OpenAI Image Pricing Table
+
+- `data/openai_image_pricing.json` is the temporary machine-readable pricing
+  table used for OpenAI image-output estimates.
+- `scripts/update_openai_image_pricing.py` downloads the official image-cost
+  documentation, parses the model/quality/size table, validates all required
+  GPT Image 2 combinations, and replaces the JSON file atomically.
+- A failed download, changed page structure, incomplete table, or invalid price
+  exits with an error before replacing the last valid table.
+- These are output-image estimates. Text and image input-token charges can make
+  the complete API request cost higher.
+- OpenAI image edits use `V2_IMAGE_EDIT_QUALITY` (`medium` by default) and a
+  documented output size selected from the source orientation. The image
+  provider records the matching table price, actual `gpt-image-*` model,
+  quality, and size in usage data. Image-operation headers do not inherit the
+  unrelated session language model or generation settings.
+
+### Execution Instructions
+
+From the repository root, refresh the table manually:
+
+```bash
+.venv/bin/python scripts/update_openai_image_pricing.py
+```
+
+Run the parser tests without network access:
+
+```bash
+.venv/bin/python -m pytest tests/v2/test_openai_image_pricing.py -q
+```
+
+For an optional daily refresh at 06:15, open the current user's crontab with
+`crontab -e` and add:
+
+```cron
+15 6 * * * cd '/home/ogier-derouineau/IT projects/whatsapp_to_Wordpess_post' && .venv/bin/python scripts/update_openai_image_pricing.py >> /tmp/speech2post-image-pricing.log 2>&1
+```

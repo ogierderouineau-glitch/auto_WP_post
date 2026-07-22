@@ -17,6 +17,7 @@ class PillowProcessor:
     """Apply configured Pillow rules; numeric behavior comes from the workbook."""
 
     DEFAULT_CROP_MIN_RETAINED_AREA = 0.60
+    VISION_CROP_MIN_RETAINED_AREA = 0.35
 
     def process(
         self,
@@ -26,12 +27,15 @@ class PillowProcessor:
         destination: Path,
         analysis: dict[str, Any] | None = None,
         stages: set[str] | None = None,
+        aspect_ratio: str | None = None,
     ) -> dict[str, Any]:
         rules = sorted(
             (row for row in snapshot.pillow_rules if row.enabled),
             key=lambda row: (-row.numeric_priority, row.rule_key),
         )
         values = {row.rule_key: row.value for row in rules}
+        if aspect_ratio is not None:
+            values["crop.aspect_ratio"] = aspect_ratio
         values, operations = self._values_with_analysis(values, analysis or {})
         destination.parent.mkdir(parents=True, exist_ok=True)
         original_backup = destination.parent / f"{destination.stem}.original{source.suffix.lower()}"
@@ -87,6 +91,7 @@ class PillowProcessor:
                 "width": image.width,
                 "height": image.height,
                 "format": output_format,
+                "aspect_ratio": str(values.get("crop.aspect_ratio") or ""),
                 "operations": operations,
                 **compression,
             }
@@ -110,9 +115,19 @@ class PillowProcessor:
             if x is not None and y is not None:
                 dynamic_values["crop.focal_x"] = x
                 dynamic_values["crop.focal_y"] = y
-                operations.append(f"vision.crop_recommendation focal_x={x:.2f}, focal_y={y:.2f}")
+                configured_minimum = float(
+                    dynamic_values.get("crop.min_retained_area", cls.DEFAULT_CROP_MIN_RETAINED_AREA)
+                )
+                dynamic_values["crop.min_retained_area"] = min(
+                    configured_minimum,
+                    cls.VISION_CROP_MIN_RETAINED_AREA,
+                )
+                operations.append(
+                    f"vision.crop_recommendation focal_x={x:.2f}, focal_y={y:.2f}, "
+                    f"min_retained_area={dynamic_values['crop.min_retained_area']:.0%}"
+                )
         if float(analysis.get("brightness_score", 100) or 100) < 45:
-            operations.append("vision.image_dark -> brightness/shadow rules enabled")
+            operations.append("vision.image_dark -> adaptive exposure enabled")
         if float(analysis.get("noise_score", 0) or 0) > 20:
             operations.append("vision.noise_score_gt_20 -> median filter enabled")
         return dynamic_values, operations
@@ -139,9 +154,11 @@ class PillowProcessor:
 
     @staticmethod
     def _operation_label(rule: PillowRule, values: dict[str, Any]) -> str:
+        if rule.rule_key == "enhance.adaptive_exposure":
+            return str(values.get("_adaptive_exposure_summary") or rule.rule_key)
         if rule.rule_key == "crop.aspect_ratio":
             return (
-                f"{rule.rule_key}={rule.value} "
+                f"{rule.rule_key}={values.get('crop.aspect_ratio', rule.value)} "
                 f"(focal_x={float(values.get('crop.focal_x', 0.5)):.2f}, "
                 f"focal_y={float(values.get('crop.focal_y', 0.5)):.2f})"
             )
@@ -151,6 +168,8 @@ class PillowProcessor:
     def _apply(image: Image.Image, rule: PillowRule, values: dict[str, Any]) -> Image.Image:
         if rule.rule_key == "prepare.auto_orient" and rule.value:
             return ImageOps.exif_transpose(image)
+        if rule.rule_key == "enhance.adaptive_exposure" and rule.value:
+            return PillowProcessor._adaptive_exposure(image, values)
         if rule.rule_key == "resize.max_width" and image.width > int(rule.value):
             ratio = int(rule.value) / image.width
             return image.resize((int(rule.value), round(image.height * ratio)), Image.Resampling.LANCZOS)
@@ -171,7 +190,10 @@ class PillowProcessor:
         if rule.rule_key == "filter.median_size":
             return image.filter(ImageFilter.MedianFilter(size=int(rule.value)))
         if rule.rule_key == "crop.aspect_ratio" and values.get("crop.mode") == "cover":
-            width_ratio, height_ratio = (float(part) for part in str(rule.value).split(":", 1))
+            width_ratio, height_ratio = (
+                float(part)
+                for part in str(values.get("crop.aspect_ratio", rule.value)).split(":", 1)
+            )
             target_ratio = width_ratio / height_ratio
             current_ratio = image.width / image.height
             focal_x = float(values.get("crop.focal_x", 0.5))
@@ -218,6 +240,63 @@ class PillowProcessor:
             )
             return image.crop((0, top, image.width, top + crop_height))
         return image
+
+    @classmethod
+    def _adaptive_exposure(cls, image: Image.Image, values: dict[str, Any]) -> Image.Image:
+        """Apply bounded corrections from pixels; preserve already-good exposures."""
+        rgb = image.convert("RGB")
+        luminance = rgb.convert("L")
+        histogram = luminance.histogram()
+        total = max(1, sum(histogram))
+
+        def percentile(fraction: float) -> int:
+            target = total * fraction
+            running = 0
+            for value, count in enumerate(histogram):
+                running += count
+                if running >= target:
+                    return value
+            return 255
+
+        p05, p25, p50, p95 = (percentile(value) for value in (0.05, 0.25, 0.50, 0.95))
+        clipped_highlights = sum(histogram[246:]) / total
+        tonal_range = p95 - p05
+        backlit = clipped_highlights >= 0.03 and p25 < 100 and p95 >= 245
+        dark = p50 < 85 and clipped_highlights < 0.02
+        low_contrast = 25 <= tonal_range < 90
+        corrected = rgb
+        adjustments: list[str] = []
+
+        if backlit:
+            gamma = max(0.78, min(0.88, 0.78 + max(0, p25 - 60) * 0.002))
+            lifted = rgb.point(lambda value: round(255 * ((value / 255) ** gamma)))
+            shadow_ceiling = max(140, min(175, p25 + 85))
+            shadow_floor = max(20, min(60, p05))
+            span = max(1, shadow_ceiling - shadow_floor)
+            mask = luminance.point(
+                lambda value: round(255 * max(0.0, min(1.0, (shadow_ceiling - value) / span)))
+            ).filter(ImageFilter.GaussianBlur(max(3, round(max(rgb.size) / 320))))
+            corrected = Image.composite(lifted, rgb, mask)
+            adjustments.append(f"shadow_lift gamma={gamma:.2f}")
+        elif dark:
+            gamma = max(0.80, min(0.94, 0.80 + max(0, p50 - 55) * 0.004))
+            corrected = rgb.point(lambda value: round(255 * ((value / 255) ** gamma)))
+            adjustments.append(f"dark_image_gamma={gamma:.2f}")
+
+        if low_contrast:
+            expanded = ImageOps.autocontrast(corrected, cutoff=1)
+            corrected = Image.blend(corrected, expanded, 0.20)
+            adjustments.append("low_contrast_blend=20%")
+
+        if not adjustments:
+            return image
+        values["_adaptive_exposure_applied"] = True
+        values["_adaptive_exposure_summary"] = (
+            "enhance.adaptive_exposure "
+            f"{' '.join(adjustments)} p05={p05} p25={p25} p50={p50} p95={p95} "
+            f"clipped_highlights={clipped_highlights:.1%}"
+        )
+        return corrected
 
     @classmethod
     def _crop_retains_enough_area(

@@ -9,7 +9,6 @@ import {
   FileText,
   Loader2,
   Search,
-  RefreshCw,
   Save,
   Send,
   Sparkles,
@@ -18,7 +17,6 @@ import type { ApiClientOptions } from "@/lib/api"
 import {
   approveSessionContent,
   loadContentSession,
-  regenerateSessionDraft,
   startImageMetadataGeneration,
   saveSessionDraftFields,
   startSessionGeneration,
@@ -189,7 +187,6 @@ export function ContentScreen({
   const [autosave, setAutosave] = useState<OperationState>("idle")
   const [backgroundMetadata, setBackgroundMetadata] = useState(false)
   const [message, setMessage] = useState("")
-  const [agentMessage, setAgentMessage] = useState("")
   const [openSection, setOpenSection] = useState<ContentSectionId | null>("wordpress")
   const [openTrace, setOpenTrace] = useState<string | null>(null)
   const [search, setSearch] = useState("")
@@ -243,7 +240,6 @@ export function ContentScreen({
   )
   const selectedRevisionFields = new Set(selectedRevisionFieldIds)
   const allRevisionFieldsSelected = fields.length > 0 && selectedRevisionFieldIds.length === fields.length
-  const hasQueuedLinkInstruction = Object.values(queuedLinks).some(Boolean)
 
   useEffect(() => {
     onRevisionFieldIdsChange(selectedRevisionFieldIds)
@@ -555,63 +551,6 @@ export function ContentScreen({
     }
   }
 
-  async function handleAgentRegenerate() {
-    if (!auth || !session || (!agentMessage.trim() && !hasQueuedLinkInstruction) || !selectedRevisionFieldIds.length) return
-    setOperation("loading")
-    setActiveAction("revise")
-    setMessage("Sending instruction to content agent...")
-    try {
-      const saved = changedCount ? await handleSave() : await latestSessionAfterAutosave()
-      let job
-      try {
-        job = await regenerateSessionDraft(
-          auth,
-          saved || session,
-          agentMessage.trim(),
-          selectedRevisionFieldIds,
-          selectedLinksForAgent,
-          aiAssistedLinkPlacement,
-        )
-      } catch (error) {
-        if (!isSessionVersionConflict(error)) throw error
-        setMessage("Session updated in the background. Syncing latest version and retrying regeneration...")
-        const latestSession = await reloadLatestSession()
-        job = await regenerateSessionDraft(
-          auth,
-          latestSession,
-          agentMessage.trim(),
-          selectedRevisionFieldIds,
-          selectedLinksForAgent,
-          aiAssistedLinkPlacement,
-        )
-      }
-      sessionStorage.setItem(
-        ACTIVE_JOB_STORAGE,
-        JSON.stringify({
-          jobId: job.job_id,
-          operation: "regenerate",
-          sessionId: session.session_id,
-          at: new Date().toISOString(),
-        }),
-      )
-      setMessage("Regenerating selected fields...")
-      const nextSession = await pollJob(job.job_id)
-      sessionStorage.removeItem(ACTIVE_JOB_STORAGE)
-      onSessionChange(nextSession)
-      setAgentMessage("")
-      setManualRevisionFieldIds([])
-      setLinkRevisionFieldIds({})
-      setQueuedLinks({})
-      setOperation("success")
-      setMessage("Selected fields regenerated.")
-    } catch (error) {
-      setOperation("error")
-      setMessage(error instanceof Error ? error.message : "Could not regenerate draft.")
-    } finally {
-      setActiveAction(null)
-    }
-  }
-
   async function handleApprove() {
     if (!auth || !session) return
     setOperation("loading")
@@ -672,27 +611,6 @@ export function ContentScreen({
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-4">
-          <div className="rounded-lg border border-border bg-card px-3 py-2">
-            <p className="text-xs text-muted-foreground">Session state</p>
-            <p className="mt-1 text-sm font-semibold text-foreground">{session.state}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-card px-3 py-2">
-            <p className="text-xs text-muted-foreground">Shared fields</p>
-            <p className="mt-1 text-sm font-semibold text-foreground">{Object.keys(session.shared_fields || {}).length}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-card px-3 py-2">
-            <p className="text-xs text-muted-foreground">ACF fields</p>
-            <p className="mt-1 text-sm font-semibold text-foreground">{Object.keys(session.acf_source_fields || {}).length}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-card px-3 py-2">
-            <p className="text-xs text-muted-foreground">Unsaved edits</p>
-            <p className="mt-1 text-sm font-semibold text-foreground">
-              {autosave === "loading" ? "Saving..." : autosave === "error" ? "Save failed" : changedCount}
-            </p>
-          </div>
-        </div>
-
         {message && (
           <p
             className={`mt-4 rounded-md px-3 py-2 text-sm ${statusMessageClass(operation, message)}`}
@@ -721,6 +639,14 @@ export function ContentScreen({
                       {CONTENT_SECTIONS[id].label} ({groupedFields[id].length})
                     </button>
                   ))}
+                  <button
+                    id="s2p-content-filter-internal-links"
+                    type="button"
+                    onClick={() => document.getElementById("s2p-content-internal-links")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    className="rounded-full border border-confirm/40 bg-confirm/10 px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-confirm/20"
+                  >
+                    Internal links ({linkCandidates.length})
+                  </button>
                   <button
                     id="s2p-content-toggle-all-revision-fields"
                     type="button"
@@ -788,52 +714,7 @@ export function ContentScreen({
             </section>
 
             <aside className="min-w-0 space-y-4 lg:sticky lg:top-24 lg:self-start">
-              <section className="rounded-xl border border-border bg-card p-4">
-                <h2 className="text-sm font-semibold">Content agent</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {selectedRevisionFieldIds.length} of {fields.length} fields selected for revision.
-                </p>
-                <textarea
-                  id="s2p-content-agent-instruction"
-                  value={agentMessage}
-                  onChange={(event) => setAgentMessage(event.target.value)}
-                  rows={5}
-                  placeholder="Describe what should change in the draft."
-                  className="mt-3 w-full resize-none rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-gold/40"
-                />
-                <label
-                  htmlFor="s2p-content-ai-assisted-placement"
-                  className="mt-3 flex items-start gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground"
-                >
-                  <input
-                    id="s2p-content-ai-assisted-placement"
-                    type="checkbox"
-                    checked={aiAssistedLinkPlacement}
-                    onChange={(event) => setAiAssistedLinkPlacement(event.target.checked)}
-                    disabled={operation === "loading"}
-                    className="mt-0.5 size-4 accent-gold"
-                  />
-                  <span>
-                    <span className="block font-medium text-foreground">AI-assisted placement</span>
-                    <span className="block">
-                      Let the agent place selected links by rewriting text when an exact anchor is not already present.
-                    </span>
-                  </span>
-                </label>
-                <button
-                  id="s2p-content-revise-selected-fields"
-                  type="button"
-                  onClick={handleAgentRegenerate}
-                  title="Revises the draft while preserving its candidates and adding checked unused links with their selected ACF destinations."
-                  disabled={operation === "loading" || (!agentMessage.trim() && !hasQueuedLinkInstruction) || !selectedRevisionFieldIds.length}
-                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ai px-3 py-2.5 text-sm font-semibold text-ai-foreground transition-colors hover:opacity-90 disabled:opacity-60"
-                >
-                  {activeAction === "revise" ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                  Revise selected fields
-                </button>
-              </section>
-
-              <section className="rounded-xl border border-border bg-card p-4">
+              <section id="s2p-content-internal-links" className="scroll-mt-28 rounded-xl border border-border bg-card p-4">
                 <h2 className="text-sm font-semibold">Internal links</h2>
                 <div className="mt-3 space-y-2">
                   {linkCandidates.length ? linkCandidates.map((candidate) => {
@@ -891,18 +772,38 @@ export function ContentScreen({
                     )
                   }) : <p className="text-xs text-muted-foreground">No eligible link candidates.</p>}
                 </div>
+                <label
+                  htmlFor="s2p-content-ai-assisted-placement"
+                  className="mt-4 flex items-start gap-3 rounded-lg border border-ai/40 bg-ai/10 p-3 text-xs text-muted-foreground shadow-sm"
+                >
+                  <input
+                    id="s2p-content-ai-assisted-placement"
+                    type="checkbox"
+                    checked={aiAssistedLinkPlacement}
+                    onChange={(event) => setAiAssistedLinkPlacement(event.target.checked)}
+                    disabled={operation === "loading"}
+                    className="mt-0.5 size-4 shrink-0 accent-ai"
+                  />
+                  <span>
+                    <span className="block font-semibold text-foreground">AI-assisted placement</span>
+                    <span className="mt-0.5 block">
+                      Let the agent place selected links by rewriting text when an exact anchor is not already present.
+                    </span>
+                  </span>
+                </label>
               </section>
 
               {!!Object.keys(session.validation_report || {}).length && (
-                <section className="rounded-xl border border-warn/40 bg-card p-4">
-                  <h2 className="flex items-center gap-2 text-sm font-semibold">
+                <details className="group rounded-xl border border-warn/40 bg-card p-4">
+                  <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold">
                     <AlertTriangle className="size-4 text-warn-foreground" />
                     Validation report
-                  </h2>
+                    <ChevronDown className="ml-auto size-4 transition-transform group-open:rotate-180" />
+                  </summary>
                   <pre className="mt-3 max-h-56 overflow-auto rounded-md bg-background p-3 text-xs text-muted-foreground">
                     {JSON.stringify(session.validation_report, null, 2)}
                   </pre>
-                </section>
+                </details>
               )}
             </aside>
           </div>

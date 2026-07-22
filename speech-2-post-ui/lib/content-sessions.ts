@@ -25,6 +25,7 @@ export type FactSchemaField = {
   field_key: string
   label: string
   required: boolean
+  enum_options?: { value: string; label: string }[]
 }
 
 export type WorkbookStatus = {
@@ -276,11 +277,13 @@ export async function uploadSessionImage(
   session: ContentSession,
   file: File,
   useVision = false,
+  aspectRatio = "4:5",
 ) {
   const form = new FormData()
   form.append("expected_version", String(session.version))
   form.append("kind", "image")
   form.append("use_vision", String(useVision))
+  form.append("aspect_ratio", aspectRatio)
   form.append("upload", file)
 
   return apiRequest<SessionResponse>(`/api/content-sessions/${session.session_id}/uploads`, auth, {
@@ -341,14 +344,26 @@ export async function saveSessionImageContextTranscript(
   )
 }
 
+async function waitForImageJob(auth: ApiClientOptions, job: SessionJob, action: string) {
+  const deadline = Date.now() + 330_000
+  while (true) {
+    if (Date.now() >= deadline) {
+      throw new Error(`${action} timed out after 5½ minutes. The server job may still finish in the background; reload the session before retrying.`)
+    }
+    const current = await loadSessionJob(auth, job.job_id)
+    if (current.status === "complete" && current.session) return { session: current.session }
+    if (current.status === "failed") throw new Error(current.error || `${action} failed.`)
+    if (current.status === "not_found") throw new Error(current.error || `${action} job was not found.`)
+    await new Promise((resolve) => setTimeout(resolve, 3000))
+  }
+}
+
 export async function optimizeSessionImage(
   auth: ApiClientOptions,
   session: ContentSession,
   filename: string,
   prompt: string,
 ) {
-  const timeoutMs = 330_000
-  const deadline = Date.now() + timeoutMs
   const job = await apiRequest<SessionJob>(`/api/content-sessions/${session.session_id}/images/optimize-job`, auth, {
     method: "POST",
     body: {
@@ -357,16 +372,23 @@ export async function optimizeSessionImage(
       prompt,
     },
   })
-  while (true) {
-    if (Date.now() >= deadline) {
-      throw new Error("Image optimization timed out after 5½ minutes. The server job may still finish in the background; reload the session before retrying.")
-    }
-    const current = await loadSessionJob(auth, job.job_id)
-    if (current.status === "complete" && current.session) return { session: current.session }
-    if (current.status === "failed") throw new Error(current.error || "Image optimization failed.")
-    if (current.status === "not_found") throw new Error(current.error || "Image optimization job was not found.")
-    await new Promise((resolve) => setTimeout(resolve, 3000))
-  }
+  return waitForImageJob(auth, job, "Image optimization")
+}
+
+export async function recropSessionImageWithAi(
+  auth: ApiClientOptions,
+  session: ContentSession,
+  filename: string,
+) {
+  const job = await apiRequest<SessionJob>(
+    `/api/content-sessions/${session.session_id}/images/recrop-job?filename=${encodeURIComponent(filename)}`,
+    auth,
+    {
+      method: "POST",
+      body: { expected_version: session.version },
+    },
+  )
+  return waitForImageJob(auth, job, "AI recropping")
 }
 
 export async function restoreSessionImageOriginal(
