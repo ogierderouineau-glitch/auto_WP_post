@@ -99,6 +99,8 @@ export function RecordingWidget({
   session,
   activeScreen,
   open,
+  submitRequest,
+  onSubmittingChange,
   onOpenChange,
   onSessionChange,
   onNavigateFacts,
@@ -117,6 +119,8 @@ export function RecordingWidget({
   session: ContentSession | null
   activeScreen: ActiveScreen
   open: boolean
+  submitRequest: number
+  onSubmittingChange: (submitting: boolean) => void
   onOpenChange: (open: boolean) => void
   onSessionChange: (session: ContentSession) => void
   onNavigateFacts: () => void
@@ -146,6 +150,10 @@ export function RecordingWidget({
     (link) => link.revision_requested === "true",
   )
   const speechStructure = voiceInstructionItems(voiceInstructions)
+
+  useEffect(() => {
+    onSubmittingChange(submitting)
+  }, [onSubmittingChange, submitting])
 
   function setSyncedTranscript(value: string) {
     transcriptRef.current = value
@@ -187,6 +195,9 @@ export function RecordingWidget({
       } else {
         const nextTranscript = appendText(transcriptRef.current, text)
         setSyncedTranscript(nextTranscript)
+        // The transcript now needs the screen-specific Send action in the
+        // popup, so reveal it when recording started from the compact control.
+        onOpenChange(true)
       }
       if (activeScreen !== "media" || !selectedPictureId) setStatus("Recording transcribed.")
     } catch (error) {
@@ -203,6 +214,8 @@ export function RecordingWidget({
         ),
       )
       setStatus("Transcription failed.")
+      // Retry and delete controls live in the popup.
+      onOpenChange(true)
     }
   }
 
@@ -286,7 +299,7 @@ export function RecordingWidget({
   }
 
   async function submitToAgent() {
-    if (!auth || !session) return
+    if (!auth || !session || submitting) return
     if (activeScreen === "wordpress") return
     if (items.some((item) => item.status === "transcribing")) {
       setStatus("Wait for all recordings to finish transcribing.")
@@ -355,6 +368,11 @@ export function RecordingWidget({
     }
   }
 
+  useEffect(() => {
+    if (!submitRequest) return
+    void submitToAgent()
+  }, [submitRequest])
+
   return (
     <div className="fixed bottom-20 right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2">
       {open && (
@@ -396,23 +414,13 @@ export function RecordingWidget({
             ))}
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <button
-              id="s2p-recording-agent-record"
-              type="button"
-              onClick={recording ? stopRecording : startRecording}
-              disabled={!session}
-              className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-card px-3 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:opacity-60"
-            >
-              {recording ? <Square className="size-4 text-destructive" /> : <Mic className="size-4 text-destructive" />}
-              {recording ? "Stop" : "Record"}
-            </button>
+          <div className="mt-3">
             <button
               id="s2p-recording-agent-submit"
               type="button"
               onClick={submitToAgent}
               disabled={submitting || !session || (activeScreen === "facts" && !selectedFactKeys.length) || (activeScreen === "content" && (!hasContentInstruction || !selectedContentFieldIds.length))}
-              className="inline-flex items-center justify-center gap-2 rounded-md bg-ai px-3 py-2.5 text-sm font-semibold text-ai-foreground transition-colors hover:opacity-90 disabled:opacity-60"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-ai px-3 py-2.5 text-sm font-semibold text-ai-foreground transition-colors hover:opacity-90 disabled:opacity-60"
             >
               {submitting ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
               {copy.action}
@@ -508,16 +516,44 @@ export function RecordingWidget({
         </section>
       )}
 
-      <button
-        id="s2p-recording-agent-toggle"
-        type="button"
-        onClick={() => onOpenChange(!open)}
-        className="inline-flex h-14 items-center justify-center gap-2 rounded-full bg-gold px-5 text-sm font-bold text-gold-foreground shadow-xl ring-2 ring-background transition-transform hover:scale-105"
-        aria-label="Open recording agent"
-      >
-        {recording ? <CircleDot className="size-5 animate-pulse text-destructive" /> : <Bot className="size-5" />}
-        {open ? "Close agent" : "Ask agent"}
-      </button>
+      <div className="flex items-center gap-2" aria-label="Agent and recording controls">
+        <button
+          id="s2p-recording-agent-record"
+          type="button"
+          onClick={recording ? stopRecording : startRecording}
+          disabled={!session}
+          aria-label={recording ? "Stop recording" : "Start recording"}
+          aria-pressed={recording}
+          className={[
+            "inline-flex h-11 items-center justify-center gap-2 rounded-full px-3.5 text-sm font-bold shadow-xl ring-2 ring-background transition-all disabled:opacity-50",
+            recording
+              ? "animate-pulse bg-destructive text-white hover:brightness-95"
+              : "border border-border bg-card text-foreground hover:bg-muted",
+          ].join(" ")}
+        >
+          {recording ? (
+            <>
+              <CircleDot className="size-4" aria-hidden="true" />
+              <span>Recording</span>
+              <span className="mx-0.5 h-5 w-px bg-white/40" aria-hidden="true" />
+              <Square className="size-3.5 fill-current" aria-hidden="true" />
+              <span>Stop</span>
+            </>
+          ) : (
+            <Mic className="size-5 text-destructive" aria-hidden="true" />
+          )}
+        </button>
+        <button
+          id="s2p-recording-agent-toggle"
+          type="button"
+          onClick={() => onOpenChange(!open)}
+          className="inline-flex h-14 items-center justify-center gap-2 rounded-full bg-gold px-5 text-sm font-bold text-gold-foreground shadow-xl ring-2 ring-background transition-transform hover:scale-105"
+          aria-label={open ? "Close recording agent" : "Open recording agent"}
+        >
+          <Bot className="size-5" aria-hidden="true" />
+          {open ? "Close agent" : "Ask agent"}
+        </button>
+      </div>
     </div>
   )
 }

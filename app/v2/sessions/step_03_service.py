@@ -1074,7 +1074,11 @@ class ContentSessionService:
                 if str(operation).strip()
             ]
             operations.append("vision_focal_recrop")
-            processed_images.append({**item, "operations": operations[-20:]})
+            processed_images.append({
+                **item,
+                "operations": operations[-20:],
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
         return self.repository.save(
             working.model_copy(
                 update={

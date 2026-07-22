@@ -85,6 +85,7 @@ export type MediaReference = {
 export type SessionImage = MediaReference & {
   processed_filename?: string
   processed_path?: string
+  processed_revision?: string
   operations: string[]
   metadata: Record<string, unknown>
   context_transcript: string
@@ -681,6 +682,7 @@ export function sessionImages(session: ContentSession): SessionImage[] {
       ...reference,
       processed_filename: typeof processed?.filename === "string" ? processed.filename : undefined,
       processed_path: typeof processed?.path === "string" ? processed.path : undefined,
+      processed_revision: typeof processed?.updated_at === "string" ? processed.updated_at : undefined,
       operations: Array.isArray(processed?.operations)
         ? processed.operations.map((item) => String(item))
         : [],

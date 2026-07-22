@@ -91,6 +91,8 @@ export default function Page() {
   const [sessionModalOpen, setSessionModalOpen] = useState(false)
   const [otherFunctionsOpen, setOtherFunctionsOpen] = useState(false)
   const [agentOpen, setAgentOpen] = useState(false)
+  const [agentSubmitRequest, setAgentSubmitRequest] = useState(0)
+  const [agentSubmitting, setAgentSubmitting] = useState(false)
   const [loading, setLoading] = useState(false)
   const [statusText, setStatusText] = useState("Starting")
   const [error, setError] = useState("")
@@ -562,6 +564,8 @@ export default function Page() {
             onPictureTranscriptChange={handlePictureTranscriptChange}
             onSelectedMediaChange={handleSelectedMediaChange}
             onOpenAgent={() => setAgentOpen(true)}
+            onExtractFacts={() => setAgentSubmitRequest((request) => request + 1)}
+            extractFactsLoading={agentSubmitting}
             pictureTranscriptSavingImmediately={pictureTranscriptSavingImmediately}
           />
         ) : screen === "facts" ? (
@@ -602,6 +606,8 @@ export default function Page() {
           session={session}
           activeScreen={screen}
           open={agentOpen}
+          submitRequest={agentSubmitRequest}
+          onSubmittingChange={setAgentSubmitting}
           onOpenChange={setAgentOpen}
           onSessionChange={handleSessionChange}
           onNavigateFacts={() => setScreen("facts")}

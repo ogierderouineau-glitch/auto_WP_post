@@ -322,6 +322,8 @@ export function MediaScreen({
   onPictureTranscriptChange,
   onSelectedMediaChange,
   onOpenAgent,
+  onExtractFacts,
+  extractFactsLoading,
   pictureTranscriptSavingImmediately,
 }: {
   auth: ApiClientOptions | null
@@ -331,6 +333,8 @@ export function MediaScreen({
   onPictureTranscriptChange: (value: string) => void
   onSelectedMediaChange: (media: SelectedMediaContext | null) => void
   onOpenAgent: () => void
+  onExtractFacts: () => void
+  extractFactsLoading: boolean
   pictureTranscriptSavingImmediately: boolean
 }) {
   const images = useMemo(() => (session ? sessionImages(session) : []), [session])
@@ -708,10 +712,10 @@ export function MediaScreen({
   function recropWithAi() {
     if (!auth || !session || !selectedImage) return
     void runAction(async (currentSession) => {
-      setMessage("Finding the focal point and recropping...")
+      setMessage("Analyzing the original image and finding a new focal point...")
       const data = await recropSessionImageWithAi(auth, currentSession, selectedOriginalFilename)
       return data.session
-    }, "Image recropped around the AI focal point.")
+    }, "Original image reanalyzed and recropped around the AI focal point.")
   }
 
   function submitImageOptimization() {
@@ -848,6 +852,16 @@ export function MediaScreen({
               </span>
             </span>
           </button>
+          <button
+            id="s2p-media-extract-facts"
+            type="button"
+            onClick={onExtractFacts}
+            disabled={!session || extractFactsLoading}
+            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-confirm px-3 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:opacity-50"
+          >
+            {extractFactsLoading ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <FileText className="size-4" aria-hidden="true" />}
+            {extractFactsLoading ? "Extracting facts..." : "Extract facts"}
+          </button>
 
           <div className="mt-3 flex items-center gap-2">
             <button
@@ -909,7 +923,7 @@ export function MediaScreen({
                           session={session}
                           filename={image.processed_filename || image.filename}
                           label={image.filename}
-                          revision={image.operations.join("|")}
+                          revision={`${image.processed_revision || ""}|${image.operations.join("|")}`}
                         />
                         <span className="absolute left-1 top-1 rounded bg-topbar/80 px-1 text-[10px] font-medium text-topbar-foreground">
                           {pendingImages.length + index + 1}
@@ -1016,7 +1030,7 @@ export function MediaScreen({
                       session={session}
                       filename={selectedFilename}
                       label="Processed"
-                      revision={selectedImage.operations.join("|")}
+                      revision={`${selectedImage.processed_revision || ""}|${selectedImage.operations.join("|")}`}
                     />
                   </div>
                 </div>
@@ -1054,7 +1068,7 @@ export function MediaScreen({
                     filename={mobilePreviewOriginal ? selectedImage.filename : selectedFilename}
                     original={mobilePreviewOriginal}
                     label={mobilePreviewOriginal ? "Original" : selectedImage.processed_filename ? "Processed" : "Original"}
-                    revision={mobilePreviewOriginal ? "" : selectedImage.operations.join("|")}
+                    revision={mobilePreviewOriginal ? "" : `${selectedImage.processed_revision || ""}|${selectedImage.operations.join("|")}`}
                   />
                 </div>
 
@@ -1067,7 +1081,7 @@ export function MediaScreen({
                         type="button"
                         onClick={recropWithAi}
                         disabled={operation === "loading" || !selectedImage.processed_filename}
-                        title="Use AI Vision to find the subject, then overwrite the processed image with a fresh focal-point crop."
+                        title="Analyze the immutable original upload with AI Vision, then replace the processed image with a fresh focal-point crop."
                         className="inline-flex items-center gap-2 rounded-md border border-gold/40 bg-gold/15 px-3.5 py-2.5 text-sm font-semibold text-gold transition-colors hover:bg-gold/25 disabled:opacity-60"
                       >
                         <Crop className="size-4" aria-hidden="true" />
