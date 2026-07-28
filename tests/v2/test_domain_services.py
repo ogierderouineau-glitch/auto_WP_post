@@ -65,6 +65,34 @@ class MetadataOnlyLanguageModel:
         })
 
 
+class ContentQualityLanguageModel:
+    last_usage: dict[str, Any] | None = None
+
+    def structured(self, *, task: str, context: dict[str, Any], schema: type[Any]) -> Any:
+        if task != "content_quality_check":
+            raise AssertionError(f"Unexpected fake model task: {task}")
+        self.last_usage = {
+            "service": "openai_text",
+            "call_name": task,
+            "model": "fake-reviewer",
+            "prompt_tokens": 5,
+            "completion_tokens": 3,
+            "total_tokens": 8,
+            "estimated_cost_usd": None,
+        }
+        return schema.model_validate({
+            "rating": "needs_polish",
+            "summary": "One phrase sounds generic.",
+            "findings": [{
+                "field_id": "shared:title",
+                "category": "generic_marketing",
+                "severity": "medium",
+                "explanation": "The wording is interchangeable.",
+                "suggestion": "Use a concrete detail from the confirmed facts.",
+            }],
+        })
+
+
 class FakeObjectStorage:
     def __init__(self) -> None:
         self.downloads: list[tuple[str, Path]] = []
@@ -148,6 +176,69 @@ class PartialUpdateDiffTests(unittest.TestCase):
         self.assertEqual(fields["wordpress"], set())
         self.assertEqual(fields["meta"], set())
         self.assertEqual(fields["acf"], set())
+
+    def test_materialized_output_path_does_not_mark_media_as_changed(self) -> None:
+        current = {
+            "wordpress": {},
+            "meta": {},
+            "acf": {},
+            "media": [{"media_id": "image-1", "path": "/stored/image.webp"}],
+        }
+        previous = {
+            **current,
+            "media": [{
+                "media_id": "image-1",
+                "path": "/stored/image.webp",
+                "output": "/temporary/image.webp",
+            }],
+        }
+
+        fields = ContentSessionService._wordpress_payload_diff_fields(current, previous)
+
+        self.assertNotIn("media", fields["wordpress"])
+
+
+class ContentQualityCheckTests(unittest.TestCase):
+    def test_review_is_saved_without_rewriting_draft_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = FileSessionRepository(temporary)
+            session = ContentSession(
+                session_id="session-1",
+                user_id="user-1",
+                post_type_key="event",
+                state="needs_review",
+                workbook_hash="hash",
+                language="de-DE",
+                shared_fields={"title": "Ein unvergessliches Erlebnis"},
+                wordpress_payload={"wordpress": {"title": "Ein unvergessliches Erlebnis"}},
+                generation_trace={
+                    "quality_check": {
+                        "rating": "natural",
+                        "summary": "Previous result",
+                        "findings": [],
+                    }
+                },
+            )
+            session = repository.create(session)
+            model = ContentQualityLanguageModel()
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(SimpleNamespace()),
+                repository=repository,
+                revision_language_model=model,
+            )
+
+            reviewed = service.review_content_quality(
+                session.session_id,
+                expected_version=session.version,
+            )
+
+            report = reviewed.generation_trace["quality_check"]
+            self.assertEqual(report["rating"], "needs_polish")
+            self.assertNotEqual(report["summary"], "Previous result")
+            self.assertEqual(report["findings"][0]["field_id"], "shared:title")
+            self.assertEqual(reviewed.shared_fields, session.shared_fields)
+            self.assertEqual(reviewed.ai_usage["total_tokens"], 8)
+
 
 class InternalLinkInjectionTests(unittest.TestCase):
     def test_internal_links_are_injected_once_into_body_copy(self) -> None:
@@ -520,6 +611,90 @@ class InternalLinkInjectionTests(unittest.TestCase):
 
 
 class FeaturedImageMetadataRegressionTests(unittest.TestCase):
+    def test_video_metadata_reuses_image_metadata_rules_and_task(self) -> None:
+        fields = tuple(
+            ImageMetadataField(
+                sheet_row=index,
+                field_key=field_key,
+                destination_type="meta",
+                destination_key=field_key,
+                description_de=field_key,
+                required=True,
+                value_type="text",
+                generation_stage="draft",
+                source_mode="generated",
+                enabled=True,
+            )
+            for index, field_key in enumerate(
+                ("image_title", "image_caption", "image_description"),
+                1,
+            )
+        )
+        snapshot = SimpleNamespace(
+            image_metadata_fields=fields,
+            agent_instructions=(),
+            image_metadata_rules=(),
+            acf_fields=(),
+        )
+
+        class VideoMetadataModel:
+            last_usage = None
+            task = ""
+            context: dict[str, Any] = {}
+
+            def structured(self, *, task: str, context: dict[str, Any], schema: type[Any]) -> Any:
+                self.task = task
+                self.context = json.loads(context["messages"][1]["content"])["context"]
+                return schema.model_validate({"images": [{
+                    "media_id": "video-1",
+                    "image_title": "Titel",
+                    "image_caption": "Bildunterschrift",
+                    "image_description": "Beschreibung",
+                }]})
+
+        model = VideoMetadataModel()
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            state="needs_review",
+            workbook_hash="hash",
+            language="de-DE",
+            video_refs=[MediaReference(
+                media_id="video-1",
+                filename="clip.mp4",
+                storage_uri="local://clip.mp4",
+                content_type="video/mp4",
+                size_bytes=1,
+            )],
+            processed_videos=[{
+                "media_id": "video-1",
+                "poster_filename": "clip-poster.jpg",
+                "poster_path": "local://clip-poster.jpg",
+            }],
+            video_context_transcripts={"video-1": "Das Video zeigt den Empfang."},
+        )
+        service = ContentSessionService(
+            knowledge=StaticKnowledge(snapshot),
+            repository=FileSessionRepository(tempfile.mkdtemp()),
+            language_model=model,
+        )
+
+        updated = service._generate_missing_video_metadata(
+            snapshot,
+            session,
+            overwrite_existing=True,
+        )
+
+        self.assertEqual(model.task, "image_metadata_batch")
+        self.assertEqual(
+            model.context["images"][0]["image_context_transcript"],
+            "Das Video zeigt den Empfang.",
+        )
+        self.assertEqual(updated.video_metadata[0]["video_title"], "Titel")
+        self.assertEqual(updated.video_metadata[0]["video_caption"], "Bildunterschrift")
+        self.assertEqual(updated.video_metadata[0]["video_description"], "Beschreibung")
+
     def test_metadata_overwrite_preserves_selected_featured_image(self) -> None:
         snapshot = SimpleNamespace(
             image_metadata_fields=(
@@ -1053,6 +1228,49 @@ class DomainServiceTests(unittest.TestCase):
         self.assertIn("<ul>", payload.acf["fakten"])
         self.assertIn("<strong>Event:</strong> Sommerfest", payload.acf["fakten"])
         self.assertNotIn("&lt;li&gt;", payload.acf["fakten"])
+
+    def test_payload_maps_selected_confirmed_fact_to_generated_variables_meta(self) -> None:
+        payload = PayloadBuilder().build(
+            self.snapshot,
+            post_type_key="bartender",
+            shared_values={},
+            acf_source_values={},
+            confirmed_facts={
+                "staff_name": FactValue(
+                    value="Anna Schmidt",
+                    source="manual_text",
+                    confidence=1,
+                    confirmed=True,
+                ),
+                "unselected_fact": FactValue(
+                    value="Must not be sent",
+                    source="manual_text",
+                    confidence=1,
+                    confirmed=True,
+                ),
+            },
+        )
+        self.assertEqual(
+            payload.meta["_generated_variables"],
+            {"staff_name": "Anna Schmidt"},
+        )
+
+    def test_payload_omits_unconfirmed_shortcode_variable(self) -> None:
+        payload = PayloadBuilder().build(
+            self.snapshot,
+            post_type_key="bartender",
+            shared_values={},
+            acf_source_values={},
+            confirmed_facts={
+                "staff_name": FactValue(
+                    value="Anna Schmidt",
+                    source="transcript",
+                    confidence=0.8,
+                    confirmed=False,
+                ),
+            },
+        )
+        self.assertNotIn("_generated_variables", payload.meta)
 
     def test_aggregated_paragraphs_preserve_safe_internal_links_and_escape_other_html(self) -> None:
         payload = PayloadBuilder().build(

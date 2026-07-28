@@ -14,8 +14,11 @@ from app.v2.knowledge_base.step_01_models import WorkbookSnapshot, WorkbookVersi
 from app.v2.knowledge_base.step_02_loader import WorkbookLoader
 from app.v2.knowledge_base.step_03_validator import WorkbookValidator
 from app.v2.knowledge_base.step_04_service import KnowledgeBaseService
+from app.v2.payloads.step_02_builder import PayloadBuilder
 from app.v2.workflow.step_03_registry import WORKFLOW_HANDLER_METHODS
 from app.v2.api import step_03_container
+from app.v2.context.step_01_builder import GenerationContextBuilder
+from app.v2.models.step_01_session import ContentSession
 
 WORKBOOK = Path(
     os.getenv(
@@ -112,6 +115,116 @@ class WorkbookTests(unittest.TestCase):
         configured = [row for row in snapshot.shared_fields if row.source_mode == "configured"]
         self.assertTrue(configured)
         self.assertTrue(all(not row.include_in_ai_schema for row in configured))
+
+    def test_post_shortcode_variables_load_as_input_fact_field_keys(self) -> None:
+        snapshot = self.validator.validate(self.loader.load(WORKBOOK))
+        bartender = snapshot.post_type("bartender")
+        self.assertIsNotNone(bartender)
+        self.assertEqual(bartender.post_shortcode_variables, ("staff_name",))
+        staff_name = next(
+            row
+            for row in snapshot.acf_fields
+            if row.post_type_key == "bartender" and row.field_key == "staff_name"
+        )
+        self.assertEqual(staff_name.field_role, "input_fact")
+
+    def test_bartender_taxonomy_configuration_loads_with_normalized_slug(self) -> None:
+        snapshot = self.validator.validate(self.loader.load(WORKBOOK))
+        bartender = snapshot.post_type("bartender")
+        self.assertIsNotNone(bartender)
+        self.assertEqual(bartender.wp_taxonomy, "barkeeper")
+        self.assertEqual(bartender.taxonomy_term_source, "acf:staff_name")
+        self.assertTrue(bartender.assign_taxonomy_to_media)
+
+        payload = PayloadBuilder().build(
+            snapshot,
+            post_type_key="bartender",
+            shared_values={},
+            acf_source_values={"staff_name": "Florent"},
+        )
+        self.assertEqual(payload.taxonomies, {"barkeeper": ["Florent"]})
+        self.assertEqual(payload.media_taxonomies, ["barkeeper"])
+
+    def test_reusable_prompt_guidance_resolves_for_selected_field(self) -> None:
+        snapshot = self.validator.validate(self.loader.load(WORKBOOK))
+        story_title = next(
+            row
+            for row in snapshot.acf_fields
+            if row.post_type_key == "bartender" and row.field_key == "story_title"
+        )
+        self.assertEqual(
+            story_title.prompt_guidance_keys,
+            ("title_highlight_braces", "avoid_generic_intro", "concise_heading"),
+        )
+        session = ContentSession(
+            session_id="session",
+            user_id="user",
+            post_type_key="bartender",
+            state="ready_to_generate",
+            workbook_hash=snapshot.version.sha256,
+            language="de",
+        )
+        context = GenerationContextBuilder().build(
+            snapshot=snapshot,
+            task="content_generation",
+            post_type_key="bartender",
+            session=session,
+            field_keys=["story_title"],
+        )
+        self.assertEqual(
+            [row["guidance_key"] for row in context.fields["story_title"].prompt_guidance],
+            ["title_highlight_braces", "avoid_generic_intro", "concise_heading"],
+        )
+
+    def test_unknown_reusable_prompt_guidance_fails_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            copy = Path(temporary) / "bad-prompt-guidance.xlsm"
+            copy.write_bytes(WORKBOOK.read_bytes())
+            workbook = load_workbook(copy, keep_vba=True)
+            sheet = workbook["ACF_fields_schema"]
+            field_column = next(cell.column for cell in sheet[1] if cell.value == "field_key")
+            guidance_column = next(
+                cell.column for cell in sheet[1] if cell.value == "prompt_guidance_keys"
+            )
+            row = next(
+                index
+                for index in range(2, sheet.max_row + 1)
+                if sheet.cell(index, field_column).value == "story_title"
+            )
+            sheet.cell(row, guidance_column).value = "missing_guidance"
+            workbook.save(copy)
+
+            with self.assertRaises(InvalidWorkbookError) as raised:
+                self.validator.validate(self.loader.load(copy))
+
+            codes = {detail.error_code for detail in raised.exception.details}
+            self.assertIn("unknown_prompt_guidance", codes)
+
+    def test_invalid_post_shortcode_variable_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            copy = Path(temporary) / "bad-shortcode-variable.xlsm"
+            copy.write_bytes(WORKBOOK.read_bytes())
+            workbook = load_workbook(copy, keep_vba=True)
+            sheet = workbook["post_types"]
+            post_type_column = next(
+                cell.column for cell in sheet[1] if cell.value == "post_type_key"
+            )
+            variables_column = next(
+                cell.column
+                for cell in sheet[1]
+                if cell.value == "post shortcode variables"
+            )
+            row = next(
+                index
+                for index in range(2, sheet.max_row + 1)
+                if sheet.cell(index, post_type_column).value == "bartender"
+            )
+            sheet.cell(row, variables_column).value = "not_an_input_fact"
+            workbook.save(copy)
+            with self.assertRaises(InvalidWorkbookError) as raised:
+                self.validator.validate(self.loader.load(copy))
+            codes = {detail.error_code for detail in raised.exception.details}
+            self.assertIn("invalid_post_shortcode_variable", codes)
 
     def test_duplicate_active_url_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

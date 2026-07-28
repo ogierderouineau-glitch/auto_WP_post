@@ -24,6 +24,7 @@ export type PostTypeOption = {
 export type FactSchemaField = {
   field_key: string
   label: string
+  description_de?: string
   required: boolean
   enum_options?: { value: string; label: string }[]
 }
@@ -36,6 +37,8 @@ export type WorkbookStatus = {
   post_types: PostTypeOption[]
   fact_schema: FactSchemaField[]
   acf_fields?: AcfFieldOption[]
+  prompt_guidance?: PromptGuidanceOption[]
+  html_patterns?: HtmlPatternOption[]
   internal_link_candidates?: InternalLinkCandidate[]
   internal_link_acf_fields?: InternalLinkAcfField[]
   generation_settings?: GenerationSettingsOptions
@@ -65,6 +68,21 @@ export type AcfFieldOption = {
   field_key: string
   acf_field_name: string
   label: string
+  value_type?: string
+  prompt_guidance_keys?: string[]
+  html_pattern_keys?: string[]
+}
+
+export type PromptGuidanceOption = {
+  guidance_key: string
+  instruction_de: string
+}
+
+export type HtmlPatternOption = {
+  pattern_key: string
+  label_de: string
+  description_de?: string
+  template_html: string
 }
 
 export type FactValue = {
@@ -93,10 +111,19 @@ export type SessionImage = MediaReference & {
   is_featured: boolean
 }
 
+export type SessionVideo = MediaReference & {
+  poster_filename?: string
+  processed_revision?: string
+  operations: string[]
+  metadata: Record<string, unknown>
+  context_transcript: string
+}
+
 export type SelectedMediaContext = {
   mediaId: string
   filename: string
   displayName: string
+  kind?: "image" | "video"
 }
 
 export type ContentSession = {
@@ -109,6 +136,7 @@ export type ContentSession = {
   manual_text: string
   audio_refs: MediaReference[]
   image_refs: MediaReference[]
+  video_refs: MediaReference[]
   transcript: string
   extracted_facts: Record<string, FactValue>
   confirmed_facts: Record<string, FactValue>
@@ -118,8 +146,11 @@ export type ContentSession = {
   selected_links: Record<string, string>[]
   eligible_link_ids: string[]
   processed_images: Record<string, unknown>[]
+  processed_videos: Record<string, unknown>[]
   image_metadata: Record<string, unknown>[]
+  video_metadata: Record<string, unknown>[]
   image_context_transcripts: Record<string, string>
+  video_context_transcripts: Record<string, string>
   image_metadata_vision: Record<string, boolean>
   wordpress_payload: Record<string, unknown>
   published_wordpress_payload: Record<string, unknown>
@@ -291,6 +322,47 @@ export async function uploadSessionImage(
     method: "POST",
     body: form,
   })
+}
+
+export async function uploadSessionVideo(
+  auth: ApiClientOptions,
+  session: ContentSession,
+  file: File,
+) {
+  const form = new FormData()
+  form.append("expected_version", String(session.version))
+  form.append("kind", "video")
+  form.append("use_vision", "false")
+  form.append("upload", file)
+  return apiRequest<SessionResponse>(`/api/content-sessions/${session.session_id}/uploads`, auth, {
+    method: "POST",
+    body: form,
+  })
+}
+
+export async function saveSessionVideoMetadata(
+  auth: ApiClientOptions,
+  session: ContentSession,
+  filename: string,
+  metadata: Record<string, unknown>,
+  transcript: string,
+) {
+  return apiRequest<SessionResponse>(`/api/content-sessions/${session.session_id}/video-metadata`, auth, {
+    method: "PUT",
+    body: { expected_version: session.version, filename, metadata, transcript },
+  })
+}
+
+export async function removeSessionVideo(
+  auth: ApiClientOptions,
+  session: ContentSession,
+  filename: string,
+) {
+  return apiRequest<SessionResponse>(
+    `/api/content-sessions/${session.session_id}/media/videos/${encodeURIComponent(filename)}`,
+    auth,
+    { method: "DELETE", body: { expected_version: session.version } },
+  )
 }
 
 export async function setSessionFeaturedImage(
@@ -515,6 +587,16 @@ export async function startImageMetadataGeneration(
   })
 }
 
+export async function startContentQualityCheck(
+  auth: ApiClientOptions,
+  session: ContentSession,
+) {
+  return apiRequest<SessionJob>(`/api/content-sessions/${session.session_id}/quality-check-job`, auth, {
+    method: "POST",
+    body: { expected_version: session.version },
+  })
+}
+
 export async function loadSessionJob(auth: ApiClientOptions, jobId: string, signal?: AbortSignal) {
   return apiRequest<SessionJob>(`/api/content-sessions/jobs/${jobId}`, auth, {
     json: false,
@@ -694,7 +776,31 @@ export function sessionImages(session: ContentSession): SessionImage[] {
   })
 }
 
+export function sessionVideos(session: ContentSession): SessionVideo[] {
+  const processed = new Map(
+    (session.processed_videos || []).map((item) => [String(item.media_id || ""), item]),
+  )
+  const metadata = new Map(
+    (session.video_metadata || []).map((item) => [String(item.media_id || ""), item]),
+  )
+  return (session.video_refs || []).map((reference) => {
+    const row = processed.get(reference.media_id) || {}
+    return {
+      ...reference,
+      poster_filename: typeof row.poster_filename === "string" ? row.poster_filename : undefined,
+      processed_revision: typeof row.updated_at === "string" ? row.updated_at : undefined,
+      operations: Array.isArray(row.operations) ? row.operations.map(String) : [],
+      metadata: metadata.get(reference.media_id) || {},
+      context_transcript: (session.video_context_transcripts || {})[reference.media_id] || "",
+    }
+  })
+}
+
 export function imageUrl(session: ContentSession, filename: string, original = false) {
   const suffix = original ? "/original" : ""
   return `/backend/api/content-sessions/${session.session_id}/media/images/${encodeURIComponent(filename)}${suffix}?v=${session.version}`
+}
+
+export function videoUrl(session: ContentSession, filename: string) {
+  return `/backend/api/content-sessions/${session.session_id}/media/videos/${encodeURIComponent(filename)}?v=${session.version}`
 }

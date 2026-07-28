@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 class WorkbookRow(BaseModel):
@@ -29,6 +29,27 @@ class PostTypeConfig(WorkbookRow):
     description_de: str
     user_selectable: bool
     voice_instructions: str | None = None
+    post_shortcode_variables: tuple[str, ...] = Field(
+        default=(),
+        validation_alias=AliasChoices(
+            "post shortcode variables",
+            "post_shortcode_variables",
+        ),
+    )
+    wp_taxonomy: str | None = None
+    taxonomy_term_source: str | None = None
+    assign_taxonomy_to_media: bool = False
+
+    @field_validator("wp_taxonomy", mode="before")
+    @classmethod
+    def normalize_taxonomy_slug(cls, value: Any) -> str | None:
+        slug = str(value or "").strip().lower()
+        return slug or None
+
+    @field_validator("assign_taxonomy_to_media", mode="before")
+    @classmethod
+    def normalize_optional_boolean(cls, value: Any) -> bool:
+        return False if value is None else bool(value)
 
 
 class SharedFieldSchema(WorkbookRow):
@@ -49,6 +70,7 @@ class SharedFieldSchema(WorkbookRow):
     include_in_ai_schema: bool
     include_in_payload: bool
     example: Any = None
+    prompt_guidance_keys: tuple[str, ...] = ()
     validation_rule: str | None = None
     enabled: bool
 
@@ -74,6 +96,7 @@ class ACFFieldSchema(WorkbookRow):
     source_mode: str
     source_fact_keys: tuple[str, ...] = ()
     guidance_de: str | None = None
+    prompt_guidance_keys: tuple[str, ...] = ()
     example: Any = None
     generation_condition: str | None = None
     include_in_image_metadata_context: bool | None = None
@@ -84,6 +107,22 @@ class ACFFieldSchema(WorkbookRow):
     allow_internal_links: bool | None = False
     max_internal_links: int | None = None
     internal_link_priority: str | None = None
+    html_pattern_keys: tuple[str, ...] = ()
+
+
+class PromptGuidance(WorkbookRow):
+    guidance_key: str
+    instruction_de: str
+    enabled: bool
+
+
+class HTMLPattern(WorkbookRow):
+    pattern_key: str
+    label_de: str
+    description_de: str
+    allowed_field_keys: tuple[str, ...] = ()
+    template_html: str
+    enabled: bool
 
 
 class BlueprintRow(WorkbookRow):
@@ -335,6 +374,8 @@ class WorkbookSnapshot(BaseModel):
     post_types: tuple[PostTypeConfig, ...]
     shared_fields: tuple[SharedFieldSchema, ...]
     acf_fields: tuple[ACFFieldSchema, ...]
+    prompt_guidance: tuple[PromptGuidance, ...] = ()
+    html_patterns: tuple[HTMLPattern, ...] = ()
     blueprint: tuple[BlueprintRow, ...]
     seo_rules: tuple[SEORule, ...]
     style_rules: tuple[StyleRule, ...]

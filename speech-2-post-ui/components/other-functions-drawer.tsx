@@ -470,6 +470,8 @@ export function OtherFunctionsDrawer({
                       {entry.details?.model ? ` · ${String(entry.details.model)}` : ""}
                       {entry.details?.reasoning_effort ? ` · reasoning ${String(entry.details.reasoning_effort)}` : ""}
                       {entry.details?.generation_mode ? ` · ${String(entry.details.generation_mode)}` : ""}
+                      {entry.details?.rating ? ` · ${String(entry.details.rating).replace("_", " ")}` : ""}
+                      {typeof entry.details?.finding_count === "number" ? ` · ${entry.details.finding_count} finding(s)` : ""}
                     </p>
                     <OperationModelCalls operationId={entry.operation_id} details={entry.details || {}} />
                     {entry.error ? <p className="mt-1 text-xs text-destructive">{entry.error}</p> : null}

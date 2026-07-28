@@ -64,6 +64,7 @@ class ContentSession(BaseModel):
     manual_text: str = ""
     audio_refs: list[MediaReference] = Field(default_factory=list)
     image_refs: list[MediaReference] = Field(default_factory=list)
+    video_refs: list[MediaReference] = Field(default_factory=list)
     transcript: str = ""
     extracted_facts: dict[str, FactValue] = Field(default_factory=dict)
     confirmed_facts: dict[str, FactValue] = Field(default_factory=dict)
@@ -76,8 +77,11 @@ class ContentSession(BaseModel):
     selected_links: list[dict[str, str]] = Field(default_factory=list)
     eligible_link_ids: list[str] = Field(default_factory=list)
     processed_images: list[dict[str, Any]] = Field(default_factory=list)
+    processed_videos: list[dict[str, Any]] = Field(default_factory=list)
     image_metadata: list[dict[str, Any]] = Field(default_factory=list)
+    video_metadata: list[dict[str, Any]] = Field(default_factory=list)
     image_context_transcripts: dict[str, str] = Field(default_factory=dict)
+    video_context_transcripts: dict[str, str] = Field(default_factory=dict)
     image_metadata_vision: dict[str, bool] = Field(default_factory=dict)
     wordpress_payload: dict[str, Any] = Field(default_factory=dict)
     published_wordpress_payload: dict[str, Any] = Field(default_factory=dict)

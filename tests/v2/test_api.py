@@ -164,6 +164,8 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("selected_post_type_key", response.json())
         if response.json()["post_types"]:
             self.assertIn("voice_instructions", response.json()["post_types"][0])
+        if response.json()["acf_fields"]:
+            self.assertIn("value_type", response.json()["acf_fields"][0])
 
     async def test_workbook_status_exposes_legacy_acf_mapping(self) -> None:
         response = await self.client.get("/api/content-sessions/_workbook?post_type_key=event")

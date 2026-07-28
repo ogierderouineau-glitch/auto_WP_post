@@ -73,6 +73,7 @@ metadata retain their dedicated model settings.
 | `V2_TRANSCRIPTION_MODEL` | `gpt-4o-transcribe` | Speech-to-text model |
 | `V2_MAX_IMAGE_BYTES` | 20 MiB | Maximum image upload size |
 | `V2_MAX_AUDIO_BYTES` | 50 MiB | Maximum audio upload size |
+| `V2_MAX_VIDEO_BYTES` | 250 MiB | Maximum MP4 source upload size before compression |
 
 ## Local run
 

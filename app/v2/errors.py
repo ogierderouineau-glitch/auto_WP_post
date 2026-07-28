@@ -101,6 +101,11 @@ class ImageProcessingError(V2Error):
     http_status = 500
 
 
+class VideoProcessingError(V2Error):
+    error_code = "video_processing_unavailable"
+    http_status = 503
+
+
 class DraftValidationError(V2Error):
     error_code = "draft_validation_failed"
     http_status = 422

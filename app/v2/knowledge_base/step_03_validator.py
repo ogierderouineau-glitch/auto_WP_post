@@ -22,6 +22,8 @@ class WorkbookValidator:
         self._unique(errors, "post_types", snapshot.post_types, "post_type_key")
         self._unique(errors, "shared_fields_schema", snapshot.shared_fields, "field_key")
         self._unique(errors, "ACF_fields_schema", snapshot.acf_fields, "field_key")
+        self._unique(errors, "prompt_guidance", snapshot.prompt_guidance, "guidance_key")
+        self._unique(errors, "HTML_patterns", snapshot.html_patterns, "pattern_key")
         self._unique(errors, "post_examples", snapshot.post_examples, "example_id")
         self._unique(errors, "image_rules_pillow", snapshot.pillow_rules, "rule_key")
         self._unique(errors, "image_metadata_rules", snapshot.image_metadata_rules, "rule_id")
@@ -53,6 +55,37 @@ class WorkbookValidator:
         shared_keys = {row.field_key for row in snapshot.shared_fields if row.enabled}
         shared_groups = {row.group for row in snapshot.shared_fields if row.enabled}
         image_metadata_keys = {row.field_key for row in snapshot.image_metadata_fields if row.enabled}
+        html_patterns = {
+            row.pattern_key: row for row in snapshot.html_patterns if row.enabled
+        }
+        prompt_guidance = {
+            row.guidance_key: row for row in snapshot.prompt_guidance if row.enabled
+        }
+
+        for sheet, rows in (
+            ("shared_fields_schema", snapshot.shared_fields),
+            ("ACF_fields_schema", snapshot.acf_fields),
+        ):
+            for row in rows:
+                seen_guidance: set[str] = set()
+                for guidance_key in row.prompt_guidance_keys:
+                    if guidance_key in seen_guidance:
+                        errors.append(self._error(
+                            sheet,
+                            row.sheet_row,
+                            "prompt_guidance_keys",
+                            "duplicate_prompt_guidance_key",
+                            f"Prompt guidance {guidance_key!r} is selected more than once.",
+                        ))
+                    elif guidance_key not in prompt_guidance:
+                        errors.append(self._error(
+                            sheet,
+                            row.sheet_row,
+                            "prompt_guidance_keys",
+                            "unknown_prompt_guidance",
+                            f"Prompt guidance {guidance_key!r} is missing or disabled.",
+                        ))
+                    seen_guidance.add(guidance_key)
 
         for row in snapshot.post_types:
             if row.enabled and (not row.generation_enabled or not row.template_ready):
@@ -61,6 +94,70 @@ class WorkbookValidator:
             if row.enabled and (not row.wp_post_type or not row.wp_category_name):
                 errors.append(self._error("post_types", row.sheet_row, "wp_post_type",
                                           "missing_wordpress_routing", "Enabled post type is missing WordPress routing."))
+            if row.wp_taxonomy and not row.taxonomy_term_source:
+                errors.append(self._error(
+                    "post_types",
+                    row.sheet_row,
+                    "taxonomy_term_source",
+                    "missing_taxonomy_term_source",
+                    "A configured WordPress taxonomy requires a taxonomy term source.",
+                ))
+            if row.taxonomy_term_source and not row.wp_taxonomy:
+                errors.append(self._error(
+                    "post_types",
+                    row.sheet_row,
+                    "wp_taxonomy",
+                    "missing_wordpress_taxonomy",
+                    "A taxonomy term source requires a WordPress taxonomy slug.",
+                ))
+            if row.assign_taxonomy_to_media and not row.wp_taxonomy:
+                errors.append(self._error(
+                    "post_types",
+                    row.sheet_row,
+                    "assign_taxonomy_to_media",
+                    "media_taxonomy_without_taxonomy",
+                    "Media taxonomy assignment requires a WordPress taxonomy slug.",
+                ))
+            if row.taxonomy_term_source:
+                source_kind, separator, source_value = row.taxonomy_term_source.partition(":")
+                valid_source = (
+                    bool(separator and source_value.strip())
+                    and (
+                        source_kind == "fixed"
+                        or (source_kind == "shared" and source_value in shared_keys)
+                        or (source_kind == "acf" and source_value in field_keys[row.post_type_key])
+                        or (source_kind == "fact" and source_value in input_facts[row.post_type_key])
+                    )
+                )
+                if not valid_source:
+                    errors.append(self._error(
+                        "post_types",
+                        row.sheet_row,
+                        "taxonomy_term_source",
+                        "invalid_taxonomy_term_source",
+                        "Taxonomy term source must be fixed:<value>, shared:<field_key>, "
+                        "acf:<field_key>, or fact:<input_fact_key> for this post type.",
+                    ))
+            seen_shortcode_variables: set[str] = set()
+            for field_key in row.post_shortcode_variables:
+                if field_key in seen_shortcode_variables:
+                    errors.append(self._error(
+                        "post_types",
+                        row.sheet_row,
+                        "post shortcode variables",
+                        "duplicate_post_shortcode_variable",
+                        f"Shortcode variable {field_key!r} is selected more than once.",
+                    ))
+                elif field_key not in input_facts[row.post_type_key]:
+                    errors.append(self._error(
+                        "post_types",
+                        row.sheet_row,
+                        "post shortcode variables",
+                        "invalid_post_shortcode_variable",
+                        f"Shortcode variable {field_key!r} must resolve to an enabled "
+                        "input_fact for the same post type.",
+                    ))
+                seen_shortcode_variables.add(field_key)
 
         for row in snapshot.post_examples:
             if row.enabled and row.post_type_key not in post_types:
@@ -105,6 +202,32 @@ class WorkbookValidator:
                         errors.append(self._error("ACF_fields_schema", row.sheet_row, "source_fact_keys",
                                                   "unknown_source_fact_key",
                                                   "Source fact does not resolve for the same post type."))
+            for pattern_key in row.html_pattern_keys:
+                pattern = html_patterns.get(pattern_key)
+                if pattern is None:
+                    errors.append(self._error(
+                        "ACF_fields_schema",
+                        row.sheet_row,
+                        "html_pattern_keys",
+                        "unknown_html_pattern",
+                        f"HTML pattern {pattern_key!r} is missing or disabled.",
+                    ))
+                elif pattern.allowed_field_keys and row.field_key not in pattern.allowed_field_keys:
+                    errors.append(self._error(
+                        "ACF_fields_schema",
+                        row.sheet_row,
+                        "html_pattern_keys",
+                        "html_pattern_not_allowed_for_field",
+                        f"HTML pattern {pattern_key!r} does not allow field {row.field_key!r}.",
+                    ))
+                elif row.value_type != "html":
+                    errors.append(self._error(
+                        "ACF_fields_schema",
+                        row.sheet_row,
+                        "html_pattern_keys",
+                        "html_pattern_requires_html_value",
+                        "HTML patterns may only be assigned to fields with value_type 'html'.",
+                    ))
             if row.min_words is not None and row.max_words is not None and row.min_words > row.max_words:
                 errors.append(self._error("ACF_fields_schema", row.sheet_row, "min_words",
                                           "invalid_word_range", "min_words cannot exceed max_words."))

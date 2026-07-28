@@ -27,6 +27,7 @@ import {
   loadRecentContentSessions,
   loadWorkbook,
   saveSessionImageContextTranscript,
+  saveSessionVideoMetadata,
   uploadKnowledgeWorkbook,
   downloadKnowledgeWorkbook,
   validateImportKey,
@@ -122,6 +123,27 @@ export default function Page() {
     "-"
   const selectedPostTypeVoiceInstructions =
     workbook?.post_types.find((item) => item.post_type_key === selectedPostType)?.voice_instructions || ""
+  const contentQualityRevisionInstruction = useMemo(() => {
+    const report = session?.generation_trace?.quality_check
+    if (!report || typeof report !== "object" || Array.isArray(report)) return ""
+    const findings = Array.isArray((report as Record<string, unknown>).findings)
+      ? (report as Record<string, unknown>).findings as Record<string, unknown>[]
+      : []
+    const selected = findings.filter((finding) =>
+      contentRevisionFieldIds.includes(String(finding.field_id || "")),
+    )
+    if (!selected.length) return ""
+    return [
+      "Improve the selected fields using the saved quality-check findings below. "
+        + "Address only these findings, preserve confirmed facts, HTML structure, links, field constraints, and the intended meaning.",
+      ...selected.map((finding) =>
+        `${String(finding.field_id || "field")}: ${String(finding.explanation || "")} Suggested direction: ${String(finding.suggestion || "")}`,
+      ),
+    ].join("\n")
+  }, [contentRevisionFieldIds, session?.generation_trace])
+  const selectedPostTypeFactDescriptions = (workbook?.fact_schema || [])
+    .map((field) => field.description_de || field.label)
+    .filter(Boolean)
   const availableFactKeys = (workbook?.fact_schema || []).map((field) => field.field_key)
   const emptyFactKeys = availableFactKeys.filter((key) => {
     const fact = session?.confirmed_facts?.[key] || session?.extracted_facts?.[key]
@@ -430,7 +452,7 @@ export default function Page() {
 
   const handlePictureTranscriptAppend = useCallback((text: string) => {
     if (!apiAuth || !selectedMedia?.mediaId) {
-      return Promise.reject(new Error("Select a picture before recording."))
+      return Promise.reject(new Error("Select a picture or video before recording."))
     }
 
     const media = selectedMedia
@@ -449,7 +471,15 @@ export default function Page() {
     const save = pictureSaveQueue.current.then(async () => {
       const currentSession = sessionRef.current
       if (!currentSession) throw new Error("The active session is no longer available.")
-      const data = await saveSessionImageContextTranscript(apiAuth, currentSession, media.filename, next)
+      const data = media.kind === "video"
+        ? await saveSessionVideoMetadata(
+            apiAuth,
+            currentSession,
+            media.filename,
+            currentSession.video_metadata.find((item) => String(item.media_id || "") === media.mediaId) || {},
+            next,
+          )
+        : await saveSessionImageContextTranscript(apiAuth, currentSession, media.filename, next)
       handleSessionChange(data.session)
     })
     pictureSaveQueue.current = save.catch(() => undefined)
@@ -470,7 +500,11 @@ export default function Page() {
     const nextTranscript =
       Object.prototype.hasOwnProperty.call(pictureTranscriptDrafts, media.mediaId)
         ? pictureTranscriptDrafts[media.mediaId]
-        : String((session.image_context_transcripts || {})[media.mediaId] || "")
+        : String((
+            media.kind === "video"
+              ? session.video_context_transcripts
+              : session.image_context_transcripts
+          )?.[media.mediaId] || "")
     pictureTranscriptRef.current = nextTranscript
     setPictureTranscript(nextTranscript)
   }
@@ -662,10 +696,12 @@ export default function Page() {
           onSelectedFactKeysChange={setSelectedFactKeys}
           selectedPictureId={selectedMedia?.mediaId}
           selectedContentFieldIds={contentRevisionFieldIds}
+          automaticContentRevisionInstruction={contentQualityRevisionInstruction}
           selectedContentLinks={contentSelectedLinks}
           contentAiAssistedLinkPlacement={contentAiAssistedLinkPlacement}
           postTypeLabel={selectedPostTypeLabel}
           voiceInstructions={selectedPostTypeVoiceInstructions}
+          factDescriptions={selectedPostTypeFactDescriptions}
           onPictureTranscriptAppend={handlePictureTranscriptAppend}
         />
       )}

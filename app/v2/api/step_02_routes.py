@@ -33,6 +33,7 @@ from app.v2.api.step_01_models import (
     SessionResponse,
     SessionsDeleteRequest,
     VersionedRequest,
+    VideoMetadataUpdateRequest,
 )
 from config import KNOWLEDGE_SOURCE_POLICY, KNOWLEDGE_WORKBOOK_GCS_URI, V2_LANGUAGE_MODEL
 from app.v2.errors import InvalidUploadError, SessionBusyError, SessionOwnershipError, V2Error
@@ -127,6 +128,7 @@ def create_router(
                 {
                     "field_key": row.field_key,
                     "label": row.description_de or row.field_key,
+                    "description_de": row.description_de or "",
                     "required": bool(row.required_for_analysis),
                     "enum_options": [
                         {
@@ -169,10 +171,36 @@ def create_router(
                     "field_key": row.field_key,
                     "acf_field_name": row.acf_field_name or row.field_key,
                     "label": row.description_de or row.acf_field_name or row.field_key,
+                    "value_type": row.value_type,
+                    "prompt_guidance_keys": list(row.prompt_guidance_keys),
+                    "html_pattern_keys": list(row.html_pattern_keys),
                 }
                 for row in snapshot.acf_fields
                 if row.enabled
                 and row.post_type_key == selected_post_type_key
+            ],
+            "prompt_guidance": [
+                {
+                    "guidance_key": row.guidance_key,
+                    "instruction_de": row.instruction_de,
+                }
+                for row in snapshot.prompt_guidance
+                if row.enabled
+            ],
+            "html_patterns": [
+                {
+                    "pattern_key": row.pattern_key,
+                    "label_de": row.label_de,
+                    "description_de": row.description_de,
+                    "template_html": row.template_html,
+                }
+                for row in snapshot.html_patterns
+                if row.enabled
+                and any(
+                    row.pattern_key in field.html_pattern_keys
+                    for field in snapshot.acf_fields
+                    if field.enabled and field.post_type_key == selected_post_type_key
+                )
             ],
         }
 
@@ -242,7 +270,7 @@ def create_router(
     async def upload(
         session_id: str,
         expected_version: int = Form(...),
-        kind: str = Form(..., pattern="^(audio|image)$"),
+        kind: str = Form(..., pattern="^(audio|image|video)$"),
         use_vision: bool = Form(default=True),
         aspect_ratio: str | None = Form(default=None, pattern="^(4:5|4:3|1:1|16:9)$"),
         upload: UploadFile = File(...),
@@ -257,8 +285,12 @@ def create_router(
         safe_name = safe_upload_name(upload.filename or "", suffix or ".bin")
         max_bytes = int(
             os.getenv(
-                "V2_MAX_IMAGE_BYTES" if kind == "image" else "V2_MAX_AUDIO_BYTES",
-                str(20 * 1024 * 1024 if kind == "image" else 50 * 1024 * 1024),
+                {
+                    "image": "V2_MAX_IMAGE_BYTES",
+                    "audio": "V2_MAX_AUDIO_BYTES",
+                    "video": "V2_MAX_VIDEO_BYTES",
+                }[kind],
+                str({"image": 20, "audio": 50, "video": 250}[kind] * 1024 * 1024),
             )
         )
         fd, temporary_name = tempfile.mkstemp(prefix="v2-upload-", suffix=Path(safe_name).suffix)
@@ -462,6 +494,24 @@ def create_router(
             service_provider,
             session_id,
             "image_metadata",
+            payload.model_dump(),
+        )
+        return job
+
+    @router.post("/{session_id}/quality-check-job")
+    async def start_quality_check_job(
+        session_id: str,
+        payload: VersionedRequest,
+        x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    ) -> dict[str, Any]:
+        service_provider().require_owner(session_id, x_user_id)
+        job = _create_session_job(session_id, "quality_check")
+        _SESSION_JOB_EXECUTOR.submit(
+            _run_session_job,
+            job["job_id"],
+            service_provider,
+            session_id,
+            "quality_check",
             payload.model_dump(),
         )
         return job
@@ -693,6 +743,31 @@ def create_router(
         )
         return FileResponse(path)
 
+    @router.get("/{session_id}/media/videos/{filename}")
+    async def get_video(
+        session_id: str,
+        filename: str,
+        x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    ) -> FileResponse:
+        service_provider().require_owner(session_id, x_user_id)
+        path = service_provider().media_path(session_id, kind="video", filename=filename)
+        return FileResponse(path)
+
+    @router.put("/{session_id}/video-metadata", response_model=SessionResponse)
+    async def update_video_metadata(
+        session_id: str,
+        payload: VideoMetadataUpdateRequest,
+        x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+    ) -> SessionResponse:
+        service_provider().require_owner(session_id, x_user_id)
+        return SessionResponse(session=service_provider().save_video_metadata(
+            session_id,
+            filename=payload.filename,
+            metadata=payload.metadata,
+            transcript=payload.transcript,
+            expected_version=payload.expected_version,
+        ))
+
     @router.delete("/{session_id}/media/{kind}/{filename}", response_model=SessionResponse)
     async def remove_media(
         session_id: str,
@@ -802,7 +877,7 @@ def _run_session_job(
     service = service_provider()
     starting_session = service.get(session_id)
     usage_before = dict(starting_session.ai_usage or {})
-    if operation == "draft_chat":
+    if operation in {"draft_chat", "quality_check"}:
         provider = service.revision_language_model
     elif operation == "optimize_image":
         provider = service.image_editor
@@ -814,7 +889,7 @@ def _run_session_job(
         "job_id": job_id,
         "model": getattr(provider, "model", None),
     }
-    if operation in {"generate", "draft_chat", "image_metadata"}:
+    if operation in {"generate", "draft_chat", "image_metadata", "quality_check"}:
         operation_details.update({
             "reasoning_effort": getattr(provider, "reasoning_effort", None),
             "generation_mode": starting_session.generation_mode,
@@ -834,6 +909,21 @@ def _run_session_job(
             session = service.recrop_image_with_vision(session_id, **payload)
         elif operation == "image_metadata":
             session = service.generate_image_metadata(session_id, **payload)
+        elif operation == "quality_check":
+            session = service.review_content_quality(session_id, **payload)
+            review = dict(session.generation_trace.get("quality_check") or {})
+            findings = list(review.get("findings") or [])
+            operation_details.update({
+                "rating": review.get("rating"),
+                "finding_count": len(findings),
+                "severity_counts": {
+                    severity: sum(
+                        1 for finding in findings
+                        if finding.get("severity") == severity
+                    )
+                    for severity in ("low", "medium", "high")
+                },
+            })
         else:
             raise ValueError(f"Unsupported session job operation: {operation}")
         session = service.record_operation(
@@ -845,6 +935,7 @@ def _run_session_job(
                 "optimize_image": "image_optimization",
                 "recrop_image": "vision_focal_recrop",
                 "image_metadata": "image_metadata_generation",
+                "quality_check": "content_quality_check",
             }.get(operation, operation),
             status="success",
             started_at=started_at,

@@ -87,6 +87,12 @@ class ImageContextTranscriptUpdateRequest(VersionedRequest):
     transcript: str = ""
 
 
+class VideoMetadataUpdateRequest(VersionedRequest):
+    filename: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    transcript: str = ""
+
+
 class FeaturedImageRequest(VersionedRequest):
     filename: str
 

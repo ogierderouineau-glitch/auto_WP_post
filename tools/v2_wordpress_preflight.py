@@ -47,6 +47,8 @@ def main() -> int:
         for row in snapshot.shared_fields
         if row.enabled and row.include_in_payload and row.destination_type == "yoast"
     }
+    if post_type.post_shortcode_variables:
+        meta_destinations.add("_generated_variables")
     session = ContentSession(
         session_id="preflight",
         user_id="preflight",

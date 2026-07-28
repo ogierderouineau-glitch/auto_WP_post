@@ -78,6 +78,12 @@ def _field_definition(
         description_parts.append(f"Maximum {schema.max_characters} characters.")
     if schema.value_type == "date":
         description_parts.append("Use German numeric date format dd.MM.yyyy.")
+    if schema.value_type == "html":
+        description_parts.append(
+            "Return an HTML fragment. When html_patterns are supplied for this field, "
+            "adapt their example content while preserving the demonstrated HTML structure "
+            "and CSS class names."
+        )
     constraints: dict[str, Any] = {
         "description": " ".join(part for part in description_parts if part),
     }

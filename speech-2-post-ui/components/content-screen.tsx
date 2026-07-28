@@ -10,6 +10,7 @@ import {
   Loader2,
   Search,
   Send,
+  ScanText,
   Sparkles,
 } from "lucide-react"
 import type { ApiClientOptions } from "@/lib/api"
@@ -17,11 +18,13 @@ import {
   approveSessionContent,
   loadContentSession,
   startImageMetadataGeneration,
+  startContentQualityCheck,
   saveSessionDraftFields,
   startSessionGeneration,
   startSessionPublish,
   waitForSessionJob,
   type ContentSession,
+  type HtmlPatternOption,
   type WorkbookStatus,
 } from "@/lib/content-sessions"
 import { ApiError } from "@/lib/api"
@@ -30,6 +33,19 @@ import { statusMessageClass } from "@/lib/status-style"
 type FieldScope = "shared" | "acf"
 type ContentSectionId = "wordpress" | "acf"
 type OperationState = "idle" | "loading" | "success" | "error"
+type QualityFinding = {
+  field_id: string
+  category: string
+  severity: "low" | "medium" | "high"
+  explanation: string
+  suggestion: string
+}
+type QualityCheck = {
+  rating: "natural" | "needs_polish" | "formulaic"
+  summary: string
+  findings: QualityFinding[]
+  reviewed_at?: string
+}
 const ACTIVE_JOB_STORAGE = "speech2post_active_job"
 
 type DraftField = {
@@ -39,6 +55,8 @@ type DraftField = {
   displayKey: string
   label: string
   value: string
+  valueType: string
+  htmlPatternKeys: string[]
   section: ContentSectionId
   trace: Record<string, unknown> | null
 }
@@ -92,15 +110,84 @@ function buildFields(session: ContentSession | null, workbook: WorkbookStatus | 
     displayKey: key,
     label: labelFromKey(key),
     value: displayValue(value),
+    valueType: "string",
+    htmlPatternKeys: [],
     section: "wordpress" as const,
     trace: fieldTrace(session, key),
   }))
   const acf = Object.entries(session.acf_source_fields || {}).map(([key, value]) => {
     const trace = fieldTrace(session, key)
     const schema = workbook?.acf_fields?.find((field) => field.field_key === key)
-    return { id: `acf:${key}`, scope: "acf" as const, key, displayKey: schema?.acf_field_name || key, label: schema?.label || labelFromKey(key), value: displayValue(value), section: "acf" as const, trace }
+    return { id: `acf:${key}`, scope: "acf" as const, key, displayKey: schema?.acf_field_name || key, label: schema?.label || labelFromKey(key), value: displayValue(value), valueType: schema?.value_type || "string", htmlPatternKeys: schema?.html_pattern_keys || [], section: "acf" as const, trace }
   })
   return [...shared, ...acf]
+}
+
+function htmlPreviewValue(value: string) {
+  return value
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
+    .replace(/\s+on[a-z][\w:-]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/\s+(href|src)\s*=\s*(["'])\s*javascript:[\s\S]*?\2/gi, "")
+}
+
+function HtmlFieldEditor({
+  id,
+  label,
+  value,
+  patterns,
+  onChange,
+}: {
+  id: string
+  label: string
+  value: string
+  patterns: HtmlPatternOption[]
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="grid gap-2 lg:grid-cols-2">
+      <div>
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">HTML source</span>
+          {!!patterns.length && (
+            <select
+              aria-label={`Insert HTML mechanic into ${label}`}
+              defaultValue=""
+              onChange={(event) => {
+                const pattern = patterns.find((item) => item.pattern_key === event.target.value)
+                if (pattern) onChange(`${value}${value.trim() ? "\n\n" : ""}${pattern.template_html}`)
+                event.target.value = ""
+              }}
+              className="max-w-56 rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
+            >
+              <option value="" disabled>Insert HTML mechanic…</option>
+              {patterns.map((pattern) => (
+                <option key={pattern.pattern_key} value={pattern.pattern_key}>
+                  {pattern.label_de}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        <textarea
+          id={id}
+          value={value}
+          rows={8}
+          spellCheck={false}
+          onChange={(event) => onChange(event.target.value)}
+          className="h-48 w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-mono text-xs leading-relaxed text-foreground outline-none focus:ring-2 focus:ring-gold/40"
+        />
+      </div>
+      <div>
+        <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Preview</span>
+        <iframe
+          title={`${label} HTML preview`}
+          sandbox=""
+          srcDoc={`<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:12px;font:14px/1.5 system-ui,sans-serif;color:#222;overflow-wrap:anywhere}img,video{max-width:100%;height:auto}table{max-width:100%;border-collapse:collapse}td,th{border:1px solid #ddd;padding:6px}</style></head><body>${htmlPreviewValue(value)}</body></html>`}
+          className="h-48 w-full rounded-md border border-border bg-white"
+        />
+      </div>
+    </div>
+  )
 }
 
 function changedMaps(fields: DraftField[], drafts: Record<string, string>) {
@@ -120,8 +207,20 @@ function hasDraft(session: ContentSession | null) {
   return Object.keys(session.shared_fields || {}).length > 0 || Object.keys(session.acf_source_fields || {}).length > 0
 }
 
-function hasMissingImageMetadata(session: ContentSession) {
-  if (!session.image_refs.length) return false
+function contentQualityCheck(session: ContentSession | null): QualityCheck | null {
+  const value = session?.generation_trace?.quality_check
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const review = value as Record<string, unknown>
+  if (typeof review.rating !== "string" || typeof review.summary !== "string") return null
+  return {
+    rating: review.rating as QualityCheck["rating"],
+    summary: review.summary,
+    findings: Array.isArray(review.findings) ? review.findings as QualityFinding[] : [],
+    reviewed_at: typeof review.reviewed_at === "string" ? review.reviewed_at : undefined,
+  }
+}
+
+function hasMissingMediaMetadata(session: ContentSession) {
   const completed = new Set(
     (session.image_metadata || [])
       .filter((row) => {
@@ -139,7 +238,15 @@ function hasMissingImageMetadata(session: ContentSession) {
       .map((row) => String((row as Record<string, unknown>).media_id || ""))
       .filter(Boolean),
   )
-  return session.image_refs.some((image) => !completed.has(image.media_id))
+  const missingImageMetadata = session.image_refs.some((image) => !completed.has(image.media_id))
+  const videoMetadata = new Map(
+    (session.video_metadata || []).map((row) => [String(row.media_id || ""), row]),
+  )
+  const missingVideoMetadata = (session.video_refs || []).some((video) => {
+    const row = videoMetadata.get(video.media_id)
+    return !row?.video_title || !row?.video_caption || !row?.video_description
+  })
+  return missingImageMetadata || missingVideoMetadata
 }
 
 function TracePanel({ trace }: { trace: Record<string, unknown> }) {
@@ -182,7 +289,7 @@ export function ContentScreen({
   const fields = useMemo(() => buildFields(session, workbook), [session, workbook])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [operation, setOperation] = useState<OperationState>("idle")
-  const [activeAction, setActiveAction] = useState<"generate" | "revise" | null>(null)
+  const [activeAction, setActiveAction] = useState<"generate" | "revise" | "review" | null>(null)
   const [autosave, setAutosave] = useState<OperationState>("idle")
   const [backgroundMetadata, setBackgroundMetadata] = useState(false)
   const [message, setMessage] = useState("")
@@ -209,6 +316,7 @@ export function ContentScreen({
   const changedCount = Object.keys(changed.shared).length + Object.keys(changed.acf).length
   const changedSignature = JSON.stringify(changed)
   const draftReady = hasDraft(session)
+  const review = contentQualityCheck(session)
   const canGenerate = !!auth && !!session && ["ready_to_generate", "needs_review", "ready_to_publish", "published"].includes(session.state)
   const canApprove = !!auth && !!session && draftReady && session.state === "needs_review"
   const visibleLinkIds = useMemo(() => {
@@ -416,18 +524,18 @@ export function ContentScreen({
       sessionStorage.removeItem(ACTIVE_JOB_STORAGE)
       return
     }
-    if (!["generate", "regenerate"].includes(storedJob.operation || "") || storedJob.sessionId !== session.session_id || !storedJob.jobId) return
+    if (!["generate", "regenerate", "quality_check"].includes(storedJob.operation || "") || storedJob.sessionId !== session.session_id || !storedJob.jobId) return
 
     const controller = new AbortController()
     setOperation("loading")
-    setActiveAction(storedJob.operation === "regenerate" ? "revise" : "generate")
-    setMessage(storedJob.operation === "regenerate" ? "Regenerating selected fields..." : "Generating content...")
+    setActiveAction(storedJob.operation === "quality_check" ? "review" : storedJob.operation === "regenerate" ? "revise" : "generate")
+    setMessage(storedJob.operation === "quality_check" ? "Running quality check..." : storedJob.operation === "regenerate" ? "Regenerating selected fields..." : "Generating content...")
     void pollJob(storedJob.jobId, controller.signal)
       .then((nextSession) => {
         sessionStorage.removeItem(ACTIVE_JOB_STORAGE)
         onSessionChange(nextSession)
         setOperation("success")
-        setMessage(storedJob.operation === "regenerate" ? "Selected fields regenerated." : "Draft generated.")
+        setMessage(storedJob.operation === "quality_check" ? "Quality check completed." : storedJob.operation === "regenerate" ? "Selected fields regenerated." : "Draft generated.")
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return
@@ -465,12 +573,12 @@ export function ContentScreen({
       setOperation("success")
       setMessage(isFirstGeneration ? "Draft generated. Preparing the WordPress post in the background..." : "Draft regenerated.")
       setQueuedLinks({})
-      const shouldRunBackgroundMetadata = hasMissingImageMetadata(nextSession)
+      const shouldRunBackgroundMetadata = hasMissingMediaMetadata(nextSession)
       if (shouldRunBackgroundMetadata) {
         setBackgroundMetadata(true)
         void Promise.resolve(nextSession)
           .then(async (generatedSession) => {
-            setMessage(isFirstGeneration ? "Generating image metadata before publishing..." : "Generating image metadata in the background...")
+            setMessage(isFirstGeneration ? "Generating media metadata before publishing..." : "Generating media metadata in the background...")
             const metadataJob = await startImageMetadataGeneration(auth, generatedSession)
             const metadataSession = await waitForSessionJob(auth, metadataJob.job_id)
             onSessionChange(metadataSession)
@@ -478,7 +586,7 @@ export function ContentScreen({
           })
           .then(async (metadataSession) => {
             if (!isFirstGeneration) {
-              setMessage("Draft regenerated. Image metadata updated in the background.")
+              setMessage("Draft regenerated. Media metadata updated in the background.")
               return metadataSession
             }
             setMessage("Approving the first draft for WordPress...")
@@ -506,7 +614,7 @@ export function ContentScreen({
               setMessage(error instanceof Error ? `Draft generated, but automatic WordPress publishing failed: ${error.message}` : "Draft generated, but automatic WordPress publishing failed.")
               return
             }
-            setMessage(error instanceof Error ? `Draft regenerated, but background image metadata failed: ${error.message}` : "Draft regenerated, but background image metadata failed.")
+            setMessage(error instanceof Error ? `Draft regenerated, but background media metadata failed: ${error.message}` : "Draft regenerated, but background media metadata failed.")
           })
           .finally(() => setBackgroundMetadata(false))
       }
@@ -539,6 +647,39 @@ export function ContentScreen({
     setOperation("success")
     setMessage("Draft fields saved.")
     return data.session
+  }
+
+  async function handleQualityCheck() {
+    if (!auth || !session || !draftReady) return
+    setOperation("loading")
+    setActiveAction("review")
+    setMessage("Starting quality check...")
+    try {
+      const currentSession = await latestSessionAfterAutosave()
+      if (!currentSession) throw new Error("Session is unavailable.")
+      const job = await startContentQualityCheck(auth, currentSession)
+      sessionStorage.setItem(
+        ACTIVE_JOB_STORAGE,
+        JSON.stringify({
+          jobId: job.job_id,
+          operation: "quality_check",
+          sessionId: currentSession.session_id,
+          at: new Date().toISOString(),
+        }),
+      )
+      setMessage("Reviewing clarity, tone, specificity, repetition and sentence rhythm...")
+      const nextSession = await pollJob(job.job_id)
+      sessionStorage.removeItem(ACTIVE_JOB_STORAGE)
+      sessionRef.current = nextSession
+      onSessionChange(nextSession)
+      setOperation("success")
+      setMessage("Quality check completed.")
+    } catch (error) {
+      setOperation("error")
+      setMessage(error instanceof Error ? error.message : "Could not complete the quality check.")
+    } finally {
+      setActiveAction(null)
+    }
   }
 
   async function handleApprove() {
@@ -577,6 +718,17 @@ export function ContentScreen({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              id="s2p-content-quality-check"
+              type="button"
+              onClick={handleQualityCheck}
+              title="Reviews the saved draft without changing it."
+              disabled={operation === "loading" || !draftReady}
+              className="inline-flex items-center gap-2 rounded-md border border-ai/40 bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-ai/10 disabled:opacity-60"
+            >
+              {activeAction === "review" ? <Loader2 className="size-4 animate-spin" /> : <ScanText className="size-4 text-ai" />}
+              Quality check
+            </button>
             <button
               id="s2p-content-generate-draft"
               type="button"
@@ -669,7 +821,15 @@ export function ContentScreen({
                           <span className="rounded bg-ai/10 px-1.5 py-0.5 text-[10px] font-semibold text-ai">Edited</span>
                         )}<button id={`s2p-content-rules-trace-${field.id}`} type="button" onClick={() => setOpenTrace((current) => current === field.id ? null : field.id)} className="rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold text-muted-foreground hover:bg-muted" aria-expanded={openTrace === field.id}>Rules trace</button></span>
                       </div>
-                      {multiline ? (
+                      {field.valueType === "html" ? (
+                        <HtmlFieldEditor
+                          id={`s2p-content-field-${field.id}`}
+                          label={field.label}
+                          value={value}
+                          patterns={(workbook?.html_patterns || []).filter((pattern) => field.htmlPatternKeys.includes(pattern.pattern_key))}
+                          onChange={(nextValue) => setDrafts((current) => ({ ...current, [field.id]: nextValue }))}
+                        />
+                      ) : multiline ? (
                         <textarea
                           id={`s2p-content-field-${field.id}`}
                           value={value}
@@ -694,6 +854,87 @@ export function ContentScreen({
             </section>
 
             <aside className="min-w-0 space-y-4 lg:sticky lg:top-24 lg:self-start">
+              {review && (
+                <section className="rounded-xl border border-ai/40 bg-card p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-sm font-semibold">Quality check</h2>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{review.summary}</p>
+                    </div>
+                    <span className={[
+                      "shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold",
+                      review.rating === "natural"
+                        ? "bg-confirm/12 text-confirm"
+                        : review.rating === "formulaic"
+                          ? "bg-warn/20 text-warn-foreground"
+                          : "bg-ai/10 text-ai",
+                    ].join(" ")}>
+                      {review.rating.replace("_", " ")}
+                    </span>
+                  </div>
+                  {!!review.findings.length && (
+                    <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3">
+                      <span className="text-[11px] text-muted-foreground">
+                        Select fields for revision
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const flaggedFieldIds = [...new Set(review.findings.map((finding) => finding.field_id))]
+                          const allSelected = flaggedFieldIds.every((fieldId) => selectedRevisionFields.has(fieldId))
+                          setManualRevisionFieldIds((current) => allSelected
+                            ? current.filter((fieldId) => !flaggedFieldIds.includes(fieldId))
+                            : [...new Set([...current, ...flaggedFieldIds])])
+                        }}
+                        className="rounded-full border border-border px-2 py-1 text-[10px] font-semibold text-foreground hover:bg-muted"
+                      >
+                        {[...new Set(review.findings.map((finding) => finding.field_id))]
+                          .every((fieldId) => selectedRevisionFields.has(fieldId))
+                          ? "Clear flagged"
+                          : "Select all flagged"}
+                      </button>
+                    </div>
+                  )}
+                  <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+                    {review.findings.length ? review.findings.map((finding, index) => (
+                      <div key={`${finding.field_id}-${index}`} className="rounded-md border border-border bg-background p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="flex min-w-0 cursor-pointer items-start gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedRevisionFields.has(finding.field_id)}
+                              onChange={() => toggleRevisionField(finding.field_id)}
+                              aria-label={`Include ${finding.field_id} in revision`}
+                              className="mt-0.5 size-4 shrink-0 accent-ai"
+                            />
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.preventDefault()
+                                document.getElementById(`s2p-content-field-${finding.field_id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
+                              }}
+                              className="truncate font-mono text-[11px] font-semibold text-ai hover:underline"
+                            >
+                              {finding.field_id}
+                            </button>
+                          </label>
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                            {finding.severity}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-xs leading-relaxed text-foreground">{finding.explanation}</p>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                          Suggestion: {finding.suggestion}
+                        </p>
+                      </div>
+                    )) : (
+                      <p className="rounded-md bg-confirm/10 px-3 py-2 text-xs text-foreground">
+                        No concrete quality issues were found.
+                      </p>
+                    )}
+                  </div>
+                </section>
+              )}
               <section id="s2p-content-internal-links" className="scroll-mt-28 rounded-xl border border-border bg-card p-4">
                 <h2 className="text-sm font-semibold">Internal links</h2>
                 <div className="mt-3 space-y-2">

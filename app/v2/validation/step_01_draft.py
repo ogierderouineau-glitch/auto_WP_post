@@ -49,6 +49,14 @@ class DraftValidator:
         for row in snapshot.acf_fields:
             if not row.enabled or row.post_type_key != post_type_key or row.field_role == "input_fact":
                 continue
+            # Values such as WordPress video and poster attachment IDs do not
+            # exist until publication uploads the processed media. They remain
+            # required for the final payload, but cannot be draft requirements.
+            if (
+                row.generation_stage == "payload_construction"
+                and row.source_mode == "derived"
+            ):
+                continue
             if session is not None and not self._acf_field_is_eligible(row, session):
                 continue
             value = acf_source_values.get(row.field_key)

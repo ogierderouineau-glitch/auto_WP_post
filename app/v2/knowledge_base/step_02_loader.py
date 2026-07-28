@@ -26,11 +26,13 @@ from app.v2.knowledge_base.step_01_models import (
     ACFFieldSchema,
     AgentInstruction,
     BlueprintRow,
+    HTMLPattern,
     ImageMetadataField,
     ImageMetadataRule,
     InternalLinkRecord,
     PostExample,
     PostTypeConfig,
+    PromptGuidance,
     SEORule,
     SharedFieldSchema,
     StoryPattern,
@@ -83,6 +85,11 @@ LIST_COLUMNS = {
     "target_field_keys",
     "allowed_next_states",
     "required_data",
+    "post shortcode variables",
+    "post_shortcode_variables",
+    "html_pattern_keys",
+    "prompt_guidance_keys",
+    "allowed_field_keys",
 }
 
 BOOLEAN_COLUMNS = {
@@ -187,6 +194,16 @@ class WorkbookLoader:
             post_types=self._models(workbook["post_types"], PostTypeConfig),
             shared_fields=self._models(workbook["shared_fields_schema"], SharedFieldSchema),
             acf_fields=self._models(workbook["ACF_fields_schema"], ACFFieldSchema),
+            prompt_guidance=(
+                self._models(workbook["prompt_guidance"], PromptGuidance)
+                if "prompt_guidance" in workbook.sheetnames
+                else ()
+            ),
+            html_patterns=(
+                self._models(workbook["HTML_patterns"], HTMLPattern)
+                if "HTML_patterns" in workbook.sheetnames
+                else ()
+            ),
             blueprint=self._models(workbook["post_blueprint"], BlueprintRow),
             seo_rules=self._models(workbook["seo_rules"], SEORule),
             style_rules=self._models(workbook["style_rules"], StyleRule),
@@ -303,7 +320,15 @@ class WorkbookLoader:
     def _normalize(raw: dict[str, Any], sheet: str, row: int) -> dict[str, Any]:
         normalized = dict(raw)
         for column in LIST_COLUMNS.intersection(normalized):
-            normalized[column] = _split_list(normalized[column])
+            normalized[column] = (
+                tuple(
+                    part.strip()
+                    for part in str(normalized[column] or "").replace(",", ";").split(";")
+                    if part.strip()
+                )
+                if column == "prompt_guidance_keys"
+                else _split_list(normalized[column])
+            )
         for column in BOOLEAN_COLUMNS.intersection(normalized):
             if normalized[column] is not None:
                 normalized[column] = _parse_boolean(

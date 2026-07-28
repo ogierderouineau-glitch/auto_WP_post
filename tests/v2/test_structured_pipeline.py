@@ -447,6 +447,15 @@ class StructuredPipelineTests(unittest.TestCase):
                 current_url=None,
                 expected_version=session.version,
             )
+            latest_snapshot = snapshot.model_copy(
+                update={
+                    "version": snapshot.version.model_copy(
+                        update={"sha256": "latest-workbook-hash"}
+                    )
+                }
+            )
+            knowledge._snapshots[latest_snapshot.version.sha256] = latest_snapshot
+            knowledge._current_hash = latest_snapshot.version.sha256
             regenerated = service.generate(
                 generated.session_id,
                 shared_fields={},
@@ -457,6 +466,14 @@ class StructuredPipelineTests(unittest.TestCase):
             )
             self.assertEqual(regenerated.state, "needs_review")
             self.assertEqual(regenerated.version, generated.version + 1)
+            self.assertEqual(regenerated.workbook_hash, "latest-workbook-hash")
+            self.assertEqual(
+                regenerated.generation_trace["workbook_refresh"],
+                {
+                    "previous_hash": snapshot.version.sha256,
+                    "current_hash": "latest-workbook-hash",
+                },
+            )
             regeneration_context = next(
                 item["context"]
                 for item in reversed(model.contexts)

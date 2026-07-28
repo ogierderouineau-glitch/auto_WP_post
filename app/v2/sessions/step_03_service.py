@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import uuid
+import hashlib
 import json
 import os
 import re
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from pathlib import Path
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import perf_counter, sleep
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 try:
     from PIL import Image
@@ -40,6 +41,7 @@ from app.v2.errors import (
     UnknownPostTypeError,
     TranscriptionProviderError,
     VisionProviderError,
+    VideoProcessingError,
     WordPressRequestError,
 )
 from app.v2.internal_links.step_01_service import InternalLinkInjectionResult, InternalLinkService
@@ -63,6 +65,7 @@ from app.v2.providers.step_01_interfaces import (
 from app.v2.sessions.step_01_repository import SessionRepository
 from app.v2.sessions.step_02_state_machine import SessionStateMachine
 from app.v2.storage.step_02_uploads import safe_upload_name
+from app.v2.videos.step_01_processor import FfmpegVideoProcessor
 from app.v2.workflow.step_04_generation_conditions import (
     GenerationConditionEvaluator,
     fact_is_usable,
@@ -89,6 +92,7 @@ class ContentSessionService:
         image_editor: ImageEditingProvider | None = None,
         object_storage: ObjectStorageProvider | None = None,
         image_processor: PillowProcessor | None = None,
+        video_processor: FfmpegVideoProcessor | None = None,
     ) -> None:
         self.knowledge = knowledge
         self.repository = repository
@@ -101,6 +105,7 @@ class ContentSessionService:
         self.image_editor = image_editor
         self.object_storage = object_storage
         self.image_processor = image_processor
+        self.video_processor = video_processor or FfmpegVideoProcessor()
         self.clarification = ClarificationService()
         self.context_builder = GenerationContextBuilder()
         self.payload_builder = PayloadBuilder()
@@ -312,6 +317,115 @@ class ContentSessionService:
             expected_version=session.version,
         )
 
+    def review_content_quality(
+        self,
+        session_id: str,
+        *,
+        expected_version: int,
+    ) -> ContentSession:
+        session = self.repository.get(session_id)
+        if session.version != expected_version:
+            raise ValueError(
+                f"Session version conflict: expected {expected_version}, found {session.version}."
+            )
+        if not session.wordpress_payload:
+            raise DraftValidationError("Generate a draft before running a quality check.")
+
+        fields = [
+            {
+                "field_id": f"{scope}:{key}",
+                "label": key,
+                "value": value,
+            }
+            for scope, values in (
+                ("shared", session.shared_fields),
+                ("acf", session.acf_source_fields),
+            )
+            for key, value in values.items()
+            if isinstance(value, str) and value.strip()
+        ]
+        if not fields:
+            raise DraftValidationError("The draft has no text fields to review.")
+
+        field_ids = tuple(item["field_id"] for item in fields)
+        field_id_type = Literal.__getitem__(field_ids)
+        finding_model = create_model(
+            "ContentQualityFinding",
+            __config__=ConfigDict(extra="forbid"),
+            field_id=(field_id_type, ...),
+            category=(
+                Literal[
+                    "generic_marketing",
+                    "repetition",
+                    "sentence_rhythm",
+                    "unnatural_transition",
+                    "translated_phrasing",
+                    "unsupported_personalization",
+                    "overwritten_style",
+                    "other",
+                ],
+                ...,
+            ),
+            severity=(Literal["low", "medium", "high"], ...),
+            explanation=(str, Field(min_length=1)),
+            suggestion=(str, Field(min_length=1)),
+        )
+        review_model = create_model(
+            "ContentQualityReview",
+            __config__=ConfigDict(extra="forbid"),
+            rating=(Literal["natural", "needs_polish", "formulaic"], ...),
+            summary=(str, Field(min_length=1)),
+            findings=(list[finding_model], Field(default_factory=list)),
+        )
+        result = self._structured(
+            task="content_quality_check",
+            messages=structured_task_input(
+                task="content_quality_check",
+                instructions=[
+                    {
+                        "instruction": (
+                            "Act as a German-language editorial quality reviewer, not an AI-text detector. "
+                            "Identify only concrete issues with clarity, specificity, repetition, sentence "
+                            "rhythm, transitions, translated phrasing, generic marketing language, overly "
+                            "polished wording, or unsupported personalization. "
+                            "Do not penalize necessary SEO terminology, factual business language, "
+                            "HTML markup, field length constraints, or a professional tone. "
+                            "Return concise, actionable findings. Do not rewrite the content."
+                        )
+                    }
+                ],
+                context={
+                    "language": session.language,
+                    "post_type": session.post_type_key,
+                    "fields": fields,
+                    "confirmed_facts": {
+                        key: fact.model_dump()
+                        for key, fact in session.confirmed_facts.items()
+                        if fact.confirmed
+                    },
+                },
+            ),
+            schema=review_model,
+            provider=self.revision_language_model,
+        )
+        session = self._record_provider_usage(session, self.revision_language_model)
+        trace = dict(session.generation_trace)
+        trace.pop("humanness_review", None)
+        trace["quality_check"] = {
+            **result.model_dump(),
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "reviewed_field_count": len(fields),
+        }
+        return self.repository.save(
+            session.model_copy(
+                update={
+                    "generation_trace": trace,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            ),
+            expected_version=expected_version,
+        )
+
     def attach_upload(
         self,
         session_id: str,
@@ -328,24 +442,75 @@ class ContentSessionService:
             raise RuntimeError("An ObjectStorageProvider is not configured.")
         session = self.repository.get(session_id)
         self._milestone(session, f"upload received kind={kind} filename={filename}")
-        storage_uri = self.object_storage.put(
-            source,
-            f"{session.session_id}/{kind}/{filename}",
-        )
         from app.v2.models.step_01_session import MediaReference
 
-        reference = MediaReference(
-            media_id=uuid.uuid4().hex,
-            filename=filename,
-            storage_uri=storage_uri,
-            content_type=content_type,
-            size_bytes=source.stat().st_size,
-        )
+        media_id = uuid.uuid4().hex
+        processed_video: dict[str, Any] | None = None
+        if kind == "video":
+            with tempfile.TemporaryDirectory(prefix="v2-video-") as directory:
+                try:
+                    result = self.video_processor.process(
+                        source,
+                        Path(directory),
+                        Path(filename).stem,
+                    )
+                except Exception as exc:
+                    raise VideoProcessingError(
+                        f"Video processing failed: {exc}"
+                    ) from exc
+                storage_uri = self.object_storage.put(
+                    result.video,
+                    f"{session.session_id}/video/{result.video.name}",
+                )
+                poster_uri = self.object_storage.put(
+                    result.poster,
+                    f"{session.session_id}/video/{result.poster.name}",
+                )
+                reference = MediaReference(
+                    media_id=media_id,
+                    filename=result.video.name,
+                    storage_uri=storage_uri,
+                    content_type="video/mp4",
+                    size_bytes=result.video.stat().st_size,
+                )
+                processed_video = {
+                    "media_id": media_id,
+                    "filename": result.video.name,
+                    "path": storage_uri,
+                    "poster_filename": result.poster.name,
+                    "poster_path": poster_uri,
+                    "operations": list(result.operations),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+        else:
+            storage_uri = self.object_storage.put(
+                source,
+                f"{session.session_id}/{kind}/{filename}",
+            )
+            reference = MediaReference(
+                media_id=media_id,
+                filename=filename,
+                storage_uri=storage_uri,
+                content_type=content_type,
+                size_bytes=source.stat().st_size,
+            )
         changes: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
         if kind == "audio":
             changes["audio_refs"] = [*session.audio_refs, reference]
         elif kind == "image":
             changes["image_refs"] = [*session.image_refs, reference]
+        elif kind == "video":
+            changes["video_refs"] = [*session.video_refs, reference]
+            changes["processed_videos"] = [*session.processed_videos, processed_video]
+            changes["video_metadata"] = [
+                *session.video_metadata,
+                {
+                    "media_id": media_id,
+                    "video_title": Path(filename).stem,
+                    "video_caption": "",
+                    "video_description": "",
+                },
+            ]
         else:
             raise ValueError(f"Unsupported upload kind: {kind}")
         updated = session.model_copy(update=changes)
@@ -808,6 +973,33 @@ class ContentSessionService:
                     session_id=session_id,
                     filename=reference.filename,
                 )
+        if kind == "video":
+            processed = next(
+                (
+                    item for item in session.processed_videos
+                    if item.get("filename") == filename
+                    or item.get("poster_filename") == filename
+                ),
+                None,
+            )
+            if processed is not None:
+                uri = (
+                    processed.get("poster_path")
+                    if processed.get("poster_filename") == filename
+                    else processed.get("path")
+                )
+                return self._materialize_media_uri(
+                    str(uri or ""),
+                    session_id=session_id,
+                    filename=filename,
+                )
+            reference = next((ref for ref in session.video_refs if ref.filename == filename), None)
+            if reference is not None:
+                return self._materialize_media_uri(
+                    reference.storage_uri,
+                    session_id=session_id,
+                    filename=reference.filename,
+                )
         raise ValueError(f"Media not found in this session: {kind}/{filename}")
 
     def _materialize_media_uri(
@@ -880,9 +1072,61 @@ class ContentSessionService:
             ]
             if not updates["audio_refs"]:
                 updates["transcript"] = ""
+        elif kind == "videos":
+            reference = next((ref for ref in session.video_refs if ref.filename == filename), None)
+            if reference is None:
+                raise ValueError(f"Video not found in this session: {filename}")
+            media_id = reference.media_id
+            updates["video_refs"] = [ref for ref in session.video_refs if ref.media_id != media_id]
+            updates["processed_videos"] = [
+                item for item in session.processed_videos if item.get("media_id") != media_id
+            ]
+            updates["video_metadata"] = [
+                item for item in session.video_metadata if item.get("media_id") != media_id
+            ]
+            transcripts = dict(session.video_context_transcripts)
+            transcripts.pop(media_id, None)
+            updates["video_context_transcripts"] = transcripts
         else:
             raise ValueError(f"Unsupported media kind: {kind}")
         return self.repository.save(session.model_copy(update=updates), expected_version=expected_version)
+
+    def save_video_metadata(
+        self,
+        session_id: str,
+        *,
+        filename: str,
+        metadata: dict[str, Any],
+        transcript: str,
+        expected_version: int,
+    ) -> ContentSession:
+        session = self.repository.get(session_id)
+        reference = next((ref for ref in session.video_refs if ref.filename == filename), None)
+        if reference is None:
+            raise ValueError(f"Video not found in this session: {filename}")
+        allowed = {
+            key: str(metadata.get(key) or "")
+            for key in ("video_title", "video_caption", "video_description")
+        }
+        rows = [
+            *(
+                item for item in session.video_metadata
+                if item.get("media_id") != reference.media_id
+            ),
+            {"media_id": reference.media_id, **allowed},
+        ]
+        transcripts = {
+            **session.video_context_transcripts,
+            reference.media_id: transcript,
+        }
+        return self.repository.save(
+            session.model_copy(update={
+                "video_metadata": rows,
+                "video_context_transcripts": transcripts,
+                "updated_at": datetime.now(timezone.utc),
+            }),
+            expected_version=expected_version,
+        )
 
     def optimize_image(
         self,
@@ -1188,6 +1432,39 @@ class ContentSessionService:
     ) -> ContentSession:
         session = self.repository.get(session_id)
         snapshot = self.knowledge.by_hash(session.workbook_hash)
+        is_regeneration = session.state in {"needs_review", "ready_to_publish", "published"}
+        if is_regeneration:
+            latest_snapshot = self.knowledge.current()
+            if latest_snapshot.version.sha256 != session.workbook_hash:
+                post_type = latest_snapshot.post_type(session.post_type_key)
+                if (
+                    post_type is None
+                    or not post_type.enabled
+                    or not post_type.generation_enabled
+                    or not post_type.template_ready
+                ):
+                    raise UnknownPostTypeError(
+                        f"Post type {session.post_type_key!r} is unavailable in the latest workbook."
+                    )
+                previous_hash = session.workbook_hash
+                snapshot = latest_snapshot
+                session = session.model_copy(
+                    update={
+                        "workbook_hash": snapshot.version.sha256,
+                        "wordpress_post_type": post_type.wp_post_type,
+                        "workflow_steps": {
+                            row.step_key: session.workflow_steps.get(row.step_key, "pending")
+                            for row in snapshot.workflow_steps
+                        },
+                        "generation_trace": {
+                            **session.generation_trace,
+                            "workbook_refresh": {
+                                "previous_hash": previous_hash,
+                                "current_hash": snapshot.version.sha256,
+                            },
+                        },
+                    }
+                )
         targeted_revision = revision_instruction is not None and revision_field_ids is not None
         fresh_generation = not targeted_revision and not shared_fields and not acf_source_fields
         selected_shared_keys = {
@@ -1221,6 +1498,7 @@ class ContentSessionService:
         if session.state in {"ready_to_generate", "needs_review"}:
             session = state_machine.transition(session, "generating")
         generation_trace = dict(session.generation_trace)
+        generation_trace.pop("humanness_review", None)
         eligible = self.internal_links.eligible(
             snapshot,
             post_type_key=session.post_type_key,
@@ -1592,20 +1870,14 @@ class ContentSessionService:
             no_eligible_links=not eligible.candidates,
             session=session,
         )
-        payload = self.payload_builder.build(
-            snapshot,
-            post_type_key=session.post_type_key,
-            shared_values=routed_shared,
-            acf_source_values=routed_acf,
-            media=session.image_metadata,
-        )
         image_metadata = list(session.image_metadata)
         payload = self.payload_builder.build(
             snapshot,
             post_type_key=session.post_type_key,
             shared_values=routed_shared,
             acf_source_values=routed_acf,
-            media=image_metadata,
+            confirmed_facts=session.confirmed_facts,
+            media=self._publication_media(snapshot, session, images=image_metadata),
         )
         session = session.model_copy(
             update={
@@ -1649,7 +1921,7 @@ class ContentSessionService:
         *,
         expected_version: int,
     ) -> ContentSession:
-        """Generate all image metadata after the readable draft is available."""
+        """Generate image and video metadata after the readable draft is available."""
 
         session = self.repository.get(session_id)
         if session.version != expected_version:
@@ -1679,22 +1951,33 @@ class ContentSessionService:
                 metadata_vision_media_ids=vision_media_ids,
             )
             self._milestone(session, "background image metadata generation finished")
+        if session.video_refs:
+            self._milestone(session, "background video metadata generation started")
+            session = self._generate_missing_video_metadata(
+                snapshot,
+                session,
+                overwrite_existing=True,
+            )
+            self._milestone(session, "background video metadata generation finished")
         latest = self.repository.get(session_id)
         payload = self.payload_builder.build(
             snapshot,
             post_type_key=latest.post_type_key,
             shared_values=latest.shared_fields,
             acf_source_values=latest.acf_source_fields,
-            media=session.image_metadata,
+            confirmed_facts=latest.confirmed_facts,
+            media=self._publication_media(snapshot, session),
         )
         merged_trace = {
             **latest.generation_trace,
             "image_metadata": session.generation_trace.get("image_metadata", {}),
+            "video_metadata": session.generation_trace.get("video_metadata", {}),
         }
         merged = latest.model_copy(
             update={
                 "image_analysis": session.image_analysis,
                 "image_metadata": session.image_metadata,
+                "video_metadata": session.video_metadata,
                 "ai_usage": session.ai_usage,
                 "generation_trace": merged_trace,
                 "wordpress_payload": payload.model_dump(),
@@ -1704,6 +1987,88 @@ class ContentSessionService:
             merged,
             expected_version=latest.version,
         )
+
+    def _generate_missing_video_metadata(
+        self,
+        snapshot: Any,
+        session: ContentSession,
+        *,
+        overwrite_existing: bool = False,
+    ) -> ContentSession:
+        if not session.video_refs:
+            return session
+        processed_by_media = {
+            str(item.get("media_id")): item for item in session.processed_videos
+        }
+        existing_as_image_metadata = [
+            {
+                "media_id": item.get("media_id"),
+                "image_title": item.get("video_title"),
+                "image_caption": item.get("video_caption"),
+                "image_description": item.get("video_description"),
+            }
+            for item in session.video_metadata
+        ]
+        poster_images = [
+            {
+                "media_id": reference.media_id,
+                "filename": processed_by_media.get(reference.media_id, {}).get(
+                    "poster_filename", reference.filename
+                ),
+                "path": processed_by_media.get(reference.media_id, {}).get(
+                    "poster_path", reference.storage_uri
+                ),
+            }
+            for reference in session.video_refs
+        ]
+        as_images = session.model_copy(update={
+            "image_refs": session.video_refs,
+            "processed_images": poster_images,
+            "image_metadata": existing_as_image_metadata,
+            "image_context_transcripts": session.video_context_transcripts,
+            "image_analysis": {},
+            "image_metadata_vision": {},
+        })
+        generated = self._generate_missing_image_metadata(
+            snapshot,
+            as_images,
+            overwrite_existing=overwrite_existing,
+            metadata_vision_media_ids=set(),
+        )
+        generated_by_media = {
+            str(item.get("media_id")): item for item in generated.image_metadata
+        }
+        video_ids = {reference.media_id for reference in session.video_refs}
+        video_metadata = [
+            item for item in session.video_metadata
+            if item.get("media_id") not in video_ids
+        ]
+        video_metadata.extend(
+            {
+                "media_id": reference.media_id,
+                "video_title": generated_by_media.get(reference.media_id, {}).get("image_title", ""),
+                "video_caption": generated_by_media.get(reference.media_id, {}).get("image_caption", ""),
+                "video_description": generated_by_media.get(reference.media_id, {}).get(
+                    "image_description",
+                    generated_by_media.get(reference.media_id, {}).get("image_description_wp", ""),
+                ),
+            }
+            for reference in session.video_refs
+            if reference.media_id in generated_by_media
+        )
+        generated_trace = generated.generation_trace.get("image_metadata", {})
+        return session.model_copy(update={
+            "video_metadata": video_metadata,
+            "ai_usage": generated.ai_usage,
+            "generation_trace": {
+                **session.generation_trace,
+                "video_metadata": {
+                    media_id: {**trace, "video_analysis_used": False}
+                    for media_id, trace in generated_trace.items()
+                    if media_id in video_ids
+                },
+            },
+        })
 
     def _session_language_provider(self, session: ContentSession) -> LanguageModelProvider | None:
         provider = self.language_model
@@ -2416,6 +2781,16 @@ class ContentSessionService:
                     "shared": False,
                     "text": guidance,
                 })
+            for reusable_guidance in field.prompt_guidance:
+                text = str(reusable_guidance.get("instruction_de") or "").strip()
+                if text:
+                    rules.append({
+                        "source": "prompt_guidance",
+                        "scope": "field",
+                        "shared": False,
+                        "rule_id": reusable_guidance.get("guidance_key"),
+                        "text": text,
+                    })
             limits = []
             if schema.get("min_words") is not None:
                 limits.append(f"min_words={schema.get('min_words')}")
@@ -2693,13 +3068,17 @@ class ContentSessionService:
             post_type_key=session.post_type_key,
             shared_values=updated_shared,
             acf_source_values=updated_acf,
-            media=session.image_metadata,
+            confirmed_facts=session.confirmed_facts,
+            media=self._publication_media(snapshot, session),
         )
+        generation_trace = dict(session.generation_trace)
+        generation_trace.pop("humanness_review", None)
         updated = session.model_copy(
             update={
                 "shared_fields": updated_shared,
                 "acf_source_fields": updated_acf,
                 "wordpress_payload": payload.model_dump(),
+                "generation_trace": generation_trace,
                 "updated_at": datetime.now(timezone.utc),
             }
         )
@@ -2766,13 +3145,18 @@ class ContentSessionService:
                 }
             )
         self._milestone(refined, "publication metadata refinement finished")
-        if shared_fields or acf_source_fields or refined.image_refs:
+        if shared_fields or acf_source_fields or refined.image_refs or refined.video_refs:
+            publication_media = [
+                *refined.image_metadata,
+                *self._video_publication_media(snapshot, refined),
+            ]
             payload = self.payload_builder.build(
                 snapshot,
                 post_type_key=refined.post_type_key,
                 shared_values=refined.shared_fields,
                 acf_source_values=refined.acf_source_fields,
-                media=refined.image_metadata,
+                confirmed_facts=refined.confirmed_facts,
+                media=publication_media,
             )
             refined = refined.model_copy(update={"wordpress_payload": payload.model_dump()})
         publishing = (
@@ -2817,7 +3201,9 @@ class ContentSessionService:
             update={
                 "wordpress_result": result,
                 "publication_idempotency_key": idempotency_key,
-                "published_wordpress_payload": wordpress_payload.model_dump(),
+                # Keep the canonical payload. Materialized local paths are an
+                # upload implementation detail, not a content change.
+                "published_wordpress_payload": publishing.wordpress_payload,
             }
         )
         published = state_machine.transition(published, "published")
@@ -2859,6 +3245,16 @@ class ContentSessionService:
         for key, value in dict(current.get("acf") or {}).items():
             if value != dict(previous.get("acf") or {}).get(key):
                 fields["acf"].add(key)
+        if dict(current.get("taxonomies") or {}) != dict(previous.get("taxonomies") or {}):
+            fields["wordpress"].add("taxonomies")
+        def comparable_media(payload: dict[str, Any]) -> list[dict[str, Any]]:
+            return [
+                {key: value for key, value in dict(item).items() if key != "output"}
+                for item in list(payload.get("media") or [])
+            ]
+
+        if comparable_media(current) != comparable_media(previous):
+            fields["wordpress"].add("media")
         return fields
 
     @staticmethod
@@ -2938,6 +3334,107 @@ class ContentSessionService:
                 next_item["output"] = str(path)
             materialized.append(next_item)
         return materialized
+
+    @staticmethod
+    def _publication_media(
+        snapshot: Any,
+        session: ContentSession,
+        *,
+        images: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        processed_by_media = {
+            str(item.get("media_id")): item
+            for item in session.processed_images
+            if item.get("media_id")
+        }
+        image_rows = []
+        for image in session.image_metadata if images is None else images:
+            row = dict(image)
+            processed = processed_by_media.get(str(row.get("media_id") or ""))
+            if processed:
+                row["binary_revision"] = ContentSessionService._media_binary_revision(processed)
+            image_rows.append(row)
+        return [
+            *image_rows,
+            *ContentSessionService._video_publication_media(snapshot, session),
+        ]
+
+    @staticmethod
+    def _media_binary_revision(processed: dict[str, Any]) -> str:
+        payload = {
+            key: processed.get(key)
+            for key in (
+                "path",
+                "filename",
+                "size_bytes",
+                "width",
+                "height",
+                "format",
+                "operations",
+                "quality",
+                "updated_at",
+            )
+        }
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()[:16]
+
+    @staticmethod
+    def _video_publication_media(snapshot: Any, session: ContentSession) -> list[dict[str, Any]]:
+        """Map the first remaining video to the shared WordPress video ACFs."""
+        if not session.video_refs:
+            return []
+        destinations = {
+            row.acf_field_name
+            for row in snapshot.acf_fields
+            if row.enabled
+            and row.include_in_payload
+            and row.post_type_key == session.post_type_key
+            and row.field_role == "direct_acf"
+            and row.acf_field_name in {"video_url", "video_poster"}
+        }
+        video_field = "video_url" if "video_url" in destinations else None
+        poster_field = "video_poster" if "video_poster" in destinations else None
+        if not video_field and not poster_field:
+            return []
+        reference = session.video_refs[0]
+        processed = next(
+            (
+                item for item in session.processed_videos
+                if item.get("media_id") == reference.media_id
+            ),
+            {},
+        )
+        metadata = next(
+            (
+                item for item in session.video_metadata
+                if item.get("media_id") == reference.media_id
+            ),
+            {},
+        )
+        common = {
+            "source_video_media_id": reference.media_id,
+            "binary_revision": ContentSessionService._media_binary_revision(processed),
+            "video_title": metadata.get("video_title"),
+            "video_caption": metadata.get("video_caption"),
+            "video_description": metadata.get("video_description"),
+        }
+        media: list[dict[str, Any]] = []
+        if video_field:
+            media.append({
+                **common,
+                "media_kind": "video",
+                "path": processed.get("path") or reference.storage_uri,
+                "acf_field_name": video_field,
+            })
+        if poster_field and processed.get("poster_path"):
+            media.append({
+                **common,
+                "media_kind": "video_poster",
+                "path": processed["poster_path"],
+                "acf_field_name": poster_field,
+            })
+        return media
 
     @staticmethod
     def _filename_from_uri(uri: str) -> str:

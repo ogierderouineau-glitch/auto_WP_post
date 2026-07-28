@@ -19,6 +19,7 @@ class PayloadBuilder:
         post_type_key: str,
         shared_values: dict[str, Any],
         acf_source_values: dict[str, Any],
+        confirmed_facts: dict[str, Any] | None = None,
         media: list[dict[str, Any]] | None = None,
     ) -> WordPressPayload:
         wordpress: dict[str, Any] = {}
@@ -75,10 +76,56 @@ class PayloadBuilder:
                 else:
                     acf[destination_key] = "".join(parts)
 
+        post_type = snapshot.post_type(post_type_key)
+        taxonomies: dict[str, list[str]] = {}
+        media_taxonomies: list[str] = []
+        wp_taxonomy = getattr(post_type, "wp_taxonomy", None)
+        taxonomy_term_source = getattr(post_type, "taxonomy_term_source", None)
+        if wp_taxonomy and taxonomy_term_source:
+            source_kind, _, source_key = taxonomy_term_source.partition(":")
+            if source_kind == "fixed":
+                term_value: Any = source_key
+            elif source_kind == "shared":
+                term_value = shared_values.get(source_key)
+            elif source_kind == "acf":
+                term_value = acf_source_values.get(source_key)
+                fact = (confirmed_facts or {}).get(source_key)
+                if (
+                    term_value in (None, "")
+                    and fact is not None
+                    and bool(getattr(fact, "confirmed", False))
+                ):
+                    term_value = getattr(fact, "value", None)
+            else:
+                fact = (confirmed_facts or {}).get(source_key)
+                term_value = (
+                    getattr(fact, "value", None)
+                    if fact is not None and bool(getattr(fact, "confirmed", False))
+                    else None
+                )
+            term_name = str(term_value or "").strip()
+            if term_name:
+                taxonomies[wp_taxonomy] = [term_name]
+                if getattr(post_type, "assign_taxonomy_to_media", False):
+                    media_taxonomies.append(wp_taxonomy)
+        generated_variables: dict[str, str] = {}
+        for field_key in post_type.post_shortcode_variables if post_type else ():
+            fact = (confirmed_facts or {}).get(field_key)
+            if fact is None or not bool(getattr(fact, "confirmed", False)):
+                continue
+            value = getattr(fact, "value", None)
+            if value in (None, "", []) or not isinstance(value, (str, int, float, bool)):
+                continue
+            generated_variables[field_key] = str(value)
+        if generated_variables:
+            meta["_generated_variables"] = generated_variables
+
         return WordPressPayload(
             wordpress=WordPressFields.model_validate(wordpress),
             meta=meta,
             acf=acf,
+            taxonomies=taxonomies,
+            media_taxonomies=media_taxonomies,
             media=media or [],
         )
 

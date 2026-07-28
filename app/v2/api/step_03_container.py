@@ -210,6 +210,8 @@ def v2_readiness() -> dict[str, object]:
             for row in snapshot.shared_fields
             if row.enabled and row.include_in_payload and row.destination_type == "yoast"
         }
+        if post_type.post_shortcode_variables:
+            meta_destinations.add("_generated_variables")
         preflight_session = ContentSession(
             session_id="readiness",
             user_id="readiness",

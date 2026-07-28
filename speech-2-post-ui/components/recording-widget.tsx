@@ -26,7 +26,7 @@ type ActiveScreen = "media" | "facts" | "content" | "wordpress"
 const SCREEN_COPY: Record<ActiveScreen, { title: string; instruction: string; action: string; placeholder: string }> = {
   media: {
     title: "Media agent",
-    instruction: "Describe the event through the selected images. Include concrete facts: place, date, people, service, atmosphere, highlights and challenges.",
+    instruction: "Describe the event through the selected images. Include concrete facts (cf. Facts list below)",
     action: "Extract facts",
     placeholder: "Add general event details or instructions for fact extraction. Picture descriptions remain attached to their images.",
   },
@@ -59,8 +59,13 @@ function appendText(current: string, next: string) {
 }
 
 function combinedPictureTranscripts(session: ContentSession) {
-  const byMediaId = new Map(session.image_refs.map((image) => [image.media_id, image.filename]))
-  return Object.entries(session.image_context_transcripts || {})
+  const byMediaId = new Map(
+    [...session.image_refs, ...(session.video_refs || [])].map((media) => [media.media_id, media.filename]),
+  )
+  return Object.entries({
+    ...(session.image_context_transcripts || {}),
+    ...(session.video_context_transcripts || {}),
+  })
     .map(([mediaId, transcript]) => {
       const text = String(transcript || "").trim()
       if (!text) return ""
@@ -109,10 +114,12 @@ export function RecordingWidget({
   onSelectedFactKeysChange,
   selectedPictureId,
   selectedContentFieldIds,
+  automaticContentRevisionInstruction,
   selectedContentLinks,
   contentAiAssistedLinkPlacement,
   postTypeLabel,
   voiceInstructions,
+  factDescriptions,
   onPictureTranscriptAppend,
 }: {
   auth: ApiClientOptions | null
@@ -129,10 +136,12 @@ export function RecordingWidget({
   onSelectedFactKeysChange: (keys: string[] | null) => void
   selectedPictureId?: string
   selectedContentFieldIds: string[]
+  automaticContentRevisionInstruction: string
   selectedContentLinks: Record<string, string>[]
   contentAiAssistedLinkPlacement: boolean
   postTypeLabel: string
   voiceInstructions: string
+  factDescriptions: string[]
   onPictureTranscriptAppend: (text: string) => Promise<void>
 }) {
   const [recording, setRecording] = useState(false)
@@ -146,7 +155,7 @@ export function RecordingWidget({
   const recordingEpoch = useRef(0)
   const copy = SCREEN_COPY[activeScreen]
   const allFactsSelected = availableFactKeys.length > 0 && selectedFactKeys.length === availableFactKeys.length
-  const hasContentInstruction = transcript.trim() || selectedContentLinks.some(
+  const hasContentInstruction = transcript.trim() || automaticContentRevisionInstruction.trim() || selectedContentLinks.some(
     (link) => link.revision_requested === "true",
   )
   const speechStructure = voiceInstructionItems(voiceInstructions)
@@ -307,7 +316,7 @@ export function RecordingWidget({
     }
     const pictureTranscripts = activeScreen === "media" ? combinedPictureTranscripts(session) : ""
     if (activeScreen !== "content" && !transcript.trim() && !pictureTranscripts) {
-      setStatus("Add an instruction or describe at least one picture first.")
+      setStatus("Add an instruction or describe at least one media item first.")
       return
     }
     if (activeScreen === "content" && !hasContentInstruction) {
@@ -340,7 +349,7 @@ export function RecordingWidget({
         const job = await regenerateSessionDraft(
           auth,
           session,
-          transcript,
+          appendText(automaticContentRevisionInstruction, transcript),
           fieldIds,
           selectedContentLinks,
           contentAiAssistedLinkPlacement,
@@ -438,6 +447,19 @@ export function RecordingWidget({
             </details>
           )}
 
+          {activeScreen === "media" && factDescriptions.length > 0 && (
+            <details className="mt-3 rounded-lg border border-ai/30 bg-ai/5 px-3 py-2">
+              <summary className="cursor-pointer text-xs font-semibold text-foreground">
+                Facts list
+              </summary>
+              <ul className="mt-2 list-disc space-y-1.5 pl-5 text-xs leading-relaxed text-muted-foreground">
+                {factDescriptions.map((description, index) => (
+                  <li key={`${index}-${description}`}>{description}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+
           {activeScreen === "facts" && (
             <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2">
               <span className="text-xs text-muted-foreground">
@@ -461,13 +483,20 @@ export function RecordingWidget({
                 {selectedContentFieldIds.length} {selectedContentFieldIds.length === 1 ? "field" : "fields"} selected for revision
               </summary>
               {selectedContentFieldIds.length ? (
-                <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
-                  {selectedContentFieldIds.map((fieldId) => (
-                    <li key={fieldId} className="rounded-md border border-border bg-background px-2.5 py-1.5">
-                      {contentFieldLabel(fieldId)}
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
+                    {selectedContentFieldIds.map((fieldId) => (
+                      <li key={fieldId} className="rounded-md border border-border bg-background px-2.5 py-1.5">
+                        {contentFieldLabel(fieldId)}
+                      </li>
+                    ))}
+                  </ul>
+                  {automaticContentRevisionInstruction && (
+                    <p className="mt-2 rounded-md border border-confirm/30 bg-confirm/10 px-2.5 py-2 text-xs leading-relaxed text-foreground">
+                      Quality-check findings will be used automatically. An additional prompt is optional.
+                    </p>
+                  )}
+                </>
               ) : (
                 <p className="mt-2 text-xs text-muted-foreground">Select fields on the Content screen to revise them.</p>
               )}

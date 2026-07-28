@@ -15,3 +15,20 @@ class WordPressPluginTests(unittest.TestCase):
         self.assertIn("'_yoast_wpseo_opengraph-description'", source)
         self.assertNotIn("acf_add_local_field_group", source)
         self.assertNotIn("'name' => 'gallery_html'", source)
+
+    def test_dynamic_shortcode_uses_registered_meta_object_and_escapes_values(self) -> None:
+        path = Path(
+            "wordpress/flairlab-dynamic-shortcodes/flairlab-dynamic-shortcodes.php"
+        )
+        source = path.read_text(encoding="utf-8")
+        self.assertIn("add_shortcode('post_variable'", source)
+        self.assertIn("register_post_meta(", source)
+        self.assertIn("'_generated_variables'", source)
+        self.assertIn("'type' => 'object'", source)
+        self.assertIn("'show_in_rest' => [", source)
+        self.assertIn("$post_id = get_the_ID();", source)
+        self.assertIn(
+            "get_post_meta($post_id, '_generated_variables', true)",
+            source,
+        )
+        self.assertIn("return esc_html((string) $value);", source)

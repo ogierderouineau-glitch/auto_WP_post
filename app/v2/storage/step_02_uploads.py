@@ -20,6 +20,8 @@ AUDIO_MIME_TYPES = {
     "audio/webm",
     "video/mp4",
 }
+VIDEO_EXTENSIONS = {".mp4"}
+VIDEO_MIME_TYPES = {"video/mp4", "application/mp4"}
 
 
 def safe_upload_name(filename: str, fallback_extension: str) -> str:
@@ -52,6 +54,9 @@ def validate_upload(
     elif kind == "audio":
         if suffix not in AUDIO_EXTENSIONS or detected not in AUDIO_MIME_TYPES:
             raise ValueError("Unsupported audio extension or MIME type.")
+    elif kind == "video":
+        if suffix not in VIDEO_EXTENSIONS or detected not in VIDEO_MIME_TYPES:
+            raise ValueError("Only MP4 video uploads are supported.")
     else:
         raise ValueError(f"Unsupported upload kind: {kind}")
     return detected

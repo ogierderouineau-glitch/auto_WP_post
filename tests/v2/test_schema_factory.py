@@ -77,3 +77,28 @@ def test_word_limit_warning_is_serialized_in_non_blocking_report() -> None:
     assert report["valid"] is True
     assert report["errors"] == []
     assert report["warnings"][0]["error_code"] == "minimum_words_not_met"
+
+
+def test_publish_time_derived_acf_is_not_required_in_content_draft() -> None:
+    row = SimpleNamespace(
+        enabled=True,
+        post_type_key="event",
+        field_role="direct_acf",
+        field_key="event_video_upload",
+        generation_stage="payload_construction",
+        source_mode="derived",
+        required_for_output=True,
+        sheet_row=4,
+        min_words=None,
+        max_words=None,
+    )
+    snapshot = SimpleNamespace(shared_fields=[], acf_fields=[row])
+
+    report = DraftValidator().validate(
+        snapshot,
+        post_type_key="event",
+        shared_values={},
+        acf_source_values={},
+    )
+
+    assert report == {"valid": True, "errors": [], "warnings": []}

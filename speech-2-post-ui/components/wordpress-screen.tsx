@@ -35,15 +35,48 @@ function resultValue(result: Record<string, unknown>, ...keys: string[]) {
   return ""
 }
 
-function payloadDiff(current: Record<string, unknown>, previous: Record<string, unknown>) {
-  const groups = ["wordpress", "meta", "acf"] as const
-  return groups.flatMap((group) => {
+function payloadMediaIds(payload: Record<string, unknown>) {
+  return Array.from(
+    new Set(
+      (Array.isArray(payload.media) ? payload.media : [])
+        .flatMap((item) => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return []
+          const media = item as Record<string, unknown>
+          const mediaId = media.source_video_media_id || media.media_id
+          return mediaId ? [String(mediaId)] : []
+        }),
+    ),
+  ).sort()
+}
+
+function payloadDiff(
+  current: Record<string, unknown>,
+  previous: Record<string, unknown>,
+  sessionMediaIds: string[],
+) {
+  const groups = ["wordpress", "meta", "acf", "taxonomies"] as const
+  const fields = groups.flatMap((group) => {
     const next = (current[group] || {}) as Record<string, unknown>
     const before = (previous[group] || {}) as Record<string, unknown>
     return Object.keys(next)
       .filter((key) => JSON.stringify(next[key]) !== JSON.stringify(before[key]))
       .map((key) => `${group}.${key}`)
   })
+  const comparableMedia = (value: unknown) =>
+    (Array.isArray(value) ? value : []).map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return item
+      const canonical = { ...(item as Record<string, unknown>) }
+      delete canonical.output
+      return canonical
+    })
+  const mediaPayloadChanged =
+    JSON.stringify(comparableMedia(current.media)) !== JSON.stringify(comparableMedia(previous.media))
+  const mediaSelectionChanged =
+    JSON.stringify([...new Set(sessionMediaIds)].sort()) !== JSON.stringify(payloadMediaIds(previous))
+  if (mediaPayloadChanged || mediaSelectionChanged) {
+    fields.push("media")
+  }
+  return fields
 }
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -100,9 +133,13 @@ export function WordPressScreen({
   const editUrl = resultValue(wordpressResult, "edit_url")
   const sentPayload = session?.published_wordpress_payload || {}
   const currentPayload = session?.wordpress_payload || {}
+  const sessionMediaIds = [
+    ...(session?.image_refs || []).map((item) => item.media_id),
+    ...(session?.video_refs || []).slice(0, 1).map((item) => item.media_id),
+  ]
   const changedFields = useMemo(
-    () => payloadDiff(currentPayload, sentPayload),
-    [currentPayload, sentPayload],
+    () => payloadDiff(currentPayload, sentPayload, sessionMediaIds),
+    [currentPayload, sentPayload, sessionMediaIds.join("|")],
   )
   const approved = !!session?.approval.approved
   const canPublish = !!auth && !!session && approved && Object.keys(session.wordpress_payload || {}).length > 0

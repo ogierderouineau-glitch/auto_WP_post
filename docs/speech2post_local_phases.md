@@ -14,6 +14,8 @@ services one slice at a time.
 - The folder is tracked by git; generated Next files and dependencies remain
   ignored by `speech-2-post-ui/.gitignore`.
 - During local development, run FastAPI and Next as separate dev servers.
+- Local MP4 processing requires `ffmpeg`. On Debian/Ubuntu install it once with
+  `sudo apt-get update && sudo apt-get install -y ffmpeg`, then restart FastAPI.
 - The Next app should call the existing backend API routes instead of creating a
   parallel backend.
 - The V0-generated app currently uses Next 16, which requires Node `>=20.9.0`.
@@ -167,21 +169,32 @@ Known gap:
 - `POST /api/content-sessions/{session_id}/uploads`
   - multipart form:
     - `expected_version`
-    - `kind`: `audio` or `image`
+    - `kind`: `audio`, `image`, or `video`
     - `use_vision`
     - `upload`
 - `GET /api/content-sessions/{session_id}/media/images/{filename}`
 - `GET /api/content-sessions/{session_id}/media/images/{filename}/original`
+- `GET /api/content-sessions/{session_id}/media/videos/{filename}`
 - `DELETE /api/content-sessions/{session_id}/media/{kind}/{filename}`
+- `PUT /api/content-sessions/{session_id}/video-metadata`
 - `PUT /api/content-sessions/{session_id}/featured-image`
 - `PUT /api/content-sessions/{session_id}/image-metadata`
 - `POST /api/content-sessions/{session_id}/images/optimize`
 - `POST /api/content-sessions/{session_id}/images/restore-original?filename=...`
 
-Known gaps:
+Video behavior:
 
-- V2 upload supports `audio` and `image`, not video. Show video UI as disabled
-  or unsupported until the backend contract exists.
+- Video upload accepts MP4 only and is capped by `V2_MAX_VIDEO_BYTES`
+  (250 MiB by default).
+- `ffmpeg` creates an H.264/AAC, fast-start MP4 at no more than 1080p and a
+  JPEG poster at 0.5 seconds. The source upload is temporary and is not stored.
+- Multiple videos are retained in upload order. Only the first remaining video
+  is published, outside the image gallery.
+- Workbook `field_key` values remain globally unique internal identifiers and
+  may differ by post type. The shared `acf_field_name` destinations `video_url`
+  and `video_poster` identify the semantic media roles for every post type.
+- WordPress receives the uploaded attachment IDs for the ACF File and Image
+  fields, which is the canonical stored value for those field types.
 - Reordering media is not exposed as a clear V2 endpoint.
 - Upload progress is a frontend feature, but final processing progress depends
   on session/job state exposed by the backend.
@@ -347,7 +360,7 @@ Outcome:
 - Save featured image.
 - Save image metadata.
 - Trigger image optimize/restore where supported.
-- Show videos as unsupported instead of faking processing.
+- Upload and process MP4 videos alongside pictures.
 
 Implemented frontend files:
 
@@ -360,7 +373,7 @@ Current behavior:
 - The Media screen uses the active V2 session and updates the parent shell after
   each backend response so the session version stays current.
 - Image uploads call `POST /api/content-sessions/{session_id}/uploads`.
-- The gold Add pictures control uploads pictures through the standard local
+- The gold Add pictures & videos control uploads pictures through the standard local
   Pillow pipeline without making a paid Vision request. Its format dropdown
   selects a per-upload Pillow crop ratio: portrait `4:5` (the default),
   landscape `4:3`, square `1:1`, or widescreen `16:9`. The ratio is stored on
@@ -373,14 +386,22 @@ Current behavior:
 - Original and processed images are shown side by side on desktop.
 - Featured image, metadata save, per-picture Vision recrop, image optimize,
   restore original, and remove image actions call the real V2 endpoints.
-- Video selection displays a clear unsupported message; no fake video endpoint
-  is used.
+- The gold control is named **Add pictures & videos**. Videos share the media
+  gallery, display a video badge and generated poster, and expose title,
+  caption, description, transcript, playback, selection, and removal.
+- The existing background image-metadata rules and batch generator also produce
+  video title, caption, and description after draft generation. The generated
+  poster is treated as the video's image record and the per-video transcript is
+  supplied as its image context; Vision remains disabled for videos.
+- Image-only before/after, featured-image, Vision, crop, restore, and editing
+  controls are not shown for videos.
 - Recording/transcript controls remain disabled until Phase 5.
 
 Risk:
 
-- Media UI can expand quickly. Keep the first version to image upload, selection,
-  metadata, and existing processing actions.
+- Video processing requires `ffmpeg`; the production Docker image installs it.
+- Large phone videos can take noticeably longer than image uploads because the
+  request remains open while the MP4 is transcoded.
 - Once cookie auth exists, media image rendering can switch away from
   authenticated blob fetching to simpler direct URLs.
 

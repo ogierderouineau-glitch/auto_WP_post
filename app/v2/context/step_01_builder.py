@@ -17,6 +17,8 @@ class FieldContext(BaseModel):
     group_rules: list[dict[str, Any]] = Field(default_factory=list)
     section_rules: list[dict[str, Any]] = Field(default_factory=list)
     style_rules: list[dict[str, Any]] = Field(default_factory=list)
+    prompt_guidance: list[dict[str, Any]] = Field(default_factory=list)
+    html_patterns: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class GenerationContext(BaseModel):
@@ -98,12 +100,32 @@ class GenerationContextBuilder:
                     or (row.match_type == "content_signal" and row.match_value in session.content_signals)
                 )
             ]
+            pattern_keys = set(getattr(schema, "html_pattern_keys", ()))
+            guidance_by_key = {
+                row.guidance_key: row
+                for row in snapshot.prompt_guidance
+                if row.enabled
+            }
+            prompt_guidance = [
+                guidance_by_key[key].model_dump(exclude={"sheet_row"})
+                for key in getattr(schema, "prompt_guidance_keys", ())
+                if key in guidance_by_key
+            ]
+            html_patterns = [
+                row.model_dump(exclude={"sheet_row"})
+                for row in snapshot.html_patterns
+                if row.enabled
+                and row.pattern_key in pattern_keys
+                and (not row.allowed_field_keys or schema.field_key in row.allowed_field_keys)
+            ]
             fields[schema.field_key] = FieldContext(
                 schema_data=self._schema_for_model(schema),
                 exact_rules=exact,
                 group_rules=group_rules,
                 section_rules=section_rules,
                 style_rules=styles,
+                prompt_guidance=prompt_guidance,
+                html_patterns=html_patterns,
             )
 
         selected_groups = {getattr(schema, "group", None) for schema in schemas}
