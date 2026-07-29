@@ -17,13 +17,41 @@ def structured_task_input(
     The code adds only task framing and structured-output boundaries.
     """
 
+    post_type = context.get("post_type")
+    enrichment_policy = (
+        post_type.get("knowledge_enrichment", "forbidden")
+        if isinstance(post_type, dict)
+        else "forbidden"
+    )
+    generated_content_task = (
+        task in {
+            "content_generation",
+            "shared_field_generation",
+            "acf_field_generation",
+        }
+        or task.startswith("acf_field_generation:")
+    )
+    knowledge_enrichment_allowed = (
+        generated_content_task and enrichment_policy == "allowed"
+    )
+    factual_constraint = (
+        "You may supplement generated content fields with established general knowledge. "
+        "Never use that knowledge to create input facts or confirmed facts. Do not invent "
+        "session-specific details, identities, quotes, URLs, brands, dates, measurements, "
+        "or other exact claims. Present uncertain or disputed information cautiously."
+        if knowledge_enrichment_allowed
+        else "Do not invent facts, URLs, identities, destinations, or field keys."
+    )
     system = {
         "task": task,
         "rules": [row.get("instruction_de") for row in instructions],
         "constraints": [
             "Return only values allowed by the supplied response schema.",
-            "Do not invent facts, URLs, identities, destinations, or field keys.",
+            factual_constraint,
         ],
+        "knowledge_enrichment": (
+            "allowed" if knowledge_enrichment_allowed else "forbidden"
+        ),
     }
     if task in {"image_metadata", "image_metadata_batch"}:
         system["constraints"].extend(

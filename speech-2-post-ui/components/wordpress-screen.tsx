@@ -35,24 +35,9 @@ function resultValue(result: Record<string, unknown>, ...keys: string[]) {
   return ""
 }
 
-function payloadMediaIds(payload: Record<string, unknown>) {
-  return Array.from(
-    new Set(
-      (Array.isArray(payload.media) ? payload.media : [])
-        .flatMap((item) => {
-          if (!item || typeof item !== "object" || Array.isArray(item)) return []
-          const media = item as Record<string, unknown>
-          const mediaId = media.source_video_media_id || media.media_id
-          return mediaId ? [String(mediaId)] : []
-        }),
-    ),
-  ).sort()
-}
-
 function payloadDiff(
   current: Record<string, unknown>,
   previous: Record<string, unknown>,
-  sessionMediaIds: string[],
 ) {
   const groups = ["wordpress", "meta", "acf", "taxonomies"] as const
   const fields = groups.flatMap((group) => {
@@ -69,11 +54,10 @@ function payloadDiff(
       delete canonical.output
       return canonical
     })
-  const mediaPayloadChanged =
-    JSON.stringify(comparableMedia(current.media)) !== JSON.stringify(comparableMedia(previous.media))
-  const mediaSelectionChanged =
-    JSON.stringify([...new Set(sessionMediaIds)].sort()) !== JSON.stringify(payloadMediaIds(previous))
-  if (mediaPayloadChanged || mediaSelectionChanged) {
+  if (
+    JSON.stringify(comparableMedia(current.media)) !==
+    JSON.stringify(comparableMedia(previous.media))
+  ) {
     fields.push("media")
   }
   return fields
@@ -133,13 +117,9 @@ export function WordPressScreen({
   const editUrl = resultValue(wordpressResult, "edit_url")
   const sentPayload = session?.published_wordpress_payload || {}
   const currentPayload = session?.wordpress_payload || {}
-  const sessionMediaIds = [
-    ...(session?.image_refs || []).map((item) => item.media_id),
-    ...(session?.video_refs || []).slice(0, 1).map((item) => item.media_id),
-  ]
   const changedFields = useMemo(
-    () => payloadDiff(currentPayload, sentPayload, sessionMediaIds),
-    [currentPayload, sentPayload, sessionMediaIds.join("|")],
+    () => payloadDiff(currentPayload, sentPayload),
+    [currentPayload, sentPayload],
   )
   const approved = !!session?.approval.approved
   const canPublish = !!auth && !!session && approved && Object.keys(session.wordpress_payload || {}).length > 0

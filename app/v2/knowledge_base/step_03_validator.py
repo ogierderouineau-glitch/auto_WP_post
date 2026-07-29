@@ -118,6 +118,18 @@ class WorkbookValidator:
                     "media_taxonomy_without_taxonomy",
                     "Media taxonomy assignment requires a WordPress taxonomy slug.",
                 ))
+            allowed_enrichment = families.get(
+                "knowledge_enrichment",
+                frozenset({"forbidden", "allowed"}),
+            )
+            if row.knowledge_enrichment not in allowed_enrichment:
+                errors.append(self._error(
+                    "post_types",
+                    row.sheet_row,
+                    "knowledge_enrichment",
+                    "unknown_knowledge_enrichment",
+                    "knowledge_enrichment must be allowed or forbidden.",
+                ))
             if row.taxonomy_term_source:
                 source_kind, separator, source_value = row.taxonomy_term_source.partition(":")
                 valid_source = (
@@ -352,7 +364,7 @@ class WorkbookValidator:
             input_facts,
         )
         self._validate_image_metadata_rules(errors, snapshot, post_types, input_facts, image_metadata_keys, families)
-        self._validate_agent_instructions(errors, snapshot, post_types)
+        self._validate_agent_instructions(errors, snapshot, post_types, families)
         self._validate_internal_links(errors, snapshot)
         self._validate_state_machine(errors, snapshot)
         self._validate_output_specification(errors, snapshot)
@@ -369,6 +381,7 @@ class WorkbookValidator:
         errors: list[ErrorDetail],
         snapshot: WorkbookSnapshot,
         post_types: dict[str, Any],
+        families: dict[str, frozenset[Any]],
     ) -> None:
         for row in snapshot.agent_instructions:
             if not row.enabled:
@@ -377,6 +390,14 @@ class WorkbookValidator:
                 errors.append(WorkbookValidator._error(
                     "agent_instructions", row.sheet_row, "post_type_key", "unknown_post_type",
                     "Agent-instruction post type does not resolve.",
+                ))
+            if row.priority not in families.get("priority", frozenset()):
+                errors.append(WorkbookValidator._error(
+                    "agent_instructions",
+                    row.sheet_row,
+                    "priority",
+                    "unknown_priority",
+                    "Agent-instruction priority is not registered.",
                 ))
             if row.workflow_stage == "ai_image_edit":
                 if row.condition not in {"always", "ai_edit_requested"}:

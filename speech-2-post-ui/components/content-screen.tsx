@@ -249,6 +249,10 @@ function hasMissingMediaMetadata(session: ContentSession) {
   return missingImageMetadata || missingVideoMetadata
 }
 
+function hasMedia(session: ContentSession) {
+  return session.image_refs.length > 0 || (session.video_refs || []).length > 0
+}
+
 function TracePanel({ trace }: { trace: Record<string, unknown> }) {
   if (!Object.keys(trace || {}).length) {
     return <p className="text-sm text-muted-foreground">No generation trace yet.</p>
@@ -573,7 +577,9 @@ export function ContentScreen({
       setOperation("success")
       setMessage(isFirstGeneration ? "Draft generated. Preparing the WordPress post in the background..." : "Draft regenerated.")
       setQueuedLinks({})
-      const shouldRunBackgroundMetadata = hasMissingMediaMetadata(nextSession)
+      const shouldRunBackgroundMetadata = isFirstGeneration
+        ? hasMissingMediaMetadata(nextSession)
+        : hasMedia(nextSession)
       if (shouldRunBackgroundMetadata) {
         setBackgroundMetadata(true)
         void Promise.resolve(nextSession)
@@ -733,7 +739,7 @@ export function ContentScreen({
               id="s2p-content-generate-draft"
               type="button"
               onClick={handleGenerate}
-              title={draftReady ? "Regenerates the full draft and ranks a fresh set of internal-link candidates." : "Generates the draft and ranks internal-link candidates."}
+              title={draftReady ? "Regenerates the full draft, ranks fresh internal-link candidates, and refreshes media metadata." : "Generates the draft and ranks internal-link candidates."}
               disabled={operation === "loading" || !canGenerate}
               className="inline-flex items-center gap-2 rounded-md bg-ai px-3 py-2 text-sm font-semibold text-ai-foreground transition-colors hover:opacity-90 disabled:opacity-60"
             >

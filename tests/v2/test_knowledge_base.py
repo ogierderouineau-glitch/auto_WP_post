@@ -128,6 +128,46 @@ class WorkbookTests(unittest.TestCase):
         )
         self.assertEqual(staff_name.field_role, "input_fact")
 
+    def test_cocktail_knowledge_enrichment_and_instruction_load(self) -> None:
+        snapshot = self.validator.validate(self.loader.load(WORKBOOK))
+        cocktail = snapshot.post_type("cocktail")
+        self.assertIsNotNone(cocktail)
+        self.assertEqual(cocktail.knowledge_enrichment, "allowed")
+        instruction = next(
+            row
+            for row in snapshot.agent_instructions
+            if row.instruction_id == "client_003"
+        )
+        self.assertEqual(instruction.post_type_key, "cocktail")
+        self.assertEqual(instruction.workflow_stage, "generation")
+        self.assertEqual(instruction.priority, "critical")
+
+    def test_unknown_knowledge_enrichment_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            copy = Path(temporary) / "bad-enrichment.xlsm"
+            copy.write_bytes(WORKBOOK.read_bytes())
+            workbook = load_workbook(copy, keep_vba=True)
+            sheet = workbook["post_types"]
+            post_type_column = next(
+                cell.column for cell in sheet[1] if cell.value == "post_type_key"
+            )
+            enrichment_column = next(
+                cell.column
+                for cell in sheet[1]
+                if cell.value == "knowledge_enrichment"
+            )
+            row = next(
+                index
+                for index in range(2, sheet.max_row + 1)
+                if sheet.cell(index, post_type_column).value == "cocktail"
+            )
+            sheet.cell(row, enrichment_column).value = "unrestricted"
+            workbook.save(copy)
+            with self.assertRaises(InvalidWorkbookError) as raised:
+                self.validator.validate(self.loader.load(copy))
+            codes = {detail.error_code for detail in raised.exception.details}
+            self.assertIn("unknown_knowledge_enrichment", codes)
+
     def test_bartender_taxonomy_configuration_loads_with_normalized_slug(self) -> None:
         snapshot = self.validator.validate(self.loader.load(WORKBOOK))
         bartender = snapshot.post_type("bartender")

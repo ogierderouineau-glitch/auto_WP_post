@@ -146,6 +146,12 @@ Loader behavior:
 
 - deprecated app-owned tabs are ignored and a warning is logged
 - missing client-owned required tabs still fail validation
+- `post_types.knowledge_enrichment` is an optional per-post-type policy:
+  - blank or `forbidden` keeps generation bound to supplied and confirmed facts
+  - `allowed` permits established general knowledge in generated content fields
+  - enrichment never applies to fact extraction or creates confirmed/input facts
+  - values are validated through the `knowledge_enrichment` family in
+    `validation_lists`
 
 ### Sessions
 

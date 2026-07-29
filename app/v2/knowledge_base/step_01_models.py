@@ -29,6 +29,7 @@ class PostTypeConfig(WorkbookRow):
     description_de: str
     user_selectable: bool
     voice_instructions: str | None = None
+    knowledge_enrichment: str = "forbidden"
     post_shortcode_variables: tuple[str, ...] = Field(
         default=(),
         validation_alias=AliasChoices(
@@ -39,6 +40,11 @@ class PostTypeConfig(WorkbookRow):
     wp_taxonomy: str | None = None
     taxonomy_term_source: str | None = None
     assign_taxonomy_to_media: bool = False
+
+    @field_validator("knowledge_enrichment", mode="before")
+    @classmethod
+    def normalize_knowledge_enrichment(cls, value: Any) -> str:
+        return str(value or "forbidden").strip().lower()
 
     @field_validator("wp_taxonomy", mode="before")
     @classmethod
