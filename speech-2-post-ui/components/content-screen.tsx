@@ -859,13 +859,15 @@ export function ContentScreen({
               })}
             </section>
 
-            <aside className="min-w-0 space-y-4 lg:sticky lg:top-24 lg:self-start">
+            <aside className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-24 lg:self-start">
               {review && (
-                <section className="rounded-xl border border-ai/40 bg-card p-4">
-                  <div className="flex items-start justify-between gap-3">
+                <details open className="group order-2 rounded-xl border border-ai/40 bg-card">
+                  <summary className="flex cursor-pointer list-none items-start justify-between gap-3 p-4">
                     <div>
-                      <h2 className="text-sm font-semibold">Quality check</h2>
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{review.summary}</p>
+                      <h2 className="flex items-center gap-2 text-sm font-semibold">
+                        Quality check
+                        <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                      </h2>
                     </div>
                     <span className={[
                       "shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold",
@@ -877,9 +879,13 @@ export function ContentScreen({
                     ].join(" ")}>
                       {review.rating.replace("_", " ")}
                     </span>
-                  </div>
-                  {!!review.findings.length && (
-                    <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3">
+                  </summary>
+                  <div className="border-t border-border px-4 pb-4">
+                    <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                      Overall diagnostic: {review.summary}
+                    </p>
+                    {!!review.findings.length && (
+                      <div className="mt-3 flex items-center justify-between gap-2">
                       <span className="text-[11px] text-muted-foreground">
                         Select fields for revision
                       </span>
@@ -899,10 +905,10 @@ export function ContentScreen({
                           ? "Clear flagged"
                           : "Select all flagged"}
                       </button>
-                    </div>
-                  )}
-                  <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
-                    {review.findings.length ? review.findings.map((finding, index) => (
+                      </div>
+                    )}
+                    <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+                      {review.findings.length ? review.findings.map((finding, index) => (
                       <div key={`${finding.field_id}-${index}`} className="rounded-md border border-border bg-background p-3">
                         <div className="flex items-center justify-between gap-2">
                           <label className="flex min-w-0 cursor-pointer items-start gap-2">
@@ -933,16 +939,22 @@ export function ContentScreen({
                           Suggestion: {finding.suggestion}
                         </p>
                       </div>
-                    )) : (
-                      <p className="rounded-md bg-confirm/10 px-3 py-2 text-xs text-foreground">
-                        No concrete quality issues were found.
-                      </p>
-                    )}
+                      )) : (
+                        <p className="rounded-md bg-confirm/10 px-3 py-2 text-xs text-foreground">
+                          No concrete quality issues were found.
+                        </p>
+                      )}
+                    </div>
                   </div>
-                </section>
+                </details>
               )}
-              <section id="s2p-content-internal-links" className="scroll-mt-28 rounded-xl border border-border bg-card p-4">
-                <h2 className="text-sm font-semibold">Internal links</h2>
+              <details open id="s2p-content-internal-links" className="group order-1 scroll-mt-28 rounded-xl border border-border bg-card">
+                <summary className="flex cursor-pointer list-none items-center gap-2 p-4">
+                  <h2 className="text-sm font-semibold">Internal links</h2>
+                  <span className="text-xs text-muted-foreground">({linkCandidates.length})</span>
+                  <ChevronDown className="ml-auto size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="border-t border-border px-4 pb-4">
                 <div className="mt-3 space-y-2">
                   {linkCandidates.length ? linkCandidates.map((candidate) => {
                     const used = usedLinkIds.has(candidate.link_id)
@@ -1018,10 +1030,11 @@ export function ContentScreen({
                     </span>
                   </span>
                 </label>
-              </section>
+                </div>
+              </details>
 
               {!!Object.keys(session.validation_report || {}).length && (
-                <details className="group rounded-xl border border-warn/40 bg-card p-4">
+                <details className="group order-3 rounded-xl border border-warn/40 bg-card p-4">
                   <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold">
                     <AlertTriangle className="size-4 text-warn-foreground" />
                     Validation report
