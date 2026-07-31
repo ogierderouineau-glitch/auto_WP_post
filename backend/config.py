@@ -90,8 +90,16 @@ def _load_clients() -> tuple[dict[str, WordPressClientConfig], Path | None]:
         storage = value.get("storage")
         if not isinstance(wordpress, dict):
             raise RuntimeError(f"clients.{client_id}.wordpress must be an object.")
-        if not isinstance(storage, dict):
-            raise RuntimeError(f"clients.{client_id}.storage must be an object.")
+
+        storage_config: dict[str, Any] = {}
+        if isinstance(storage, dict):
+            storage_config = storage
+        else:
+            storage_config = {
+                "session_prefix": value.get("session_prefix"),
+                "knowledge_workbook": value.get("knowledge_workbook"),
+            }
+
         import_key = _required_string(value, "import_api_key", f"clients.{client_id}")
         if import_key in import_keys:
             raise RuntimeError(f"Duplicate import_api_key in {path}.")
@@ -105,9 +113,9 @@ def _load_clients() -> tuple[dict[str, WordPressClientConfig], Path | None]:
             wp_base_url=_required_string(wordpress, "base_url", f"clients.{client_id}.wordpress"),
             wp_username=_required_string(wordpress, "username", f"clients.{client_id}.wordpress"),
             wp_app_password=_required_string(wordpress, "app_password", f"clients.{client_id}.wordpress"),
-            session_prefix=_required_string(storage, "session_prefix", f"clients.{client_id}.storage").strip("/"),
+            session_prefix=_required_string(storage_config, "session_prefix", f"clients.{client_id}.storage").strip("/"),
             knowledge_workbook=_required_string(
-                storage, "knowledge_workbook", f"clients.{client_id}.storage"
+                storage_config, "knowledge_workbook", f"clients.{client_id}.storage"
             ).strip("/"),
         )
     return clients, path

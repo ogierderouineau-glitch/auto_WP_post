@@ -58,6 +58,29 @@ class ClientConfigurationTests(unittest.TestCase):
                 "beta": client_record("beta", "same-key"),
             })
 
+    def test_legacy_flat_storage_fields_are_accepted(self) -> None:
+        clients, _ = self.load({
+            "flairlab": {
+                "name": "FLAIRLAB",
+                "country": "DE",
+                "language": "de-DE",
+                "import_api_key": "flairlab-key",
+                "wordpress": {
+                    "base_url": "https://flairlab.example",
+                    "username": "flairlab-user",
+                    "app_password": "flairlab-password",
+                },
+                "session_prefix": "clients/flairlab/v2-sessions",
+                "knowledge_workbook": "clients/flairlab/knowledge/current.xlsm",
+            }
+        })
+
+        self.assertEqual(clients["flairlab"].session_prefix, "clients/flairlab/v2-sessions")
+        self.assertEqual(
+            clients["flairlab"].knowledge_workbook,
+            "clients/flairlab/knowledge/current.xlsm",
+        )
+
     def test_client_paths_use_global_buckets_and_relative_client_paths(self) -> None:
         acme = config.WordPressClientConfig(
             client_id="acme",
