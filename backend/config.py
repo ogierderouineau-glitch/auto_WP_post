@@ -47,6 +47,13 @@ def _required_string(record: dict[str, Any], key: str, context: str) -> str:
     return value.strip()
 
 
+def _string_or_default(record: dict[str, Any], key: str, context: str, default: str) -> str:
+    value = record.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return default
+
+
 def _load_clients() -> tuple[dict[str, WordPressClientConfig], Path | None]:
     path = next((candidate for candidate in CLIENT_CONFIG_PATHS if candidate.is_file()), None)
     if path is None:
@@ -113,9 +120,17 @@ def _load_clients() -> tuple[dict[str, WordPressClientConfig], Path | None]:
             wp_base_url=_required_string(wordpress, "base_url", f"clients.{client_id}.wordpress"),
             wp_username=_required_string(wordpress, "username", f"clients.{client_id}.wordpress"),
             wp_app_password=_required_string(wordpress, "app_password", f"clients.{client_id}.wordpress"),
-            session_prefix=_required_string(storage_config, "session_prefix", f"clients.{client_id}.storage").strip("/"),
-            knowledge_workbook=_required_string(
-                storage_config, "knowledge_workbook", f"clients.{client_id}.storage"
+            session_prefix=_string_or_default(
+                storage_config,
+                "session_prefix",
+                f"clients.{client_id}.storage",
+                f"clients/{client_id}/v2-sessions",
+            ).strip("/"),
+            knowledge_workbook=_string_or_default(
+                storage_config,
+                "knowledge_workbook",
+                f"clients.{client_id}.storage",
+                f"clients/{client_id}/knowledge/current.xlsm",
             ).strip("/"),
         )
     return clients, path
