@@ -8,12 +8,14 @@ services:
     healthCheckPath: /health
     maxShutdownDelaySeconds: 120
     envVars:
-      - key: REQUIRE_IMPORT_API_KEY
-        value: "true"
-      - key: IMPORT_API_KEY
-        sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: GOOGLE_CLOUD_PROJECT
+        value: auto-wordpress-post-499518
+      - key: GCS_DATA_BUCKET
+        value: auto-wordpress-post-499518-speech2post-data
+      - key: GCS_KNOWLEDGE_BUCKET
+        value: auto-wordpress-post-499518-speech2post-knowledge
       - key: V2_LANGUAGE_MODEL
         value: gpt-5.6
       - key: V2_TEXT_REASONING_EFFORT
@@ -22,24 +24,6 @@ services:
         value: gpt-5-mini
       - key: V2_REVISION_MODEL
         value: gpt-5-mini
-      - key: FLAIRLAB_WP_BASE_URL
-        sync: false
-      - key: FLAIRLAB_WP_USERNAME
-        sync: false
-      - key: FLAIRLAB_WP_APP_PASSWORD
-        sync: false
-      - key: CONTENT_PIPELINE_VERSION
-        value: v2
-      - key: KNOWLEDGE_SOURCE_POLICY
-        value: gcs_required
-      - key: KNOWLEDGE_WORKBOOK_GCS_URI
-        value: gs://auto-wordpress-post-499518-speech2post-knowledge/clients/flairlab/knowledge/current.xlsm
-      - key: KNOWLEDGE_WORKBOOK_PATH
-        value: /tmp/speech2post/knowledge/flairlab.xlsm
-      - key: V2_KNOWLEDGE_WORKBOOK_PATH
-        value: /tmp/speech2post/knowledge/flairlab.xlsm
-      - key: V2_SESSION_GCS_PREFIX
-        value: gs://auto-wordpress-post-499518-speech2post-data/clients/flairlab/v2-sessions
       - key: GOOGLE_APPLICATION_CREDENTIALS
         value: /etc/secrets/gcp-service-account.json
       - key: V2_MAX_IMAGE_BYTES
@@ -52,7 +36,7 @@ services:
     runtime: node
     plan: free
     region: frankfurt
-    rootDir: speech-2-post-ui
+    rootDir: frontend
     buildCommand: npm install --global pnpm@10.34.3 && pnpm install --frozen-lockfile && pnpm run typecheck && pnpm run build
     startCommand: pnpm start
     healthCheckPath: /

@@ -1,0 +1,1357 @@
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+import unittest
+from unittest.mock import patch
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+from backend.app.context.step_01_builder import GenerationContextBuilder
+from backend.app.internal_links.step_01_service import EligibleLinks, InternalLinkService
+from backend.app.knowledge_base.step_01_models import ImageMetadataField, InternalLinkRecord
+from backend.app.knowledge_base.step_02_loader import WorkbookLoader
+from backend.app.knowledge_base.step_03_validator import WorkbookValidator
+from backend.app.models.step_01_session import ContentSession, FactValue, MediaReference
+from backend.app.payloads.step_02_builder import PayloadBuilder
+from backend.app.sessions.step_01_repository import FileSessionRepository
+from backend.app.workflow.step_01_conditions import condition_matches
+from backend.app.workflow.step_02_clarification import ClarificationService
+from backend.app.sessions.step_03_service import ContentSessionService
+
+WORKBOOK = Path(
+    os.getenv(
+        "V2_TEST_WORKBOOK",
+        "data/knowledge/test-client.xlsm",
+    )
+)
+
+
+class StaticKnowledge:
+    def __init__(self, snapshot: object) -> None:
+        self.snapshot = snapshot
+
+    def current(self) -> object:
+        return self.snapshot
+
+    def by_hash(self, workbook_hash: str) -> object:
+        self.assert_hash = workbook_hash
+        return self.snapshot
+
+
+class MetadataOnlyLanguageModel:
+    last_usage: dict[str, Any] | None = None
+
+    def structured(self, *, task: str, context: dict[str, Any], schema: type[Any]) -> Any:
+        if task != "image_metadata_batch":
+            raise AssertionError(f"Unexpected fake model task: {task}")
+        self.last_usage = {
+            "service": "openai_text",
+            "call_name": task,
+            "model": "fake-text",
+            "prompt_tokens": 1,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+            "estimated_cost_usd": None,
+        }
+        user_context = json.loads(context["messages"][1]["content"])["context"]
+        return schema.model_validate({
+            "images": [
+                {"media_id": image["media_id"], "image_alt": "generated image_alt"}
+                for image in user_context["images"]
+            ]
+        })
+
+
+class ContentQualityLanguageModel:
+    last_usage: dict[str, Any] | None = None
+
+    def structured(self, *, task: str, context: dict[str, Any], schema: type[Any]) -> Any:
+        if task != "content_quality_check":
+            raise AssertionError(f"Unexpected fake model task: {task}")
+        self.last_usage = {
+            "service": "openai_text",
+            "call_name": task,
+            "model": "fake-reviewer",
+            "prompt_tokens": 5,
+            "completion_tokens": 3,
+            "total_tokens": 8,
+            "estimated_cost_usd": None,
+        }
+        return schema.model_validate({
+            "rating": "needs_polish",
+            "summary": "One phrase sounds generic.",
+            "findings": [{
+                "field_id": "shared:title",
+                "category": "generic_marketing",
+                "severity": "medium",
+                "explanation": "The wording is interchangeable.",
+                "suggestion": "Use a concrete detail from the confirmed facts.",
+            }],
+        })
+
+
+class FakeObjectStorage:
+    def __init__(self) -> None:
+        self.downloads: list[tuple[str, Path]] = []
+
+    def put(self, source: Path, key: str) -> str:
+        return f"gs://bucket/{key}"
+
+    def get(self, uri: str, destination: Path) -> Path:
+        self.downloads.append((uri, destination))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"image")
+        return destination
+
+
+class FakeImageEditor:
+    last_usage = {
+        "service": "openai_images",
+        "call_name": "image_optimization",
+        "model": "fake-image",
+        "prompt_tokens": 1,
+        "completion_tokens": 1,
+        "total_tokens": 2,
+        "estimated_cost_usd": None,
+    }
+
+    def __init__(self) -> None:
+        self.instructions: list[dict[str, Any]] = []
+
+    def edit(self, source: Path, destination: Path, instructions: dict[str, Any]) -> Path:
+        self.instructions.append(instructions)
+        destination.write_bytes(source.read_bytes() + b"-edited")
+        return destination
+
+
+class PartialUpdateDiffTests(unittest.TestCase):
+    def test_post_title_edit_maps_to_wordpress_title_only(self) -> None:
+        snapshot = SimpleNamespace(
+            shared_fields=(
+                SimpleNamespace(
+                    field_key="post_title",
+                    enabled=True,
+                    include_in_payload=True,
+                    destination_type="wordpress",
+                    destination_key="title",
+                ),
+                SimpleNamespace(
+                    field_key="seo_title",
+                    enabled=True,
+                    include_in_payload=True,
+                    destination_type="yoast",
+                    destination_key="_yoast_wpseo_title",
+                ),
+            ),
+            acf_fields=(),
+        )
+
+        fields = ContentSessionService._wordpress_partial_update_fields(
+            snapshot,
+            "event",
+            shared_fields={"post_title": "Updated title"},
+            acf_source_fields={},
+        )
+
+        self.assertEqual(fields["wordpress"], {"title"})
+        self.assertEqual(fields["meta"], set())
+        self.assertEqual(fields["acf"], set())
+
+    def test_missing_previous_payload_does_not_infer_all_fields_changed(self) -> None:
+        fields = ContentSessionService._wordpress_payload_diff_fields(
+            {
+                "wordpress": {
+                    "title": "Updated title",
+                    "status": "draft",
+                },
+                "meta": {"yoast_wpseo_title": "SEO"},
+                "acf": {"hero_h1": "Hero"},
+            },
+            {},
+        )
+
+        self.assertEqual(fields["wordpress"], set())
+        self.assertEqual(fields["meta"], set())
+        self.assertEqual(fields["acf"], set())
+
+    def test_materialized_output_path_does_not_mark_media_as_changed(self) -> None:
+        current = {
+            "wordpress": {},
+            "meta": {},
+            "acf": {},
+            "media": [{"media_id": "image-1", "path": "/stored/image.webp"}],
+        }
+        previous = {
+            **current,
+            "media": [{
+                "media_id": "image-1",
+                "path": "/stored/image.webp",
+                "output": "/temporary/image.webp",
+            }],
+        }
+
+        fields = ContentSessionService._wordpress_payload_diff_fields(current, previous)
+
+        self.assertNotIn("media", fields["wordpress"])
+
+
+class ContentQualityCheckTests(unittest.TestCase):
+    def test_review_is_saved_without_rewriting_draft_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = FileSessionRepository(temporary)
+            session = ContentSession(
+                session_id="session-1",
+                user_id="user-1",
+                post_type_key="event",
+                state="needs_review",
+                workbook_hash="hash",
+                language="de-DE",
+                shared_fields={"title": "Ein unvergessliches Erlebnis"},
+                wordpress_payload={"wordpress": {"title": "Ein unvergessliches Erlebnis"}},
+                generation_trace={
+                    "quality_check": {
+                        "rating": "natural",
+                        "summary": "Previous result",
+                        "findings": [],
+                    }
+                },
+            )
+            session = repository.create(session)
+            model = ContentQualityLanguageModel()
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(SimpleNamespace()),
+                repository=repository,
+                revision_language_model=model,
+            )
+
+            reviewed = service.review_content_quality(
+                session.session_id,
+                expected_version=session.version,
+            )
+
+            report = reviewed.generation_trace["quality_check"]
+            self.assertEqual(report["rating"], "needs_polish")
+            self.assertNotEqual(report["summary"], "Previous result")
+            self.assertEqual(report["findings"][0]["field_id"], "shared:title")
+            self.assertEqual(reviewed.shared_fields, session.shared_fields)
+            self.assertEqual(reviewed.ai_usage["total_tokens"], 8)
+
+
+class InternalLinkInjectionTests(unittest.TestCase):
+    def test_internal_link_placements_respect_linkable_fields_and_budgets(self) -> None:
+        first = InternalLinkRecord(
+            sheet_row=1,
+            link_id="mobile-bar",
+            post_type_key="event",
+            keyword="mobile Cocktailbar",
+            anchor_text="mobile Cocktailbar",
+            anchor_variants=(),
+            target_url="https://staging.flairlab.de/mobile-cocktailbar/",
+            link_role="service",
+            category="bar",
+            priority="high",
+            active=True,
+            usage_context="Use when mobile bars are mentioned.",
+            language="de-DE",
+        )
+        second = InternalLinkRecord(
+            sheet_row=2,
+            link_id="show-barkeeper",
+            post_type_key="event",
+            keyword="Showbarkeeper Berlin",
+            anchor_text="Showbarkeeper Berlin",
+            anchor_variants=(),
+            target_url="https://staging.flairlab.de/showbarkeeper-berlin/",
+            link_role="service",
+            category="bar",
+            priority="medium",
+            active=True,
+            usage_context="Use when show bartenders are relevant.",
+            language="de-DE",
+        )
+        eligible = EligibleLinks(candidates=(first, second))
+        field_schema = SimpleNamespace(max_internal_links=1)
+
+        result = InternalLinkService().inject_placements(
+            eligible,
+            [
+                {
+                    "link_id": "mobile-bar",
+                    "field_key": "cta_text",
+                    "match_text": "mobile Cocktailbar",
+                    "anchor_text": "mobile Cocktailbar",
+                    "placement_mode": "wrap_existing_text",
+                },
+                {
+                    "link_id": "show-barkeeper",
+                    "field_key": "cta_text",
+                    "match_text": "Showbarkeeper Berlin",
+                    "anchor_text": "Showbarkeeper Berlin",
+                    "placement_mode": "wrap_existing_text",
+                },
+            ],
+            acf_source_fields={
+                "cta_text": "Jetzt mobile Cocktailbar und Showbarkeeper Berlin anfragen.",
+            },
+            linkable_fields={"cta_text": field_schema},
+        )
+
+        self.assertIn("<a", result.acf_source_fields["cta_text"])
+        self.assertEqual(len(result.injected), 1)
+        self.assertEqual(result.skipped[0]["reason"], "field_link_budget_exceeded")
+
+    def test_existing_anchor_placements_honor_each_requested_acf_destination(self) -> None:
+        first = InternalLinkRecord(
+            sheet_row=1, link_id="mobile-bar", post_type_key="event",
+            keyword="mobile Cocktailbar", anchor_text="mobile Cocktailbar", anchor_variants=(),
+            target_url="https://example.com/mobile-bar/", link_role="service", category="bar",
+            priority="high", active=True, usage_context="Mobile bar", language="de-DE",
+        )
+        second = InternalLinkRecord(
+            sheet_row=2, link_id="smoothie-bike", post_type_key="event",
+            keyword="Smoothie-Fahrrad", anchor_text="Smoothie-Fahrrad", anchor_variants=(),
+            target_url="https://example.com/smoothie-bike/", link_role="service", category="smoothie",
+            priority="high", active=True, usage_context="Smoothie bike", language="de-DE",
+        )
+        eligible = EligibleLinks(candidates=(first, second))
+        fields = {
+            "hero_intro": SimpleNamespace(acf_field_name="hero_text", max_internal_links=1),
+            "event_story": SimpleNamespace(acf_field_name="story_text", max_internal_links=1),
+        }
+        values = {
+            "hero_intro": "Unsere mobile Cocktailbar begrüßte die Gäste.",
+            "event_story": "Das Smoothie-Fahrrad war den ganzen Abend beliebt.",
+        }
+
+        placements = InternalLinkService().existing_anchor_placements(
+            eligible,
+            [
+                {"link_id": "mobile-bar", "anchor_text": "mobile Cocktailbar", "destination_acf": "hero_text"},
+                {"link_id": "smoothie-bike", "anchor_text": "Smoothie-Fahrrad", "destination_acf": "story_text"},
+            ],
+            acf_source_fields=values,
+            linkable_fields=fields,
+        )
+
+        self.assertEqual(
+            {(item["link_id"], item["field_key"]) for item in placements},
+            {("mobile-bar", "hero_intro"), ("smoothie-bike", "event_story")},
+        )
+        result = InternalLinkService().inject_placements(
+            eligible, placements, acf_source_fields=values, linkable_fields=fields,
+        )
+        self.assertEqual(len(result.injected), 2)
+
+    def test_sequential_placement_moves_nested_anchor_to_another_field(self) -> None:
+        mojito_razz = InternalLinkRecord(
+            sheet_row=1, link_id="mojito-razz", post_type_key="cocktail",
+            keyword="Mojito Razz", anchor_text="Mojito Razz", anchor_variants=(),
+            target_url="https://example.com/mojito-razz/", link_role="guide", category="cocktail",
+            priority="high", active=True, usage_context="Mojito Razz", language="de-DE",
+        )
+        mojito = InternalLinkRecord(
+            sheet_row=2, link_id="mojito", post_type_key="cocktail",
+            keyword="Mojito", anchor_text="Mojito", anchor_variants=(),
+            target_url="https://example.com/mojito/", link_role="guide", category="cocktail",
+            priority="high", active=True, usage_context="Mojito", language="de-DE",
+        )
+        eligible = EligibleLinks(candidates=(mojito_razz, mojito))
+        fields = {
+            "ablauf_text": SimpleNamespace(acf_field_name="ablauf_text", max_internal_links=2),
+            "barkeeper_talk_text": SimpleNamespace(acf_field_name="barkeeper_talk_text", max_internal_links=2),
+        }
+        values = {
+            "ablauf_text": "Den Mojito Razz kurz verrühren.",
+            "barkeeper_talk_text": "Beim Mojito entscheidet die Minze.",
+        }
+
+        for selections in (
+            [
+                {"link_id": "mojito-razz", "anchor_text": "Mojito Razz"},
+                {"link_id": "mojito", "anchor_text": "Mojito"},
+            ],
+            [
+                {"link_id": "mojito", "anchor_text": "Mojito"},
+                {"link_id": "mojito-razz", "anchor_text": "Mojito Razz"},
+            ],
+        ):
+            with self.subTest(order=[item["link_id"] for item in selections]):
+                result = InternalLinkService().inject_existing_anchors(
+                    eligible,
+                    selections,
+                    acf_source_fields=values,
+                    linkable_fields=fields,
+                )
+
+                self.assertEqual(len(result.injected), 2)
+                self.assertEqual(
+                    {item["link_id"] for item in result.injected},
+                    {"mojito-razz", "mojito"},
+                )
+                self.assertIn("https://example.com/mojito-razz/", result.acf_source_fields["ablauf_text"])
+                self.assertIn("https://example.com/mojito/", result.acf_source_fields["barkeeper_talk_text"])
+
+    def test_inject_placements_does_not_reuse_existing_link_target(self) -> None:
+        existing = InternalLinkRecord(
+            sheet_row=1,
+            link_id="mobile-bar",
+            post_type_key="event",
+            keyword="mobile Cocktailbar",
+            anchor_text="mobile Cocktailbar",
+            anchor_variants=(),
+            target_url="https://example.com/mobile-bar/",
+            link_role="service",
+            category="bar",
+            priority="high",
+            active=True,
+            usage_context="Mobile bar",
+            language="de-DE",
+        )
+        eligible = EligibleLinks(candidates=(existing,))
+        field_schema = SimpleNamespace(acf_field_name="cta_text", max_internal_links=3)
+
+        result = InternalLinkService().inject_placements(
+            eligible,
+            [
+                {
+                    "link_id": "mobile-bar",
+                    "field_key": "cta_text",
+                    "match_text": "mobile Cocktailbar",
+                    "anchor_text": "mobile Cocktailbar",
+                    "placement_mode": "wrap_existing_text",
+                },
+            ],
+            acf_source_fields={
+                "hero_intro": 'Die <a href="https://example.com/mobile-bar/">mobile Cocktailbar</a> ist schon verlinkt.',
+                "cta_text": "Jetzt mobile Cocktailbar anfragen.",
+            },
+            linkable_fields={"cta_text": field_schema},
+        )
+
+        self.assertEqual(result.injected, [])
+        self.assertEqual(result.skipped[0]["reason"], "duplicate_target")
+        self.assertEqual(
+            result.acf_source_fields["cta_text"],
+            "Jetzt mobile Cocktailbar anfragen.",
+        )
+
+    def test_internal_link_ranking_prefers_smoothie_link_for_smoothie_event(self) -> None:
+        smoothie = InternalLinkRecord(
+            sheet_row=1,
+            link_id="link_018",
+            post_type_key="*",
+            keyword="Smoothiebar Berlin",
+            anchor_text="Smoothiebar in Berlin",
+            anchor_variants=("Smoothiebar", "mobile Smoothiebar", "Smoothie-Catering", "Smoothie-Bar"),
+            target_url="https://flairlab.de/smoothie-catering/",
+            link_role="service",
+            category="Service",
+            priority="medium",
+            active=True,
+            usage_context="Für Smoothiebar, Smoothie-Fahrrad, alkoholfreie Konzepte, Smoothies",
+            city="Berlin",
+            language="de-DE",
+        )
+        generic = InternalLinkRecord(
+            sheet_row=2,
+            link_id="link_001",
+            post_type_key="*",
+            keyword="Cocktailcatering Berlin",
+            anchor_text="Cocktailcatering in Berlin",
+            anchor_variants=(),
+            target_url="https://flairlab.de/cocktailcatering/",
+            link_role="service",
+            category="Service",
+            priority="high",
+            active=True,
+            usage_context="Für Cocktailcatering und mobile Bars",
+            city="Berlin",
+            language="de-DE",
+        )
+
+        ranked = InternalLinkService().rank(
+            EligibleLinks(candidates=(generic, smoothie)),
+            source_text=(
+                "Politische Promotionsveranstaltung mit Smoothie-Fahrrad, "
+                "Smoothie-Catering, frischen Smoothies und alkoholfreien Konzepten in Berlin."
+            ),
+            maximum=1,
+        )
+
+        self.assertEqual(ranked, [{"link_id": "link_018", "anchor_text": "Smoothiebar in Berlin"}])
+
+    def test_internal_link_ranking_uses_approved_anchor_variants_as_strong_signal(self) -> None:
+        smoothie = InternalLinkRecord(
+            sheet_row=1,
+            link_id="link_018",
+            post_type_key="*",
+            keyword="Smoothiebar Berlin",
+            anchor_text="Smoothiebar in Berlin",
+            anchor_variants=("Smoothie-Catering",),
+            target_url="https://flairlab.de/smoothie-catering/",
+            link_role="service",
+            category="Service",
+            priority="medium",
+            active=True,
+            usage_context="Für alkoholfreie Konzepte",
+            city="Berlin",
+            language="de-DE",
+        )
+        generic = InternalLinkRecord(
+            sheet_row=2,
+            link_id="link_001",
+            post_type_key="*",
+            keyword="Cocktailcatering Berlin",
+            anchor_text="Cocktailcatering in Berlin",
+            anchor_variants=(),
+            target_url="https://flairlab.de/cocktailcatering/",
+            link_role="service",
+            category="Service",
+            priority="high",
+            active=True,
+            usage_context="Für Events in Berlin",
+            city="Berlin",
+            language="de-DE",
+        )
+
+        ranked = InternalLinkService().rank(
+            EligibleLinks(candidates=(generic, smoothie)),
+            source_text="Das Smoothie-Catering war der Mittelpunkt der Promotion.",
+            maximum=1,
+        )
+
+        self.assertEqual(ranked[0]["link_id"], "link_018")
+
+    def test_internal_link_placement_can_rewrite_one_sentence_with_approved_anchor(self) -> None:
+        record = InternalLinkRecord(
+            sheet_row=1,
+            link_id="smoothie-bar",
+            post_type_key="event",
+            keyword="Smoothiebar Berlin",
+            anchor_text="Smoothiebar in Berlin",
+            anchor_variants=("mobile Smoothiebar",),
+            target_url="https://flairlab.de/smoothie-catering/",
+            link_role="service",
+            category="smoothie",
+            priority="high",
+            active=True,
+            usage_context="Use for smoothie events in the Berlin area.",
+            language="de-DE",
+        )
+        result = InternalLinkService().inject_placements(
+            EligibleLinks(candidates=(record,)),
+            [
+                {
+                    "link_id": "smoothie-bar",
+                    "field_key": "event_story",
+                    "match_text": "mobile Smoothiebar",
+                    "anchor_text": "mobile Smoothiebar",
+                    "placement_mode": "rewrite_single_sentence",
+                    "sentence_index": 1,
+                    "replacement_sentence": "Die mobile Smoothiebar versorgte die Gäste in Potsdam.",
+                }
+            ],
+            acf_source_fields={
+                "event_story": "Das Event fand in Potsdam statt. Eine mobile Station versorgte die Gäste. Die Stimmung war entspannt.",
+            },
+            linkable_fields={"event_story": SimpleNamespace(max_internal_links=1)},
+        )
+
+        self.assertEqual(len(result.injected), 1)
+        self.assertIn(
+            '<a href="https://flairlab.de/smoothie-catering/">mobile Smoothiebar</a>',
+            result.acf_source_fields["event_story"],
+        )
+        self.assertNotIn("Eine mobile Station", result.acf_source_fields["event_story"])
+
+    def test_internal_link_sentence_rewrite_rejects_unapproved_phrase(self) -> None:
+        record = InternalLinkRecord(
+            sheet_row=1,
+            link_id="smoothie-bar",
+            post_type_key="event",
+            keyword="Smoothiebar Berlin",
+            anchor_text="Smoothiebar in Berlin",
+            anchor_variants=(),
+            target_url="https://flairlab.de/smoothie-catering/",
+            link_role="service",
+            category="smoothie",
+            priority="high",
+            active=True,
+            usage_context="Use for smoothie events.",
+            language="de-DE",
+        )
+        result = InternalLinkService().inject_placements(
+            EligibleLinks(candidates=(record,)),
+            [
+                {
+                    "link_id": "smoothie-bar",
+                    "field_key": "event_story",
+                    "match_text": "beliebige Werbung",
+                    "anchor_text": "Smoothiebar in Berlin",
+                    "placement_mode": "rewrite_single_sentence",
+                    "sentence_index": 0,
+                    "replacement_sentence": "Beliebige Werbung für Potsdam.",
+                }
+            ],
+            acf_source_fields={"event_story": "Eine Station versorgte die Gäste."},
+            linkable_fields={"event_story": SimpleNamespace(max_internal_links=1)},
+        )
+
+        self.assertFalse(result.injected)
+        self.assertEqual(result.skipped[0]["reason"], "rewrite_anchor_not_approved")
+
+
+class FeaturedImageMetadataRegressionTests(unittest.TestCase):
+    def test_video_metadata_reuses_image_metadata_rules_and_task(self) -> None:
+        fields = tuple(
+            ImageMetadataField(
+                sheet_row=index,
+                field_key=field_key,
+                destination_type="meta",
+                destination_key=field_key,
+                description_de=field_key,
+                required=True,
+                value_type="text",
+                generation_stage="draft",
+                source_mode="generated",
+                enabled=True,
+            )
+            for index, field_key in enumerate(
+                ("image_title", "image_caption", "image_description"),
+                1,
+            )
+        )
+        snapshot = SimpleNamespace(
+            image_metadata_fields=fields,
+            agent_instructions=(),
+            image_metadata_rules=(),
+            acf_fields=(),
+        )
+
+        class VideoMetadataModel:
+            last_usage = None
+            task = ""
+            context: dict[str, Any] = {}
+
+            def structured(self, *, task: str, context: dict[str, Any], schema: type[Any]) -> Any:
+                self.task = task
+                self.context = json.loads(context["messages"][1]["content"])["context"]
+                return schema.model_validate({"images": [{
+                    "media_id": "video-1",
+                    "image_title": "Titel",
+                    "image_caption": "Bildunterschrift",
+                    "image_description": "Beschreibung",
+                }]})
+
+        model = VideoMetadataModel()
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            state="needs_review",
+            workbook_hash="hash",
+            language="de-DE",
+            video_refs=[MediaReference(
+                media_id="video-1",
+                filename="clip.mp4",
+                storage_uri="local://clip.mp4",
+                content_type="video/mp4",
+                size_bytes=1,
+            )],
+            processed_videos=[{
+                "media_id": "video-1",
+                "poster_filename": "clip-poster.jpg",
+                "poster_path": "local://clip-poster.jpg",
+            }],
+            video_context_transcripts={"video-1": "Das Video zeigt den Empfang."},
+        )
+        service = ContentSessionService(
+            knowledge=StaticKnowledge(snapshot),
+            repository=FileSessionRepository(tempfile.mkdtemp()),
+            language_model=model,
+        )
+
+        updated = service._generate_missing_video_metadata(
+            snapshot,
+            session,
+            overwrite_existing=True,
+        )
+
+        self.assertEqual(model.task, "image_metadata_batch")
+        self.assertEqual(
+            model.context["images"][0]["image_context_transcript"],
+            "Das Video zeigt den Empfang.",
+        )
+        self.assertEqual(updated.video_metadata[0]["video_title"], "Titel")
+        self.assertEqual(updated.video_metadata[0]["video_caption"], "Bildunterschrift")
+        self.assertEqual(updated.video_metadata[0]["video_description"], "Beschreibung")
+
+    def test_metadata_overwrite_preserves_selected_featured_image(self) -> None:
+        snapshot = SimpleNamespace(
+            image_metadata_fields=(
+                ImageMetadataField(
+                    sheet_row=1,
+                    field_key="image_alt",
+                    destination_type="meta",
+                    destination_key="alt",
+                    description_de="Alternativtext",
+                    required=True,
+                    value_type="text",
+                    generation_stage="draft",
+                    source_mode="generated",
+                    enabled=True,
+                ),
+            ),
+            agent_instructions=(),
+            image_metadata_rules=(),
+            acf_fields=(),
+        )
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            state="needs_review",
+            workbook_hash="hash",
+            language="de-DE",
+            image_refs=[
+                MediaReference(
+                    media_id="image-1",
+                    filename="first.png",
+                    storage_uri="local://first.png",
+                    content_type="image/png",
+                    size_bytes=1,
+                ),
+                MediaReference(
+                    media_id="image-2",
+                    filename="second.png",
+                    storage_uri="local://second.png",
+                    content_type="image/png",
+                    size_bytes=1,
+                ),
+            ],
+            processed_images=[
+                {"media_id": "image-1", "filename": "first.webp", "path": "local://first.webp"},
+                {"media_id": "image-2", "filename": "second.webp", "path": "local://second.webp"},
+            ],
+            image_metadata=[
+                {"media_id": "image-2", "image_usage": "featured", "image_priority": 1},
+                {"media_id": "image-1", "image_usage": "gallery", "image_priority": 2},
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(snapshot),
+                repository=FileSessionRepository(temporary),
+                language_model=MetadataOnlyLanguageModel(),
+            )
+
+            updated = service._generate_missing_image_metadata(
+                snapshot,
+                session,
+                overwrite_existing=True,
+            )
+
+        featured = [
+            row for row in updated.image_metadata
+            if row.get("image_usage") == "featured"
+        ]
+        self.assertEqual(len(featured), 1)
+        self.assertEqual(featured[0]["media_id"], "image-2")
+        self.assertEqual(featured[0]["image_priority"], 1)
+
+    def test_media_path_materializes_gcs_uri_before_file_response(self) -> None:
+        storage = FakeObjectStorage()
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            state="uploading",
+            workbook_hash="hash",
+            language="de-DE",
+            image_refs=[
+                MediaReference(
+                    media_id="image-1",
+                    filename="first.png",
+                    storage_uri="gs://bucket/session/originals/first.png",
+                    content_type="image/png",
+                    size_bytes=1,
+                ),
+            ],
+            processed_images=[
+                {
+                    "media_id": "image-1",
+                    "filename": "first.webp",
+                    "path": "gs://bucket/session/processed/first.webp",
+                },
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = FileSessionRepository(temporary)
+            repository.create(session)
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(SimpleNamespace()),
+                repository=repository,
+                object_storage=storage,
+            )
+
+            path = service.media_path(
+                session.session_id,
+                kind="image",
+                filename="first.webp",
+            )
+
+        self.assertTrue(path.is_file())
+        self.assertNotEqual(path.parts[0], "gs:")
+        self.assertEqual(storage.downloads[0][0], "gs://bucket/session/processed/first.webp")
+
+    def test_publication_media_materializes_gcs_uri_before_wordpress_upload(self) -> None:
+        storage = FakeObjectStorage()
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            state="ready_to_publish",
+            workbook_hash="hash",
+            language="de-DE",
+            processed_images=[
+                {
+                    "media_id": "image-1",
+                    "filename": "first.webp",
+                    "path": "gs://bucket/session/processed/first.webp",
+                },
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(SimpleNamespace()),
+                repository=FileSessionRepository(temporary),
+                object_storage=storage,
+            )
+
+            media = service._materialize_publication_media(
+                session,
+                [
+                    {
+                        "media_id": "image-1",
+                        "path": "gs://bucket/session/processed/first.webp",
+                        "image_usage": "featured",
+                    }
+                ],
+            )
+
+        self.assertTrue(Path(media[0]["path"]).is_file())
+        self.assertFalse(media[0]["path"].startswith("gs:"))
+        self.assertEqual(media[0]["output"], media[0]["path"])
+        self.assertEqual(storage.downloads[0][0], "gs://bucket/session/processed/first.webp")
+
+    def test_optimize_image_uses_edited_file_size_before_remote_put(self) -> None:
+        storage = FakeObjectStorage()
+        editor = FakeImageEditor()
+        instruction = SimpleNamespace(
+            instruction_id="analysis_005",
+            enabled=True,
+            owner="language_model",
+            post_type_key="*",
+            workflow_stage="ai_image_edit",
+            condition="ai_edit_requested",
+            priority="high",
+            instruction_de="Gesichter beibehalten.",
+            expected_behavior="Nur die gewünschte Änderung ausführen.",
+        )
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            state="uploading",
+            workbook_hash="hash",
+            language="de-DE",
+            image_refs=[
+                MediaReference(
+                    media_id="image-1",
+                    filename="first.png",
+                    storage_uri="gs://bucket/session/images/first.png",
+                    content_type="image/png",
+                    size_bytes=5,
+                ),
+            ],
+            processed_images=[
+                {
+                    "media_id": "image-1",
+                    "filename": "first.webp",
+                    "path": "gs://bucket/session/processed/first.webp",
+                    "operations": [],
+                },
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = FileSessionRepository(temporary)
+            repository.create(session)
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(SimpleNamespace(agent_instructions=(instruction,))),
+                repository=repository,
+                object_storage=storage,
+                image_editor=editor,
+            )
+
+            updated = service.optimize_image(
+                session.session_id,
+                filename="first.png",
+                prompt="Make it brighter.",
+                expected_version=session.version,
+            )
+
+        self.assertEqual(updated.processed_images[0]["size_bytes"], len(b"image-edited"))
+        self.assertEqual(updated.processed_images[0]["path"], "gs://bucket/session-1/processed/first.webp")
+        self.assertIn("openai_image_optimization", updated.processed_images[0]["operations"])
+        self.assertIn("Gesichter beibehalten.", editor.instructions[0]["prompt"])
+        self.assertIn("Nur die gewünschte Änderung ausführen.", editor.instructions[0]["prompt"])
+        self.assertIn("Make it brighter.", editor.instructions[0]["prompt"])
+        self.assertEqual(
+            updated.processed_images[0]["image_optimization"]["applied_instruction_ids"],
+            ["analysis_005"],
+        )
+        self.assertEqual(
+            updated.processed_images[0]["image_optimization"]["effective_prompt"],
+            editor.instructions[0]["prompt"],
+        )
+
+    def test_vision_recrop_reanalyzes_original_and_overwrites_processed_record(self) -> None:
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            state="uploading",
+            workbook_hash="hash",
+            language="de-DE",
+            image_refs=[
+                MediaReference(
+                    media_id="image-1",
+                    filename="first.jpg",
+                    storage_uri="gs://bucket/session/images/first.jpg",
+                    content_type="image/jpeg",
+                    size_bytes=5,
+                ),
+            ],
+            image_analysis={"image-1": {"focal_point": "old"}},
+            processed_images=[
+                {
+                    "media_id": "image-1",
+                    "filename": "first.webp",
+                    "path": "gs://bucket/session/processed/first.webp",
+                    "operations": ["old_crop"],
+                },
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = FileSessionRepository(temporary)
+            repository.create(session)
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(SimpleNamespace()),
+                repository=repository,
+                object_storage=FakeObjectStorage(),
+                vision=SimpleNamespace(),
+                image_processor=SimpleNamespace(),
+            )
+
+            def analyze(_snapshot: object, working: ContentSession, **_kwargs: object) -> ContentSession:
+                self.assertNotIn("image-1", working.image_analysis)
+                self.assertFalse(working.processed_images)
+                return working.model_copy(update={"image_analysis": {"image-1": {"focal_point": "new"}}})
+
+            def process(_snapshot: object, working: ContentSession, **_kwargs: object) -> ContentSession:
+                self.assertEqual(working.image_analysis["image-1"]["focal_point"], "new")
+                return working.model_copy(update={"processed_images": [{
+                    "media_id": "image-1",
+                    "filename": "first.webp",
+                    "path": "gs://bucket/session/processed/first.webp",
+                    "operations": ["crop_to_target"],
+                }]})
+
+            with patch.object(service, "_analyze_missing_images", side_effect=analyze), patch.object(
+                service,
+                "_process_missing_images",
+                side_effect=process,
+            ):
+                updated = service.recrop_image_with_vision(
+                    session.session_id,
+                    filename="first.jpg",
+                    expected_version=session.version,
+                )
+
+        self.assertEqual(updated.image_analysis["image-1"]["focal_point"], "new")
+        self.assertEqual(len(updated.processed_images), 1)
+        self.assertEqual(updated.processed_images[0]["path"], "gs://bucket/session/processed/first.webp")
+        self.assertIn("vision_focal_recrop", updated.processed_images[0]["operations"])
+
+
+@unittest.skipUnless(WORKBOOK.is_file(), f"V2 test workbook not found: {WORKBOOK}")
+class DomainServiceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.snapshot = WorkbookValidator().validate(WorkbookLoader().load(WORKBOOK))
+
+    def session(self, **updates: object) -> ContentSession:
+        base = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="event",
+            state="created",
+            workbook_hash=self.snapshot.version.sha256,
+            language="de-DE",
+        )
+        return base.model_copy(update=updates)
+
+    def test_manual_text_only_skips_transcription(self) -> None:
+        session = self.session(manual_text="Event in Berlin")
+        self.assertFalse(condition_matches("audio_count_gt_0", session))
+
+    def test_image_free_session_omits_image_blueprint_rows(self) -> None:
+        context = GenerationContextBuilder().build(
+            snapshot=self.snapshot,
+            task="content_generation",
+            post_type_key="event",
+            session=self.session(),
+        )
+        target_keys = {row["target_key"] for row in context.blueprint}
+        self.assertNotIn("image_caption", target_keys)
+        self.assertNotIn("event_gallery", target_keys)
+
+    def test_image_session_includes_image_blueprint_rows(self) -> None:
+        image = MediaReference(
+            media_id="image-1",
+            filename="image.jpg",
+            storage_uri="gs://bucket/image.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+        )
+        context = GenerationContextBuilder().build(
+            snapshot=self.snapshot,
+            task="content_generation",
+            post_type_key="event",
+            session=self.session(image_refs=[image]),
+        )
+        target_keys = {row["target_key"] for row in context.blueprint}
+        self.assertIn("image_caption", target_keys)
+        self.assertIn("event_gallery", target_keys)
+
+    def test_context_is_field_addressable_and_excludes_unrelated_rules(self) -> None:
+        context = GenerationContextBuilder().build(
+            snapshot=self.snapshot,
+            task="seo_generation",
+            post_type_key="event",
+            session=self.session(),
+            field_keys=["seo_title"],
+        )
+        self.assertEqual(set(context.fields), {"seo_title"})
+        exact_targets = {
+            row["target_key"] for row in context.fields["seo_title"].exact_rules
+        }
+        self.assertEqual(exact_targets, {"seo_title"})
+
+    def test_generation_context_includes_source_text_for_optional_semantic_fields(self) -> None:
+        context = GenerationContextBuilder().build(
+            snapshot=self.snapshot,
+            task="generation",
+            post_type_key="event",
+            session=self.session(
+                manual_text=(
+                    "Die Besonderheit war die alkoholfreie Signature-Auswahl. "
+                    "Der Fokus lag auf kurzer Wartezeit. "
+                    "Die Herausforderung war ein enger Aufbau."
+                )
+            ),
+            field_keys=["fact_speciality", "fact_focus", "fact_challenge", "event_challenge"],
+        )
+
+        self.assertIn("Herausforderung", context.source_text["manual_text"])
+        challenge_guidance = context.fields["fact_challenge"].schema_data["guidance_de"]
+        self.assertIn("Herausforderung", challenge_guidance)
+        self.assertIn("source_text", challenge_guidance)
+        self.assertNotIn("Fokus oder Besonderheit", challenge_guidance)
+        self.assertIn("raw_text_without_html", context.fields["fact_challenge"].schema_data["model_output_contract"])
+
+    def test_missing_required_facts_are_bundled(self) -> None:
+        service = ClarificationService()
+        missing = service.missing_required_dependencies(self.snapshot, self.session())
+        self.assertTrue(missing)
+        questions = service.bundled_questions(missing)
+        self.assertEqual(len(questions), 1)
+
+    def test_optional_dependency_does_not_create_a_question(self) -> None:
+        required_keys = {
+            row.field_key
+            for row in self.snapshot.acf_fields
+            if row.enabled
+            and row.post_type_key == "event"
+            and row.field_role == "input_fact"
+            and row.required_for_analysis
+        }
+        facts = {
+            key: FactValue(
+                value=f"value-{key}",
+                source="user_correction",
+                confidence=1,
+                confirmed=True,
+            )
+            for key in required_keys
+        }
+        missing = ClarificationService().missing_required_dependencies(
+            self.snapshot,
+            self.session(confirmed_facts=facts),
+        )
+        missing_fields = {item.output_field_key for item in missing}
+        self.assertNotIn("fact_bar", missing_fields)
+        self.assertNotIn("fact_bartender", missing_fields)
+
+    def test_optional_derived_field_is_not_exposed_without_confirmed_dependency(self) -> None:
+        row = next(
+            item for item in self.snapshot.acf_fields
+            if item.field_key == "fact_bartender"
+        )
+        self.assertFalse(
+            ContentSessionService._acf_field_is_eligible(row, self.session())
+        )
+        confirmed = self.session(
+            confirmed_facts={
+                "bartender": FactValue(
+                    value=["Florent"],
+                    source="user_correction",
+                    confidence=1,
+                    confirmed=True,
+                )
+            }
+        )
+        self.assertTrue(
+            ContentSessionService._acf_field_is_eligible(row, confirmed)
+        )
+
+    def test_optional_challenge_field_requires_confirmed_fact_condition(self) -> None:
+        row = next(
+            item for item in self.snapshot.acf_fields
+            if item.field_key == "event_challenge"
+        )
+        self.assertEqual(row.generation_condition, "fact_present:challenge")
+        self.assertFalse(
+            ContentSessionService._acf_field_is_eligible(row, self.session())
+        )
+        confirmed = self.session(
+            confirmed_facts={
+                "challenge": FactValue(
+                    value="enger Aufbau",
+                    source="user_correction",
+                    confidence=1,
+                    confirmed=True,
+                )
+            }
+        )
+        self.assertTrue(
+            ContentSessionService._acf_field_is_eligible(row, confirmed)
+        )
+
+    def test_user_correction_overrides_extracted_fact(self) -> None:
+        original = FactValue(
+            value="Hamburg",
+            source="transcript",
+            confidence=0.8,
+            confirmed=False,
+        )
+        corrected = ClarificationService().apply_corrections(
+            self.session(confirmed_facts={"city": original}),
+            {"city": "Berlin"},
+        )
+        self.assertEqual(corrected.confirmed_facts["city"].value, "Berlin")
+        self.assertEqual(corrected.confirmed_facts["city"].source, "user_correction")
+
+    def test_internal_links_are_filtered_and_urls_are_resolved_in_python(self) -> None:
+        service = InternalLinkService()
+        eligible = service.eligible(
+            self.snapshot,
+            post_type_key="event",
+            language="de-DE",
+            current_url="https://staging.flairlab.de/mobile-cocktailbar/",
+        )
+        self.assertNotIn(
+            "https://staging.flairlab.de/mobile-cocktailbar/",
+            {row.target_url for row in eligible.candidates},
+        )
+        self.assertGreater(len(eligible.candidates), 0)
+
+    def test_zero_internal_link_candidates_keeps_evidence(self) -> None:
+        eligible = InternalLinkService().eligible(
+            self.snapshot,
+            post_type_key="event",
+            language="fr-FR",
+            current_url=None,
+        )
+        self.assertEqual(eligible.candidates, ())
+        self.assertIsNotNone(eligible.empty_reason)
+
+    def test_payload_routes_workbook_destinations_and_aggregations(self) -> None:
+        shared = {
+            "post_title": "Test Event",
+            "slug": "test-event",
+            "excerpt": "Kurztext",
+            "status": "draft",
+            "category": "auto event post",
+            "tags": ["Berlin"],
+            "focus_keyword": "Event Berlin",
+            "seo_title": "Event Berlin",
+            "meta_description": "Event in Berlin",
+            "social_title": "Event Berlin",
+            "social_description": "Event in Berlin",
+        }
+        acf = {
+            "hero_h1": "Event Berlin",
+            "verlauf_h2": "Der Ablauf",
+            "fact_event": "Sommerfest",
+            "fact_service": "Cocktailcatering",
+        }
+        payload = PayloadBuilder().build(
+            self.snapshot,
+            post_type_key="event",
+            shared_values=shared,
+            acf_source_values=acf,
+        )
+        self.assertEqual(payload.wordpress.title, "Test Event")
+        self.assertEqual(payload.meta["yoast_wpseo_title"], "Event Berlin")
+        self.assertEqual(payload.acf["hero_h1"], "Event Berlin")
+        self.assertEqual(payload.acf["verlauf_h2"], "Der Ablauf")
+        self.assertIn("<ul>", payload.acf["fakten"])
+        self.assertIn("<strong>Event:</strong> Sommerfest", payload.acf["fakten"])
+        self.assertNotIn("&lt;li&gt;", payload.acf["fakten"])
+
+    def test_payload_maps_selected_confirmed_fact_to_generated_variables_meta(self) -> None:
+        payload = PayloadBuilder().build(
+            self.snapshot,
+            post_type_key="bartender",
+            shared_values={},
+            acf_source_values={},
+            confirmed_facts={
+                "staff_name": FactValue(
+                    value="Anna Schmidt",
+                    source="manual_text",
+                    confidence=1,
+                    confirmed=True,
+                ),
+                "unselected_fact": FactValue(
+                    value="Must not be sent",
+                    source="manual_text",
+                    confidence=1,
+                    confirmed=True,
+                ),
+            },
+        )
+        self.assertEqual(
+            payload.meta["_generated_variables"],
+            {"staff_name": "Anna Schmidt"},
+        )
+
+    def test_payload_omits_unconfirmed_shortcode_variable(self) -> None:
+        payload = PayloadBuilder().build(
+            self.snapshot,
+            post_type_key="bartender",
+            shared_values={},
+            acf_source_values={},
+            confirmed_facts={
+                "staff_name": FactValue(
+                    value="Anna Schmidt",
+                    source="transcript",
+                    confidence=0.8,
+                    confirmed=False,
+                ),
+            },
+        )
+        self.assertNotIn("_generated_variables", payload.meta)
+
+    def test_aggregated_paragraphs_preserve_safe_internal_links_and_escape_other_html(self) -> None:
+        payload = PayloadBuilder().build(
+            self.snapshot,
+            post_type_key="event",
+            shared_values={
+                "post_title": "Test Event",
+                "slug": "test-event",
+                "excerpt": "Kurztext",
+                "status": "draft",
+                "category": "auto event post",
+                "tags": ["Potsdam"],
+                "focus_keyword": "Event Potsdam",
+                "seo_title": "Event Potsdam",
+                "meta_description": "Event in Potsdam",
+                "social_title": "Event Potsdam",
+                "social_description": "Event in Potsdam",
+            },
+            acf_source_values={
+                "event_highlight": (
+                    'Weitere <a href="https://staging.flairlab.de/event-impressionen/">'
+                    "Event-Impressionen von FLAIRLAB</a>. <script>alert(1)</script>"
+                ),
+            },
+        )
+
+        verlauf = payload.acf["verlauf_text"]
+        self.assertIn(
+            '<a href="https://staging.flairlab.de/event-impressionen/">'
+            "Event-Impressionen von FLAIRLAB</a>",
+            verlauf,
+        )
+        self.assertNotIn("<script>", verlauf)
+        self.assertIn("&lt;script&gt;", verlauf)
+
+    def test_file_repository_uses_optimistic_versioning(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = FileSessionRepository(temporary)
+            session = repository.create(self.session())
+            saved = repository.save(
+                session.model_copy(update={"manual_text": "hello"}),
+                expected_version=1,
+            )
+            self.assertEqual(saved.version, 2)
+
+    def test_featured_image_selection_is_stored_in_v2_image_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = FileSessionRepository(temporary)
+            session = self.session(
+                state="uploading",
+                image_refs=[
+                    MediaReference(
+                        media_id="image-1",
+                        filename="first.png",
+                        storage_uri="local://first.png",
+                        content_type="image/png",
+                        size_bytes=1,
+                    ),
+                    MediaReference(
+                        media_id="image-2",
+                        filename="second.png",
+                        storage_uri="local://second.png",
+                        content_type="image/png",
+                        size_bytes=1,
+                    ),
+                ],
+                processed_images=[
+                    {"media_id": "image-1", "filename": "first.webp", "path": "local://first.webp"},
+                    {"media_id": "image-2", "filename": "second.webp", "path": "local://second.webp"},
+                ],
+            )
+            repository.create(session)
+            service = ContentSessionService(
+                knowledge=StaticKnowledge(self.snapshot),
+                repository=repository,
+            )
+
+            updated = service.set_featured_image(
+                session.session_id,
+                filename="second.webp",
+                expected_version=session.version,
+            )
+
+            featured = [
+                row for row in updated.image_metadata
+                if row.get("image_usage") == "featured"
+            ]
+            self.assertEqual(len(featured), 1)
+            self.assertEqual(featured[0]["media_id"], "image-2")
+            self.assertEqual(featured[0]["image_priority"], 1)

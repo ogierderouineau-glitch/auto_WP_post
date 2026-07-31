@@ -1,4 +1,4 @@
-# FLAIRLAB WordPress Post Generator
+# Speech2Post
 
 This project turns event inputs — voice notes, manual notes and images — into a structured WordPress post draft, then publishes it through WordPress REST APIs.
 
@@ -15,7 +15,27 @@ The current production workflow is workbook-driven. The workbook is the source o
 7. Review image metadata and draft fields.
 8. Publish to WordPress.
 
-The familiar app UI is the main interface. Its core actions are routed to the structured `/api/content-sessions` workflow.
+The Next.js app in `frontend/` is the user interface. It talks to the
+FastAPI backend through the structured `/api/content-sessions` API.
+
+## Project structure
+
+```text
+backend/
+  app/          application features and providers
+  tests/        backend regression tests
+  main.py       FastAPI composition root
+  config.py     environment configuration
+  wordpress_api.py
+  requirements.txt
+frontend/       Next.js user interface
+integrations/   WordPress plugins and snippets
+data/           workbook inputs and ignored local runtime data
+tools/          diagnostics and maintenance commands
+scripts/        deployment and local proxy helpers
+docs/           deployment guide and generated workbook reference
+main.py         compatibility entry point for uvicorn
+```
 
 ## Terminal milestones
 
@@ -35,18 +55,38 @@ export V2_MILESTONE_LOGS=0
 
 ## Running locally
 
+Create the Python environment once:
+
 ```bash
-export V2_KNOWLEDGE_WORKBOOK_PATH=/absolute/path/FLAIRLAB_Knowledge_Base_Revised_V5.xlsm
-myenv/bin/uvicorn main:app --reload
+python3 -m venv .venv
+.venv/bin/pip install -r backend/requirements-dev.txt
+```
+
+Start the backend:
+
+```bash
+.venv/bin/uvicorn main:app --reload
+```
+
+Add an ignored `clients.json` first. With GCS bucket variables configured,
+client workbooks and sessions use their isolated cloud paths. Without them,
+place the local workbook at `data/knowledge/{client_id}.xlsm`.
+
+In another terminal:
+
+```bash
+cd frontend
+nvm use
+corepack pnpm dev
 ```
 
 Useful environment variables:
 
 | Variable | Purpose |
 |---|---|
-| `V2_KNOWLEDGE_WORKBOOK_PATH` | Workbook source of truth |
+| `GCS_KNOWLEDGE_BUCKET` | Canonical client workbook bucket |
+| `GCS_DATA_BUCKET` | Client session and uploaded-object bucket |
 | `V2_SESSION_ROOT` | Local file-backed session storage |
-| `V2_SESSION_GCS_PREFIX` | Cloud/GCS session/object prefix |
 | `V2_LANGUAGE_MODEL` | Structured text generation model |
 | `V2_VISION_MODEL` | Image analysis model |
 | `V2_TRANSCRIPTION_MODEL` | Speech-to-text model |
@@ -90,21 +130,21 @@ TAG=$(date +%Y%m%d-%H%M%S) ./scripts/deploy-fast.sh
 Run the full suite:
 
 ```bash
-myenv/bin/python -m unittest discover -s tests -p 'test*.py'
+.venv/bin/python -m pytest
 ```
 
 Run focused structured workflow checks:
 
 ```bash
-myenv/bin/python -m unittest tests.v2.test_structured_pipeline tests.v2.test_legacy_ui_adapter tests.v2.test_api
+.venv/bin/python -m pytest backend/tests/test_structured_pipeline.py backend/tests/test_api.py
 ```
 
 ## Generation latency diagnostics
 
-To flag slow generation jobs from local V2 sessions (default threshold: 45 seconds):
+To flag slow generation jobs from local sessions (default threshold: 45 seconds):
 
 ```bash
-myenv/bin/python tools/v2_generation_latency_report.py --threshold 45
+.venv/bin/python tools/generation_latency_report.py --threshold 45
 ```
 
 Useful options:
@@ -119,13 +159,13 @@ Useful options:
 Regenerate validation choice references after updating `validation_lists` values:
 
 ```bash
-myenv/bin/python tools/v2_export_validation_reference.py data/knowledge/FLAIRLAB_Knowledge_Base_Revised_V7.xlsm
+.venv/bin/python tools/export_validation_reference.py data/knowledge/{client_id}.xlsm
 ```
 
 Generated artifacts:
 
-- `docs/v2/validation_choices.md`
-- `docs/v2/validation_choices.csv`
+- `docs/reference/validation_choices.md`
+- `docs/reference/validation_choices.csv`
 
 The CSV includes both a human-readable `allowed_value` column and an `allowed_value_json` column that preserves typed values.
 
@@ -149,24 +189,35 @@ To get a new post type working, configure these first:
    - Define the new `post_type_key`.
    - Enable generation/template flags.
    - Set WordPress post type, default language/status/category.
+   - Select zero or more entries from `taxonomies` in `wp_taxonomies`
+     (semicolon-separated when selecting several).
 
-2. **`ACF_fields_schema`**
+2. **`taxonomies`**
+   - Define each `(post_type_key, wp_taxonomy)` relationship once.
+   - Set its term source as `fixed:<value>`, `shared:<field_key>`,
+     `acf:<field_key>`, or `fact:<input_fact_key>`.
+   - The same WordPress taxonomy may use different term sources for different
+     post types.
+   - Set `post_types.assign_taxonomy_to_media` when all terms selected by that
+     post type should also be assigned to uploaded media.
+
+3. **`ACF_fields_schema`**
    - This is one of the most important tabs.
    - Define the input facts and generated fields for the post type.
    - Mark required facts carefully; too many required facts can block generation, too few can weaken the result.
    - Use `field_role = input_fact` for facts the system must extract/confirm before drafting.
    - Use generated/direct/aggregation roles for fields that become draft or ACF payload values.
 
-3. **`post_blueprint`**
+4. **`post_blueprint`**
    - This is the skeleton of the post.
    - Use it to tell the generator what sections belong in this post type and in what order.
 
-4. **`agent_instructions`**
+5. **`agent_instructions`**
    - This is where the “brain” gets its operating rules.
    - Add instructions for `analysis`, `generation`, `image_metadata` and `internal_links` where relevant.
    - Keep instructions specific to the post type, not generic marketing fluff.
 
-5. **`seo_rules`**
+6. **`seo_rules`**
    - Controls exact field-level constraints and SEO behavior.
    - Use this to keep titles, descriptions, headings, excerpts and link behavior consistent.
 
@@ -259,6 +310,6 @@ Keep business behavior in the workbook whenever possible. Code should mainly pro
 - structured model calls;
 - safe file/media handling;
 - WordPress publication;
-- UI compatibility.
+- a small authenticated API for the frontend.
 
 If a seemingly simple request requires a lot of code, first ask whether the same behavior can be expressed in the workbook with fewer moving parts.

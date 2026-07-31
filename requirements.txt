@@ -1,8 +1,0 @@
-fastapi
-uvicorn[standard]
-python-multipart
-requests
-Pillow
-openai==2.45.0
-openpyxl
-google-cloud-storage

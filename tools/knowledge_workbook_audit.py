@@ -14,7 +14,7 @@ APP_ROOT = Path(__file__).resolve().parents[1]
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
-from config import KNOWLEDGE_WORKBOOK_GCS_URI, KNOWLEDGE_WORKBOOK_PATH
+from backend.config import KNOWLEDGE_WORKBOOK_GCS_URI, KNOWLEDGE_WORKBOOK_PATH
 
 try:
     from google.cloud import storage
@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - optional import failure path
 from openpyxl import load_workbook
 
 
-DEFAULT_LOCAL_WORKBOOK = APP_ROOT / "data/knowledge/FLAIRLAB_EventPost_Master_Knowledge.xlsm"
+DEFAULT_LOCAL_WORKBOOK = APP_ROOT / "data/knowledge/default.xlsm"
 DEFAULT_OUTPUT_JSON = APP_ROOT / "data/audits/knowledge_workbook_audit.json"
 DEFAULT_OUTPUT_MD = APP_ROOT / "data/audits/knowledge_workbook_audit.md"
 

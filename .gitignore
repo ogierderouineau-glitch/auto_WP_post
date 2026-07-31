@@ -12,9 +12,11 @@ myenv/
 # Secrets
 .env
 .env.*
+!.env.example
 credentials.json
 *.pem
 *.key
+clients.json
 
 # VS Code
 .vscode/

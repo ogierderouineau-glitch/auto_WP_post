@@ -1,10 +1,5 @@
-"""Readable application entry point.
+"""Compatibility ASGI entry point for ``uvicorn main:app``."""
 
-The production app is hosted by ``app_main``. The current structured
-content workflow is mounted there through a narrow router while its business
-logic lives under ``app.v2``.
-"""
-
-from app_main import app
+from backend.main import app
 
 __all__ = ["app"]
