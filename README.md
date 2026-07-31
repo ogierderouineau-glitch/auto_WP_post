@@ -253,7 +253,7 @@ Add rows using the new `post_type_key` in:
 
 Use `*` only for rules that are truly global across post types. If behavior should differ, create a post-type-specific row instead.
 
-### Practical setup checklist
+### Practical setup checklist 
 
 For each new post type:
 

@@ -41,7 +41,7 @@ data/app_sessions/
 data/v2_sessions/
 data/api_logs/
 
-# Local knowledge/workbook inputs and exported site snapshots
+# Local knowledge/workbook inputs and exported site snapshots.
 data/knowledge/*.xlsm
 data/knowledge/*.xlsx
 data/knowledge/*.xlsm.bak
