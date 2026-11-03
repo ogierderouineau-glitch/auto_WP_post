@@ -1,6 +1,11 @@
 # Speech2Post
 
-This project turns event inputs — voice notes, manual notes and images — into a structured WordPress post draft, then publishes it through WordPress REST APIs.
+This project turns voice notes, manual notes and images into a structured WordPress post draft, then publishes it through WordPress REST APIs.
+
+Speech2Post supports multiple clients across different industries. Client-specific
+post types, fields and business rules belong in each client's workbook and
+configuration, rather than shared application logic. See [AGENTS.md](AGENTS.md)
+for the project priorities that apply to every coding agent.
 
 The current production workflow is workbook-driven. The workbook is the source of truth for post types, fact extraction, draft fields, image metadata, internal links, style rules and payload routing.
 
@@ -237,6 +242,31 @@ These tabs are where you get the most “juice out of the machine”:
 | 6 | **`story_patterns`** | Helps the model choose a narrative shape when facts match a known scenario |
 | 7 | **`post_examples`** | Provides high-quality reference patterns; useful when approved and representative |
 | 8 | **`internal_links_database`** | Gives the system eligible links and anchors for contextual internal linking |
+
+### Maintaining `post_examples`
+
+Keep one approved example per row, using these columns:
+`post_type_key`, `example_id`, `enabled`, `approved`, `quality_score`,
+`input_facts_text`, `post_title`, `example_content`, `learning_for_gpt`,
+`retrieval_tags`, and `url`.
+
+Put labelled copy in `example_content`; exact ACF field names make the labels
+easier to associate with the schema. Examples guide writing quality, while the
+current field schema, blueprint and instructions determine the output.
+
+Separate `retrieval_tags` with semicolons. Use concise, distinctive descriptions
+such as `hotel; luxury; team integration`. Descriptive phrases and system tags
+such as `luxury_hotel` both work. Selection counts distinct matching words
+(case-insensitive, splitting punctuation and underscores, excluding common words)
+against confirmed fact values and session context tags. It considers only enabled,
+approved examples of the current post type, then ranks by word overlap, quality
+score, and example ID for stable ties. With no overlap it selects the highest-quality
+example. This is lexical matching, so synonyms in different languages do not match
+automatically; use the vocabulary present in the client's facts and tags.
+
+Only one example is sent for post generation. Image metadata uses
+`image_metadata_schema` and `image_metadata_rules`, together with the current
+picture context; post examples and legacy image-caption columns are excluded.
 
 ### Tabs to extend for a new post type
 

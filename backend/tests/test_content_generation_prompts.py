@@ -51,3 +51,13 @@ def test_forbidden_policy_keeps_generated_content_evidence_bound() -> None:
 
     assert system["knowledge_enrichment"] == "forbidden"
     assert "Do not invent facts" in " ".join(system["constraints"])
+
+
+def test_examples_are_references_and_do_not_override_schema_or_current_facts() -> None:
+    messages = structured_task_input(
+        task="content_generation", instructions=[],
+        context={"examples": [{"example_content": "hero title: Example"}]},
+    )
+    constraints = " ".join(json.loads(messages[0]["content"])["constraints"])
+    assert "current field schema, blueprint and instructions take precedence" in constraints
+    assert "Never copy example facts" in constraints

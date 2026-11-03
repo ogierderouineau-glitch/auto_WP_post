@@ -53,6 +53,14 @@ def structured_task_input(
             "allowed" if knowledge_enrichment_allowed else "forbidden"
         ),
     }
+    if generated_content_task and context.get("examples"):
+        system["constraints"].append(
+            "Use examples only as references for tone, specificity and writing quality, "
+            "following learning_for_gpt. Example content labels are references, not an output schema. "
+            "The current field schema, blueprint and instructions take precedence. "
+            "Never copy example facts, names, dates, claims or URLs unless independently "
+            "supported by the current input. Examples do not establish facts about the current post."
+        )
     if task in {"image_metadata", "image_metadata_batch"}:
         system["constraints"].extend(
             [

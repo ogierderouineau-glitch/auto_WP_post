@@ -373,6 +373,17 @@ class PostExample(WorkbookRow):
     enabled: bool
     approved: bool
     quality_score: float
+    input_facts_text: str = ""
+    post_title: str = ""
+    example_content: str = ""
+    learning_for_gpt: str = ""
+    retrieval_tags: tuple[str, ...] = ()
+    url: str = ""
+
+    @field_validator("input_facts_text", "post_title", "example_content", "learning_for_gpt", "url", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value: Any) -> str:
+        return str(value) if value is not None else ""
 
 
 class OutputSpecification(WorkbookRow):

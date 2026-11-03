@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -7,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.app.knowledge_base.step_01_models import WorkbookSnapshot
 from backend.app.models.step_01_session import ContentSession
 from backend.app.workflow.step_01_conditions import condition_matches
+from backend.app.workflow.step_04_generation_conditions import fact_is_usable
 
 
 class FieldContext(BaseModel):
@@ -166,11 +168,24 @@ class GenerationContextBuilder:
         ]
         priority_order = {"high": 0, "medium": 1, "low": 2}
         patterns.sort(key=lambda row: (priority_order.get(row.priority, 9), row.pattern_id))
+        context_terms = self._example_terms(" ".join([
+            *session.context_tags,
+            *(str(fact.value) for key, fact in session.confirmed_facts.items()
+              if fact_is_usable(session, key)),
+        ]))
+        candidates = sorted(
+            (row for row in snapshot.post_examples
+             if row.enabled and row.approved and row.post_type_key == post_type_key),
+            key=lambda row: (
+                -len(context_terms & self._example_terms(" ".join(row.retrieval_tags))),
+                -row.quality_score,
+                row.example_id,
+            ),
+        )
         examples = [
-            row.model_dump(exclude={"sheet_row"})
-            for row in sorted(snapshot.post_examples, key=lambda item: item.quality_score, reverse=True)
-            if row.enabled and row.approved and row.post_type_key == post_type_key
-        ][:1]
+            row.model_dump(include=set(type(row).model_fields) - {"sheet_row"})
+            for row in candidates[:1]
+        ] if task == "generation" or task.endswith("generation") else []
         return GenerationContext(
             task=task,
             post_type=post_type.model_dump(exclude={"sheet_row"}),
@@ -188,6 +203,15 @@ class GenerationContextBuilder:
             story_patterns=[row.model_dump(exclude={"sheet_row"}) for row in patterns[:2]],
             examples=examples,
         )
+
+    @staticmethod
+    def _example_terms(text: str) -> set[str]:
+        # Match descriptive workbook tags and underscore-separated context tags.
+        stop_words = {"aber", "auch", "das", "der", "die", "ein", "eine", "einer",
+                      "eines", "für", "ist", "mit", "oder", "und", "von", "zum",
+                      "zur", "the", "and", "for"}
+        return {term for term in re.findall(r"[^\W_]+", text.casefold())
+                if len(term) >= 3 and term not in stop_words}
 
     @staticmethod
     def _schema_for_model(schema: Any) -> dict[str, Any]:

@@ -74,6 +74,7 @@ DEPRECATED_APP_OWNED_SHEETS = {
 }
 
 LIST_COLUMNS = {
+    "retrieval_tags",
     "source_fact_keys",
     "context_tags",
     "trigger_tags",
