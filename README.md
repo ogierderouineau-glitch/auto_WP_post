@@ -7,6 +7,9 @@ post types, fields and business rules belong in each client's workbook and
 configuration, rather than shared application logic. See [AGENTS.md](AGENTS.md)
 for the project priorities that apply to every coding agent.
 
+Coding agents should start with [the continuation guide](docs/agent_handoff.md)
+for current architecture, setup, known gaps and a reusable conversation starter.
+
 The current production workflow is workbook-driven. The workbook is the source of truth for post types, fact extraction, draft fields, image metadata, internal links, style rules and payload routing.
 
 ## Current production workflow
@@ -70,12 +73,14 @@ python3 -m venv .venv
 Start the backend:
 
 ```bash
-.venv/bin/uvicorn main:app --reload
+.venv/bin/python -m uvicorn main:app --reload
 ```
 
-Add an ignored `clients.json` first. With GCS bucket variables configured,
-client workbooks and sessions use their isolated cloud paths. Without them,
-place the local workbook at `data/knowledge/{client_id}.xlsm`.
+Add an ignored `clients.json` first and supply `OPENAI_API_KEY` through a root
+`.env` or the process environment. Restart the backend after changing secrets.
+Normal local execution uses `data/knowledge/{client_id}.xlsm` (or `.xlsx`) and
+`data/v2_sessions/{client_id}`. Render uses configured isolated GCS paths.
+See [deployment configuration](docs/deployment.md) for details.
 
 In another terminal:
 
@@ -97,7 +102,11 @@ Useful environment variables:
 | `V2_TRANSCRIPTION_MODEL` | Speech-to-text model |
 | `V2_MILESTONE_LOGS=0` | Disables terminal milestone logs |
 
-## Fast live sync and deploy
+## Older Cloud Run helpers
+
+The current deployment configuration is [Render](docs/deployment.md).
+The following scripts target the older Cloud Run deployment; they are not
+required to start the application locally.
 
 Use the helper scripts in `scripts/` for quick loops:
 

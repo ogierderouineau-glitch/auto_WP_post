@@ -89,7 +89,8 @@ client-relative paths:
 ```
 
 Upload that client's workbook to its knowledge object before redeploying. The
-backend validates every configured client workbook during startup.
+backend loads and validates a client's workbook lazily when that client's
+service is first needed, rather than validating every workbook during startup.
 
 ## Local development
 
@@ -97,13 +98,18 @@ Place an ignored `clients.json` in the repository root using the same schema.
 An `.env` file is optional; global values can instead be exported by the shell
 or supplied by the IDE.
 
-If GCS bucket variables are present, development uses the same isolated GCS
-paths as production. Without them, it uses:
+Normal local execution (without `RENDER` set) uses local workbooks, sessions and
+media even if GCS bucket variables are present:
 
 ```text
 data/knowledge/{client_id}.xlsm
 data/v2_sessions/{client_id}
 ```
+
+Render uses the configured isolated GCS paths. Workbook upload can also write to
+GCS when a knowledge bucket is configured locally, so local bucket settings can
+still affect external data. See `backend/app/api/step_03_container.py` and
+`backend/main.py` for these distinct read/storage and upload paths.
 
 Use Google Application Default Credentials locally or set
 `GOOGLE_APPLICATION_CREDENTIALS` to a credential file outside source control.

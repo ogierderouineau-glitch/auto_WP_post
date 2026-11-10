@@ -26,9 +26,9 @@ type ActiveScreen = "media" | "facts" | "content" | "wordpress"
 const SCREEN_COPY: Record<ActiveScreen, { title: string; instruction: string; action: string; placeholder: string }> = {
   media: {
     title: "Media agent",
-    instruction: "Describe the event through the selected images. Include concrete facts (cf. Facts list below)",
-    action: "Extract facts",
-    placeholder: "Add general event details or instructions for fact extraction. Picture descriptions remain attached to their images.",
+    instruction: "Tell your story through the selected images. Include concrete facts (cf. Facts list below)",
+    action: "All set? Extract facts",
+    placeholder: "Add general details or instructions for fact extraction. Picture descriptions remain attached to their images.\rThe recorded speech is always appended to the visible image's Picture transcript field",
   },
   facts: {
     title: "Facts agent",

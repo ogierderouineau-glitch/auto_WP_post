@@ -1,5 +1,9 @@
 # Project priorities for every coding agent
 
+For current architecture, local setup, known gaps and continuation instructions,
+read [docs/agent_handoff.md](docs/agent_handoff.md) before implementation. Keep
+affected documentation current when changing architecture or behavior.
+
 ## First priority: support multiple clients across different industries
 
 Speech2Post is a multi-client, industry-independent application. Flairlab is one

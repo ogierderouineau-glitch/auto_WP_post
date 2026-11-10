@@ -1062,13 +1062,14 @@ export function MediaScreen({
           </button>
           <button
             id="s2p-media-extract-facts"
+            title="Facts will be used to create a truthful content"
             type="button"
             onClick={onExtractFacts}
             disabled={!session || extractFactsLoading}
             className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-confirm px-3 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:opacity-50"
           >
             {extractFactsLoading ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <FileText className="size-4" aria-hidden="true" />}
-            {extractFactsLoading ? "Extracting facts..." : "Extract facts"}
+            {extractFactsLoading ? "Extracting facts..." : "All set? Extract facts"}
           </button>
 
           <div className="mt-3 flex items-center gap-2">
