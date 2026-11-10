@@ -29,6 +29,8 @@ from backend.app.api.step_01_models import (
     ImageContextTranscriptUpdateRequest,
     ImageMetadataUpdateRequest,
     InputsRequest,
+    InsertLinkRequest,
+    LinkCandidatesRequest,
     PublishRequest,
     SessionResponse,
     SessionNameRequest,
@@ -533,8 +535,8 @@ def create_router(
         payload: DraftChatRequest,
     ) -> dict[str, Any]:
         service_provider().require_owner(session_id, get_active_client_id())
-        if not payload.revision_field_ids:
-            raise InvalidUploadError("Select at least one draft field to revise.")
+        if not payload.revision_field_ids and not any(item.get("revision_requested") == "true" for item in payload.selected_links):
+            raise InvalidUploadError("Select at least one draft field or link to revise.")
         job = _create_session_job(session_id, "draft_chat")
         _SESSION_JOB_EXECUTOR.submit(
             _run_session_job,
@@ -545,6 +547,26 @@ def create_router(
             payload.model_dump(),
         )
         return job
+
+    @router.get("/{session_id}/links")
+    async def link_options(session_id: str) -> dict[str, Any]:
+        service = service_provider()
+        service.require_owner(session_id, get_active_client_id())
+        return service.link_options(session_id)
+
+    @router.put("/{session_id}/link-candidates", response_model=SessionResponse)
+    async def edit_link_candidates(session_id: str, payload: LinkCandidatesRequest) -> SessionResponse:
+        service = service_provider()
+        service.require_owner(session_id, get_active_client_id())
+        _raise_if_session_job_active(session_id)
+        return SessionResponse(session=service.edit_link_candidates(session_id, **payload.model_dump()))
+
+    @router.post("/{session_id}/links", response_model=SessionResponse)
+    async def insert_manual_link(session_id: str, payload: InsertLinkRequest) -> SessionResponse:
+        service = service_provider()
+        service.require_owner(session_id, get_active_client_id())
+        _raise_if_session_job_active(session_id)
+        return SessionResponse(session=service.insert_manual_link(session_id, **payload.model_dump()))
 
     @router.put("/{session_id}/draft-fields", response_model=SessionResponse)
     async def update_draft_fields(
@@ -983,8 +1005,9 @@ def _regenerate_draft_chat(
     if not message and not data.get("link_placement_only"):
         raise InvalidUploadError("Draft chat message is required.")
     revision_field_ids = data.get("revision_field_ids")
-    if not revision_field_ids:
-        raise InvalidUploadError("Select at least one draft field to revise.")
+    if not revision_field_ids and not any(item.get("revision_requested") == "true" for item in data.get("selected_links", [])):
+        raise InvalidUploadError("Select at least one draft field or link to revise.")
+    data["revision_field_ids"] = revision_field_ids or []
     data["revision_instruction"] = message
     session = service.generate(session_id, **data)
     chat = [

@@ -121,7 +121,6 @@ export function RecordingWidget({
   selectedContentFieldIds,
   automaticContentRevisionInstruction,
   selectedContentLinks,
-  contentAiAssistedLinkPlacement,
   postTypeLabel,
   voiceInstructions,
   factDescriptions,
@@ -143,7 +142,6 @@ export function RecordingWidget({
   selectedContentFieldIds: string[]
   automaticContentRevisionInstruction: string
   selectedContentLinks: Record<string, string>[]
-  contentAiAssistedLinkPlacement: boolean
   postTypeLabel: string
   voiceInstructions: string
   factDescriptions: string[]
@@ -173,7 +171,7 @@ export function RecordingWidget({
     : activeScreen === "facts" && !hasExtractedFacts(session) ? "Extract facts on the Media screen before updating them."
     : activeScreen === "facts" && !selectedFactKeys.length ? "Select at least one fact to update."
     : activeScreen === "content" && !draftReady ? "Generate content before revising fields."
-    : activeScreen === "content" && !selectedContentFieldIds.length ? "Select at least one content field to revise."
+    : activeScreen === "content" && !selectedContentFieldIds.length && !selectedContentLinks.some((link) => link.revision_requested === "true") ? "Select at least one content field to revise."
     : activeScreen === "content" && !hasContentInstruction ? "Add revision instructions or select an internal link to place."
     : activeScreen === "facts" && !transcript.trim() ? "Add instructions for updating the selected facts." : ""
   const speechStructure = voiceInstructionItems(voiceInstructions)
@@ -385,14 +383,13 @@ export function RecordingWidget({
         setStatus("Facts updated.")
       } else if (activeScreen === "content") {
         const fieldIds = selectedContentFieldIds
-        if (!fieldIds.length) throw new Error("Generate a draft before asking the content agent to revise it.")
+        if (!fieldIds.length && !selectedContentLinks.some((link) => link.revision_requested === "true")) throw new Error("Select fields or link candidates to revise.")
         const job = await regenerateSessionDraft(
           auth,
           session,
           appendText(automaticContentRevisionInstruction, transcript),
           fieldIds,
           selectedContentLinks,
-          contentAiAssistedLinkPlacement,
         )
         sessionStorage.setItem("speech2post_active_job", JSON.stringify({
           jobId: job.job_id,

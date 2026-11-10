@@ -67,6 +67,19 @@ class DraftFieldsUpdateRequest(VersionedRequest):
     acf_source_fields: dict[str, Any] = Field(default_factory=dict)
 
 
+class LinkCandidatesRequest(VersionedRequest):
+    action: Literal["add", "remove", "refresh"]
+    link_id: str | None = None
+
+
+class InsertLinkRequest(VersionedRequest):
+    field_key: str
+    url: str = Field(min_length=1, max_length=4096)
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    selected_text: str = Field(min_length=1)
+
+
 class ApproveRequest(VersionedRequest):
     user_id: str
 

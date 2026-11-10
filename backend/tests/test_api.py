@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import asyncio
 import hashlib
 import tempfile
 import unittest
@@ -134,6 +135,13 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         polled = await self.client.get(f"/api/content-sessions/jobs/{job['job_id']}")
         self.assertEqual(polled.status_code, 200)
         self.assertEqual(polled.json()["job_id"], job["job_id"])
+        # Do not delete the session directory while its worker is recording the result.
+        for _ in range(100):
+            if polled.json()["status"] in {"failed", "complete"}:
+                break
+            await asyncio.sleep(0.01)
+            polled = await self.client.get(f"/api/content-sessions/jobs/{job['job_id']}")
+        self.assertIn(polled.json()["status"], {"failed", "complete"})
 
     async def test_draft_chat_job_requires_explicit_revision_fields(self) -> None:
         created = (await self.client.post(

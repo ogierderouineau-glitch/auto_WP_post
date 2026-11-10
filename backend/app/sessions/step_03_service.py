@@ -45,7 +45,8 @@ from backend.app.errors import (
     VideoProcessingError,
     WordPressRequestError,
 )
-from backend.app.internal_links.step_01_service import InternalLinkInjectionResult, InternalLinkService
+from backend.app.internal_links.step_01_service import EligibleLinks, InternalLinkInjectionResult, InternalLinkService
+from backend.app.internal_links.step_02_editor import LinkMarkup, insert_link, link_urls, unlink_url
 from backend.app.images.step_02_processor import PillowProcessor
 from backend.app.images.step_03_metadata_context import (
     ImageMetadataFieldContextBuilder,
@@ -1516,6 +1517,8 @@ class ContentSessionService:
         revision_field_ids: list[str] | None = None,
         expected_version: int,
     ) -> ContentSession:
+        # Retained in the API for older clients; explicit link requests now fall back automatically.
+        del ai_assisted_link_placement
         session = self.repository.get(session_id)
         snapshot = self.knowledge.by_hash(session.workbook_hash)
         is_regeneration = session.state in {"needs_review", "ready_to_publish", "published"}
@@ -1585,12 +1588,14 @@ class ContentSessionService:
             session = state_machine.transition(session, "generating")
         generation_trace = dict(session.generation_trace)
         generation_trace.pop("humanness_review", None)
+        generation_trace.pop("quality_check", None)
         eligible = self.internal_links.eligible(
             snapshot,
             post_type_key=session.post_type_key,
             language=session.language,
-            current_url=current_url,
+            current_url=current_url or session.wordpress_result.get("view_url"),
         )
+        eligible = EligibleLinks(candidates=tuple(row for row in eligible.candidates if row.link_id not in session.excluded_link_ids))
         _, maximum_links = self._internal_link_range(snapshot)
         if not targeted_revision and not selected_links and eligible.candidates:
             self._milestone(session, "deterministic internal link ranking started")
@@ -1608,7 +1613,12 @@ class ContentSessionService:
             )
             self._milestone(session, "deterministic internal link ranking finished")
         if maximum_links is not None and len(selected_links) > maximum_links:
+            if targeted_revision:
+                raise InvalidInternalLinksError("The workbook candidate limit has been reached.")
             selected_links = selected_links[:maximum_links]
+        available_link_ids = {row.link_id for row in eligible.candidates}
+        if any(item.get("link_id") not in available_link_ids for item in selected_links):
+            raise InvalidInternalLinksError("A selected link is excluded or ineligible for this session.")
         explicitly_requested_link_ids = {
             str(selection.get("link_id") or "")
             for selection in selected_links
@@ -1619,11 +1629,7 @@ class ContentSessionService:
                 row.list_name: tuple(snapshot.validation_family(row.list_name))
                 for row in snapshot.validation_values
             }
-            should_generate = (
-                (targeted_revision and (not link_placement_only or ai_assisted_link_placement))
-                or not shared_fields
-                or not acf_source_fields
-            )
+            should_generate = (not link_placement_only) if targeted_revision else (not shared_fields or not acf_source_fields)
             if should_generate:
                 shared_rows = [
                     row for row in snapshot.shared_fields
@@ -1695,20 +1701,12 @@ class ContentSessionService:
                     context_payload = context.model_dump(by_alias=True)
                     if targeted_revision:
                         context_payload["examples"] = []
-                    if not targeted_revision or ai_assisted_link_placement:
+                    if not targeted_revision:
                         context_payload["selected_internal_links"] = selected_link_context
-                        if targeted_revision and ai_assisted_link_placement and explicitly_requested_link_ids:
-                            context_payload["internal_link_output_contract"] = (
-                                "Rewrite the selected internal-link-enabled body fields naturally so every "
-                                "explicitly requested link is represented by exactly one of its approved anchor "
-                                "phrases verbatim. Every requested link is mandatory. Do not add HTML or URLs; "
-                                "the application will inject them after generation."
-                            )
-                        else:
-                            context_payload["internal_link_output_contract"] = (
-                                "Where natural and relevant, use one approved anchor phrase verbatim in an "
-                                "internal-link-enabled body field. Do not add HTML or URLs and never force a phrase."
-                            )
+                        context_payload["internal_link_output_contract"] = (
+                            "Where natural and relevant, use one approved anchor phrase verbatim in an "
+                            "internal-link-enabled body field. Do not add HTML or URLs and never force a phrase."
+                        )
                     context_payload["current_shared_fields"] = {
                         key: value
                         for key, value in session.shared_fields.items()
@@ -1844,28 +1842,34 @@ class ContentSessionService:
         routed_shared = dict(shared_fields)
         routed_acf = dict(acf_source_fields)
         plain_acf_source_fields = dict(routed_acf)
+        placement_selections = [selection for selection in selected_links
+                                if not targeted_revision or selection.get("revision_requested") == "true"]
         try:
             linkable_fields = self._linkable_acf_fields(snapshot, session)
-            if selected_links and linkable_fields:
+            if placement_selections and linkable_fields:
                 minimum_words_between_links = self._minimum_words_between_internal_links(snapshot)
+                records = {row.link_id: row for row in eligible.candidates}
+                for selection in placement_selections:
+                    if selection.get("revision_requested") != "true":
+                        continue
+                    key = self.internal_links.choose_destination(
+                        records[selection["link_id"]], linkable_fields, routed_acf, selection.get("destination_acf", ""),
+                    )
+                    if key:
+                        selection["destination_acf"] = linkable_fields[key].acf_field_name or key
                 deterministic_result = self.internal_links.inject_existing_anchors(
                     eligible,
-                    selected_links,
+                    placement_selections,
                     acf_source_fields=routed_acf,
                     linkable_fields=linkable_fields,
                     minimum_words_between_links=minimum_words_between_links,
                 )
                 eligible_records = {row.link_id: row for row in eligible.candidates}
-                deterministic_content = "\n".join(
-                    str(value)
-                    for value in deterministic_result.acf_source_fields.values()
-                    if isinstance(value, str)
-                )
                 remaining_selections = [
                     selection
-                    for selection in selected_links
+                    for selection in placement_selections
                     if str(selection.get("link_id") or "") in eligible_records
-                    and eligible_records[str(selection.get("link_id"))].target_url not in deterministic_content
+                    and eligible_records[str(selection.get("link_id"))].target_url not in link_urls(deterministic_result.acf_source_fields.values())
                 ]
                 skipped = [
                     {
@@ -1896,11 +1900,15 @@ class ContentSessionService:
                             "field_key": str(selection.get("destination_acf") or ""),
                             "reason": "no_workbook_linkable_fields",
                         }
-                        for selection in selected_links
+                        for selection in placement_selections
                     ],
                 )
         except ValueError as exc:
             raise InvalidInternalLinksError(str(exc)) from exc
+        if explicitly_requested_link_ids:
+            session, injected_links = self._fallback_link_placement(
+                snapshot, session, eligible, selected_links, linkable_fields, injected_links,
+            )
         routed_shared = injected_links.shared_fields or routed_shared
         routed_acf = injected_links.acf_source_fields
         eligible_records = {row.link_id: row for row in eligible.candidates}
@@ -1908,9 +1916,7 @@ class ContentSessionService:
             link_id
             for link_id in explicitly_requested_link_ids
             if link_id in eligible_records
-            and eligible_records[link_id].target_url in "\n".join(
-                str(value) for value in routed_acf.values() if isinstance(value, str)
-            )
+            and eligible_records[link_id].target_url in link_urls(routed_acf.values())
         }
         unfulfilled_link_ids = explicitly_requested_link_ids - fulfilled_requested_link_ids
         if unfulfilled_link_ids:
@@ -3146,6 +3152,217 @@ class ContentSessionService:
             if len(completed) >= effective_minimum:
                 break
         return completed
+
+    def _fallback_link_placement(self, snapshot: Any, session: ContentSession, eligible: EligibleLinks,
+                                 selections: list[dict[str, str]], fields: dict[str, Any],
+                                 result: InternalLinkInjectionResult) -> tuple[ContentSession, InternalLinkInjectionResult]:
+        records = {row.link_id: row for row in eligible.candidates}
+        present = link_urls(result.acf_source_fields.values())
+        unresolved = [item for item in selections if item.get("revision_requested") == "true"
+                      and records[item["link_id"]].target_url not in present]
+        if not unresolved or self.revision_language_model is None:
+            return session, result
+        planned_values = dict(result.acf_source_fields)
+        editable_fields = {key: row for key, row in fields.items()
+                           if row.include_in_ai_schema and row.field_role != "input_fact"
+                           and row.source_mode not in {"derived", "derived_from_facts"}}
+        assignments = []
+        for item in unresolved:
+            record = records[item["link_id"]]
+            key = self.internal_links.choose_destination(record, editable_fields, planned_values, item.get("destination_acf", ""))
+            if key is None:
+                continue
+            assignments.append({**item, "field_key": key,
+                                "destination_acf": fields[key].acf_field_name or key,
+                                "approved_anchors": [record.anchor_text, *record.anchor_variants]})
+            # Reserve capacity for other candidates assigned during this pass.
+            planned_values[key] += '<a href="reserved">reserved</a>'
+        if not assignments:
+            return session, result
+        keys = {item["field_key"] for item in assignments}
+        rows = [fields[key] for key in sorted(keys)]
+        context = self.context_builder.build(
+            snapshot=snapshot, task="generation", post_type_key=session.post_type_key,
+            session=session, field_keys=sorted(keys),
+        )
+        provider = self.revision_language_model
+        generated = self._structured(
+            task="internal_link_revision",
+            messages=structured_task_input(
+                task="internal_link_revision", instructions=context.instructions,
+                context={
+                    "instruction": "Minimally revise only these fields so each assigned link has one approved anchor phrase verbatim. Preserve facts, meaning, HTML structure and every existing link. Do not add URLs or new links; the application inserts those. Follow the supplied field rules.",
+                    "fields": {key: value.model_dump(by_alias=True) for key, value in context.fields.items()},
+                    "confirmed_facts": context.confirmed_facts,
+                    "current_acf_source_fields": {key: result.acf_source_fields[key] for key in keys},
+                    "assignments": assignments,
+                },
+            ),
+            schema=build_generation_model(rows, name="InternalLinkRevision"), provider=provider,
+        )
+        session = self._record_provider_usage(session, provider)
+        replacements = generated.model_dump(exclude_none=True)
+        if set(replacements) != keys:
+            raise InvalidInternalLinksError("The link revision did not return every required field. Draft unchanged.")
+        for key, value in replacements.items():
+            original_markup = LinkMarkup(result.acf_source_fields[key])
+            revised_markup = LinkMarkup(value) if isinstance(value, str) else None
+            original_links = [(url, original_markup.source[opening[1]:closing[0]])
+                              for url, opening, closing in original_markup.links]
+            revised_links = [(url, revised_markup.source[opening[1]:closing[0]])
+                             for url, opening, closing in revised_markup.links] if revised_markup else []
+            if not isinstance(value, str) or sorted(original_links) != sorted(revised_links):
+                raise InvalidInternalLinksError("The link revision would change an existing link. Draft unchanged.")
+        revised = {**result.acf_source_fields, **replacements}
+        placed = self.internal_links.inject_existing_anchors(
+            eligible, assignments, acf_source_fields=revised, linkable_fields=fields,
+            minimum_words_between_links=self._minimum_words_between_internal_links(snapshot),
+        )
+        fulfilled = {item["link_id"] for item in placed.injected}
+        return session, InternalLinkInjectionResult(
+            shared_fields={}, acf_source_fields=placed.acf_source_fields,
+            injected=[*result.injected, *placed.injected],
+            skipped=[item for item in result.skipped if item.get("link_id") not in fulfilled] + placed.skipped,
+        )
+
+    def _session_links(self, snapshot: Any, session: ContentSession, *, include_excluded: bool = False) -> EligibleLinks:
+        eligible = self.internal_links.eligible(
+            snapshot, post_type_key=session.post_type_key, language=session.language,
+            current_url=session.wordpress_result.get("view_url"),
+        )
+        return EligibleLinks(candidates=tuple(
+            row for row in eligible.candidates
+            if include_excluded or row.link_id not in session.excluded_link_ids
+        ))
+
+    def link_options(self, session_id: str) -> dict[str, Any]:
+        session = self.repository.get(session_id)
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        fields = self._linkable_acf_fields(snapshot, session)
+        eligible = self._session_links(snapshot, session, include_excluded=True)
+        urls = link_urls([*session.shared_fields.values(), *session.acf_source_fields.values()])
+        return {
+            "maximum": self._internal_link_range(snapshot)[1],
+            "placed_link_ids": [row.link_id for row in eligible.candidates if row.target_url in urls],
+            "placed_field_keys": {row.link_id: [key for key, value in session.acf_source_fields.items()
+                                               if row.target_url in link_urls([value])]
+                                  for row in eligible.candidates if row.target_url in urls},
+            "fields": [{"field_key": key, "acf_field_name": row.acf_field_name or key, "label": row.description_de or key} for key, row in fields.items()],
+            "links": [{
+                "link_id": row.link_id, "anchor_text": row.anchor_text, "target_url": row.target_url,
+                "usage_context": row.usage_context,
+                "suggested_field_key": self.internal_links.choose_destination(row, fields, session.acf_source_fields),
+            } for row in eligible.candidates],
+        }
+
+    def _save_link_edit(self, session: ContentSession, *, expected_version: int, content_changed: bool) -> ContentSession:
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        updates: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
+        if content_changed:
+            payload = self.payload_builder.build(
+                snapshot, post_type_key=session.post_type_key, shared_values=session.shared_fields,
+                acf_source_values=session.acf_source_fields, confirmed_facts=session.confirmed_facts,
+                media=self._publication_media(snapshot, session),
+            )
+            trace = dict(session.generation_trace)
+            trace.pop("quality_check", None)
+            trace.pop("humanness_review", None)
+            trace.pop("internal_links", None)
+            updates.update(wordpress_payload=payload.model_dump(), approval=Approval(),
+                           state="needs_review", publication_idempotency_key=None, generation_trace=trace)
+        return self.repository.save(session.model_copy(update=updates), expected_version=expected_version)
+
+    def edit_link_candidates(self, session_id: str, *, action: str, link_id: str | None, expected_version: int) -> ContentSession:
+        session = self.repository.get(session_id)
+        if session.version != expected_version:
+            raise SessionVersionConflictError("Session changed. Reload before changing link candidates.")
+        if not session.wordpress_payload:
+            raise InvalidInternalLinksError("Generate a draft before editing candidates.")
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        eligible = self._session_links(snapshot, session, include_excluded=True)
+        records = {row.link_id: row for row in eligible.candidates}
+        selections = [dict(item) for item in session.selected_links if item.get("link_id") in records]
+        excluded = set(session.excluded_link_ids)
+        shared, acf = dict(session.shared_fields), dict(session.acf_source_fields)
+        urls = link_urls([*shared.values(), *acf.values()])
+        _, maximum = self._internal_link_range(snapshot)
+        if action == "add":
+            if link_id not in records:
+                raise InvalidInternalLinksError("This link is unavailable for the current client, language or post type.")
+            if any(item["link_id"] == link_id for item in selections):
+                return session
+            if maximum is not None and len(selections) >= maximum:
+                raise InvalidInternalLinksError("The workbook candidate limit has been reached. Remove a candidate first.")
+            selections.append({"link_id": link_id, "anchor_text": records[link_id].anchor_text})
+            excluded.discard(link_id)
+        elif action == "remove":
+            if link_id not in records or not any(item["link_id"] == link_id for item in selections):
+                raise InvalidInternalLinksError("Candidate not found in this session.")
+            url = records[link_id].target_url
+            selections = [item for item in selections if item["link_id"] != link_id]
+            excluded.add(link_id)
+            shared = {key: unlink_url(value, url) if isinstance(value, str) else value for key, value in shared.items()}
+            acf = {key: unlink_url(value, url) if isinstance(value, str) else value for key, value in acf.items()}
+        elif action == "refresh":
+            previous_ids = {item["link_id"] for item in selections}
+            selections = [item for item in selections if records[item["link_id"]].target_url in urls]
+            pool = EligibleLinks(candidates=tuple(row for row in eligible.candidates if row.link_id not in previous_ids | excluded))
+            source = " ".join(str(value) for value in [session.manual_text, session.transcript, *acf.values(), *shared.values()])
+            remaining = None if maximum is None else max(0, maximum - len(selections))
+            selections += self.internal_links.rank(pool, source_text=source, maximum=remaining)
+        else:
+            raise InvalidInternalLinksError("Unknown candidate action.")
+        updated = session.model_copy(update={
+            "selected_links": selections, "excluded_link_ids": sorted(excluded),
+            "shared_fields": shared, "acf_source_fields": acf,
+        })
+        return self._save_link_edit(updated, expected_version=expected_version,
+                                    content_changed=shared != session.shared_fields or acf != session.acf_source_fields)
+
+    def insert_manual_link(self, session_id: str, *, field_key: str, url: str, start: int, end: int,
+                           selected_text: str, expected_version: int) -> ContentSession:
+        session = self.repository.get(session_id)
+        if session.version != expected_version:
+            raise SessionVersionConflictError("Session changed. Select the text again before adding a link.")
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        fields = self._linkable_acf_fields(snapshot, session)
+        if not session.wordpress_payload or field_key not in fields:
+            raise InvalidInternalLinksError("Choose a generated ACF field that allows links.")
+        value = session.acf_source_fields.get(field_key)
+        if not isinstance(value, str):
+            raise InvalidInternalLinksError("Choose a text field.")
+        maximum = fields[field_key].max_internal_links
+        if maximum is not None and self.internal_links._existing_link_count(value) >= maximum:
+            raise InvalidInternalLinksError("This field has reached its link limit.")
+        if url.strip() in link_urls(session.acf_source_fields.values()):
+            raise InvalidInternalLinksError("This URL is already linked in the draft.")
+        try:
+            linked = insert_link(value, url=url.strip(), start=start, end=end, selected_text=selected_text)
+        except ValueError as exc:
+            raise InvalidInternalLinksError(str(exc)) from exc
+        markup = LinkMarkup(linked)
+        inserted = next((span for span in markup.links if span[0] == url.strip()), None)
+        minimum = self._minimum_words_between_internal_links(snapshot)
+        if inserted and minimum and not self.internal_links._has_minimum_word_distance(
+            linked, inserted[1][0], inserted[2][1],
+            [(opening[0], closing[1]) for href, opening, closing in markup.links if href != url.strip()], minimum,
+        ):
+            raise InvalidInternalLinksError("The link is too close to another link for the workbook spacing rule.")
+        selections = list(session.selected_links)
+        excluded = set(session.excluded_link_ids)
+        matching = next((row for row in self._session_links(snapshot, session, include_excluded=True).candidates
+                         if row.target_url == url.strip()), None)
+        if matching and not any(item.get("link_id") == matching.link_id for item in selections):
+            _, limit = self._internal_link_range(snapshot)
+            if limit is not None and len(selections) >= limit:
+                raise InvalidInternalLinksError("Remove a candidate before adding another workbook link.")
+            selections.append({"link_id": matching.link_id, "anchor_text": matching.anchor_text})
+            excluded.discard(matching.link_id)
+        updated = session.model_copy(update={
+            "acf_source_fields": {**session.acf_source_fields, field_key: linked},
+            "selected_links": selections, "excluded_link_ids": sorted(excluded),
+        })
+        return self._save_link_edit(updated, expected_version=expected_version, content_changed=True)
 
     def approve(
         self,

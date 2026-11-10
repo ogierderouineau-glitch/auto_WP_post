@@ -56,7 +56,7 @@ checkboxes appear after extraction. Extraction is disabled until a non-empty
 transcript has been saved (general text, audio transcript, picture or video notes).
 The Media agent provides “Save transcript” for its general text. Fact updates stay
 disabled until the first extraction; content revision requires a generated draft
-and selected fields. The Content screen’s Quality check and Revise selected fields
+and selected fields or free link candidates. The Content screen’s Quality check and Revise selected fields
 buttons are hidden until a draft exists. Disabled actions explain the prerequisite on hover or keyboard
 focus. Content revision opens the existing agent for the selected fields.
 
@@ -66,6 +66,46 @@ The publishing checklist checks “Featured image assigned” only when an uploa
 image is marked as featured; sessions without images leave it unchecked.
 Workbook uploads show a prominent confirmation with the uploaded filename.
 Operations from today show local time; older operations show local date and time.
+
+## Internal links
+
+The Content screen shows the session's candidate list, including placed links.
+Use **Add candidate…** to search all eligible links in this client's workbook by
+anchor, URL or description. The configured post type, language and active flags
+still apply. The workbook maximum applies to the total candidate list, including
+placed and manually added workbook candidates.
+
+**Refresh unplaced candidates** retains placed links and ranks alternatives locally,
+excluding the previous unplaced set. Fewer suggestions appear when there are not
+enough relevant alternatives. Removing an unplaced candidate only removes it from
+the list. Removing a placed candidate unwraps its link while preserving anchor text
+and inner formatting, updates the payload and requires approval again. Removed IDs
+stay excluded across reloads and full regeneration until manually re-added.
+
+Select free candidates and use **Revise selected fields**, then submit through the
+content agent. No extra instruction or manually checked field is necessary for
+link-only placement. Each destination defaults to **- choose for me -**: local
+scoring prefers approved anchor matches, then an explicitly preferred destination,
+keyword/context relevance and workbook field priority, respecting field capacity.
+No AI tokens are used to choose destinations or place existing anchors. Placed
+candidates show their destination fields.
+
+If exact placement fails, the app requests a small AI revision for only the needed
+eligible fields, without sending examples or unrelated draft fields. This can
+include a field outside the manually checked set. The app then injects links and
+validates the draft. Existing links must survive unchanged. If any requested link
+cannot be placed safely, the saved draft stays unchanged and the action reports an
+error. The former AI-assisted-placement checkbox is no longer needed.
+
+For a pasted internal or external URL, select text in a generated link-enabled ACF
+field and click **Add link to selected text**. In HTML fields, select text in the
+source editor. Paste an HTTP(S) URL and confirm. The app wraps that selection without
+rewriting surrounding content; selections spanning tags or existing links are
+rejected with guidance. Field link limits and spacing rules still apply. A pasted
+URL matching an eligible workbook link joins the candidate list and counts toward
+its maximum. Other pasted URLs remain direct content edits rather than candidates.
+Changing content refreshes the WordPress payload but does not update the live post
+until the normal approval and update/publish flow is used.
 
 ## Project structure
 

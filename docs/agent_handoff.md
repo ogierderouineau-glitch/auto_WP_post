@@ -72,6 +72,28 @@ only when usable. Media drag-and-drop reuses the existing uploader and backend
 validation. Template links come from the active post type's workbook configuration.
 See README for user-facing behavior and the configurable workbook test command.
 
+## Internal-link editing
+
+`selected_links` is the persisted session candidate list; `excluded_link_ids`
+records explicit removals across regeneration. `GET /{session_id}/links` returns
+eligible workbook links, the candidate maximum, actual placed-link IDs/fields,
+linkable ACF fields and local destination suggestions using the session snapshot.
+`PUT /{session_id}/link-candidates` supports add/remove/refresh. `POST
+/{session_id}/links` wraps a selected source-text range in an HTTP(S) link. These
+mutations require ownership, no active job and the expected session version.
+
+The Content screen reuses the existing revision job for free candidates. Explicit
+link requests first use deterministic injection, then one focused structured AI
+revision for unresolved destinations (provider/schema retries still apply).
+Field choice is local; examples and unrelated fields are excluded from fallback
+context. No requested-link placement is saved if any request or final validation
+fails. HTML source edits use the small parser in `internal_links/step_02_editor.py`;
+selection offsets are converted from browser UTF-16 units. Removing a placed link
+or inserting a manual link rebuilds the payload and clears approval. The legacy
+`ai_assisted_link_placement` API parameter is accepted but ignored by this flow.
+See README for user behavior and `backend/tests/test_link_workflow.py` for tests
+with arbitrary post-type/field keys and an unrelated industry.
+
 ## Workbook versus application ownership
 
 Client-owned sheets define post types, shared/ACF fields, SEO constraints,

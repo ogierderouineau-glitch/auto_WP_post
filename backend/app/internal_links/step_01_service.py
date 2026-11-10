@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from backend.app.knowledge_base.step_01_models import InternalLinkRecord, WorkbookSnapshot
+from backend.app.internal_links.step_02_editor import link_urls
 
 
 def canonical_path(url: str) -> str:
@@ -35,7 +36,6 @@ class InternalLinkService:
     SEARCH_STOP_TERMS = {
         "aber", "auch", "das", "der", "die", "ein", "eine", "einer", "eines",
         "für", "ist", "mit", "oder", "und", "von", "wenn", "wird", "zum", "zur",
-        "event", "events",
     }
 
     def eligible(
@@ -332,19 +332,27 @@ class InternalLinkService:
 
     @staticmethod
     def _existing_link_urls(values: Any) -> set[str]:
-        urls: set[str] = set()
-        for value in values:
-            if not isinstance(value, str):
+        return link_urls(values)
+
+    def choose_destination(self, record: InternalLinkRecord, fields: dict[str, Any], values: dict[str, Any], preferred: str = "") -> str | None:
+        """Rank eligible destinations locally; no model call is needed."""
+        query = self._search_terms(" ".join((record.keyword, record.anchor_text, record.usage_context, record.category)))
+        choices = []
+        for order, (key, schema) in enumerate(fields.items()):
+            value = values.get(key)
+            if not isinstance(value, str) or not value.strip():
                 continue
-            urls.update(
-                html.unescape(match.group(1))
-                for match in re.finditer(
-                    r"<a\b[^>]*\bhref=[\"']([^\"']+)[\"'][^>]*>",
-                    value,
-                    flags=re.IGNORECASE,
-                )
-            )
-        return urls
+            maximum = getattr(schema, "max_internal_links", None)
+            if maximum is not None and self._existing_link_count(value) >= maximum:
+                continue
+            destination = str(getattr(schema, "acf_field_name", None) or key)
+            anchor_present = bool(self.existing_anchor_placements(
+                EligibleLinks(candidates=(record,)), [{"link_id": record.link_id, "destination_acf": destination}],
+                acf_source_fields=values, linkable_fields={key: schema},
+            ))
+            overlap = len(query & self._search_terms(re.sub(r"<[^>]+>", " ", value)))
+            choices.append((anchor_present, destination == preferred, overlap, -order, key))
+        return max(choices)[-1] if choices else None
 
     @staticmethod
     def _existing_link_anchors(values: Any) -> set[str]:

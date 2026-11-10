@@ -106,7 +106,6 @@ export default function Page() {
   const [selectedFactKeys, setSelectedFactKeys] = useState<string[] | null>(null)
   const [contentRevisionFieldIds, setContentRevisionFieldIds] = useState<string[]>([])
   const [contentSelectedLinks, setContentSelectedLinks] = useState<Record<string, string>[]>([])
-  const [contentAiAssistedLinkPlacement, setContentAiAssistedLinkPlacement] = useState(false)
   const sessionRef = useRef<ContentSession | null>(null)
   const pictureTranscriptRef = useRef("")
   const pictureSaveQueue = useRef<Promise<unknown>>(Promise.resolve())
@@ -684,7 +683,6 @@ export default function Page() {
             onOpenAgent={() => setAgentOpen(true)}
             onRevisionFieldIdsChange={setContentRevisionFieldIds}
             onSelectedLinksChange={setContentSelectedLinks}
-            onAiAssistedLinkPlacementChange={setContentAiAssistedLinkPlacement}
             onBackToFacts={() => setScreen("facts")}
             onContinueToWordPress={() => setScreen("wordpress")}
           />
@@ -708,7 +706,6 @@ export default function Page() {
           selectedContentFieldIds={contentRevisionFieldIds}
           automaticContentRevisionInstruction={contentQualityRevisionInstruction}
           selectedContentLinks={contentSelectedLinks}
-          contentAiAssistedLinkPlacement={contentAiAssistedLinkPlacement}
           postTypeLabel={selectedPostTypeLabel}
           voiceInstructions={selectedPostTypeVoiceInstructions}
           factDescriptions={selectedPostTypeFactDescriptions}

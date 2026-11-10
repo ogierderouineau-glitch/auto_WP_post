@@ -1,5 +1,6 @@
 "use client"
 
+import { InternalLinksPanel } from "@/components/internal-links-panel"
 import { ActionHint } from "@/components/action-hint"
 
 import { useActionWarning } from "@/components/action-warning"
@@ -19,6 +20,10 @@ import {
 } from "lucide-react"
 import type { ApiClientOptions } from "@/lib/api"
 import {
+  editSessionLinkCandidates,
+  insertSessionLink,
+  loadSessionLinkOptions,
+  type SessionLinkOptions,
   approveSessionContent,
   loadContentSession,
   startImageMetadataGeneration,
@@ -143,12 +148,14 @@ function HtmlFieldEditor({
   value,
   patterns,
   onChange,
+  onSelect,
 }: {
   id: string
   label: string
   value: string
   patterns: HtmlPatternOption[]
   onChange: (value: string) => void
+  onSelect: (element: HTMLTextAreaElement) => void
 }) {
   return (
     <div className="grid gap-2 lg:grid-cols-2">
@@ -180,6 +187,7 @@ function HtmlFieldEditor({
           value={value}
           rows={8}
           spellCheck={false}
+          onSelect={(event) => onSelect(event.currentTarget)}
           onChange={(event) => onChange(event.target.value)}
           className="h-48 w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-mono text-xs leading-relaxed text-foreground outline-none focus:ring-2 focus:ring-gold/40"
         />
@@ -284,7 +292,6 @@ export function ContentScreen({
   onSessionChange,
   onRevisionFieldIdsChange,
   onSelectedLinksChange,
-  onAiAssistedLinkPlacementChange,
   onBackToFacts,
   onContinueToWordPress,
   onOpenAgent,
@@ -295,7 +302,6 @@ export function ContentScreen({
   onSessionChange: (session: ContentSession) => void
   onRevisionFieldIdsChange: (fieldIds: string[]) => void
   onSelectedLinksChange: (links: Record<string, string>[]) => void
-  onAiAssistedLinkPlacementChange: (enabled: boolean) => void
   onBackToFacts: () => void
   onContinueToWordPress: () => void
   onOpenAgent: () => void
@@ -312,7 +318,6 @@ export function ContentScreen({
   const [search, setSearch] = useState("")
   const [queuedLinks, setQueuedLinks] = useState<Record<string, string>>({})
   const [manualRevisionFieldIds, setManualRevisionFieldIds] = useState<string[]>([])
-  const [aiAssistedLinkPlacement, setAiAssistedLinkPlacement] = useState(false)
   const sessionRef = useRef<ContentSession | null>(session)
   const autosaveTimerRef = useRef<number | null>(null)
   const autosavePromiseRef = useRef<Promise<ContentSession | null> | null>(null)
@@ -332,45 +337,38 @@ export function ContentScreen({
   const review = contentQualityCheck(session)
   const canGenerate = !!auth && !!session && ["ready_to_generate", "needs_review", "ready_to_publish", "published"].includes(session.state)
   const canApprove = !!auth && !!session && draftReady && session.state === "needs_review"
-  const visibleLinkIds = useMemo(() => {
-    const selected = new Set((session?.selected_links || []).map((selection) => selection.link_id))
-    return selected.size ? selected : new Set(session?.eligible_link_ids || [])
-  }, [session?.eligible_link_ids, session?.selected_links])
-  const linkCandidates = useMemo(
-    () => (workbook?.internal_link_candidates || []).filter(
-      (candidate) => !visibleLinkIds.size || visibleLinkIds.has(candidate.link_id),
-    ),
-    [visibleLinkIds, workbook?.internal_link_candidates],
-  )
-  const currentDraftContent = fields.map((field) => drafts[field.id] ?? field.value).join("\n")
-  const usedLinkIds = new Set(
-    linkCandidates
-      .filter((candidate) => currentDraftContent.includes(candidate.target_url))
-      .map((candidate) => candidate.link_id),
-  )
+  const [linkOptions, setLinkOptions] = useState<SessionLinkOptions | null>(null)
+  const [linkSelection, setLinkSelection] = useState<{ fieldId: string; start: number; end: number; text: string } | null>(null)
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false)
+  const [linkUrl, setLinkUrl] = useState("")
+  const linkDialog = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    if (linkDialogOpen) linkDialog.current?.showModal()
+  }, [linkDialogOpen])
+  useEffect(() => {
+    if (!auth || !session || !draftReady) return
+    let cancelled = false
+    loadSessionLinkOptions(auth, session).then((options) => {
+      if (!cancelled) setLinkOptions(options)
+    }).catch((error) => {
+      if (!cancelled) setMessage(error instanceof Error ? error.message : "Could not load link candidates.")
+    })
+    return () => { cancelled = true }
+  }, [auth, session, draftReady])
+  const linkCandidates = (linkOptions?.links || []).filter((link) => session?.selected_links.some((item) => item.link_id === link.link_id))
+  const usedLinkIds = new Set(linkOptions?.placed_link_ids || [])
+  const hasQueuedLinks = Object.keys(queuedLinks).some((id) => !usedLinkIds.has(id))
   const normalizedSearch = search.trim().toLowerCase()
   const filteredFields = fields.filter((field) => !normalizedSearch || `${field.label} ${field.key} ${drafts[field.id] ?? field.value}`.toLowerCase().includes(normalizedSearch))
   const groupedFields = Object.fromEntries((Object.keys(CONTENT_SECTIONS) as ContentSectionId[]).map((id) => [id, filteredFields.filter((field) => field.section === id)])) as Record<ContentSectionId, DraftField[]>
-  const linkRevisionFieldIds = useMemo(
-    () => Object.fromEntries(
-      Object.entries(queuedLinks).map(([linkId, destination]) => [
-        linkId,
-        linkDestinationFieldIds(destination),
-      ]),
-    ),
-    [fields, queuedLinks, workbook?.acf_fields],
-  )
-  const selectedRevisionFieldIds = useMemo(
-    () => [...new Set([
-      ...manualRevisionFieldIds,
-      ...Object.values(linkRevisionFieldIds).flat(),
-    ])],
-    [linkRevisionFieldIds, manualRevisionFieldIds],
-  )
+  // Candidate-only revisions choose their destination on the backend. Keep the
+  // checked-field list manual so quality-check instructions do not trigger an
+  // unnecessary model rewrite for an otherwise deterministic link insertion.
+  const selectedRevisionFieldIds = manualRevisionFieldIds
   const revisionDisabledReason = !auth || !session ? "Create or load a session first."
     : operation === "loading" ? "Wait for the current content operation to finish."
     : !draftReady ? "Generate content before revising fields."
-    : !selectedRevisionFieldIds.length ? "Select at least one content field to revise." : ""
+    : !selectedRevisionFieldIds.length && !hasQueuedLinks ? "Select at least one content field or link candidate to revise." : ""
   const selectedRevisionFields = new Set(selectedRevisionFieldIds)
   const allRevisionFieldsSelected = fields.length > 0 && selectedRevisionFieldIds.length === fields.length
 
@@ -382,10 +380,11 @@ export function ContentScreen({
     const selections = new Map(
       (session?.selected_links || []).map((selection) => [selection.link_id, { ...selection }]),
     )
+    const placed = new Set(linkOptions?.placed_link_ids || [])
     for (const [linkId, destination] of Object.entries(queuedLinks)) {
-      if (!destination) continue
+      if (placed.has(linkId) || !selections.has(linkId)) continue
       const existing = selections.get(linkId)
-      const candidate = linkCandidates.find((item) => item.link_id === linkId)
+      const candidate = linkOptions?.links.find((item) => item.link_id === linkId)
       const selection = {
         ...existing,
         link_id: linkId,
@@ -396,15 +395,11 @@ export function ContentScreen({
       selections.set(linkId, selection)
     }
     return [...selections.values()]
-  }, [linkCandidates, queuedLinks, session?.selected_links])
+  }, [linkOptions, queuedLinks, session?.selected_links])
 
   useEffect(() => {
     onSelectedLinksChange(selectedLinksForAgent)
   }, [onSelectedLinksChange, selectedLinksForAgent])
-
-  useEffect(() => {
-    onAiAssistedLinkPlacementChange(aiAssistedLinkPlacement)
-  }, [aiAssistedLinkPlacement, onAiAssistedLinkPlacementChange])
 
   function toggleRevisionField(fieldId: string) {
     setManualRevisionFieldIds((current) => {
@@ -413,20 +408,6 @@ export function ContentScreen({
       else next.add(fieldId)
       return [...next]
     })
-  }
-
-  function linkDestinationFieldIds(destination: string) {
-    if (!destination) return []
-    const matchingFieldIds = fields.filter((field) =>
-      field.scope === "acf" && (
-        field.key === destination
-        || field.displayKey === destination
-        || workbook?.acf_fields?.some((schema) =>
-          schema.field_key === field.key && schema.acf_field_name === destination
-        )
-      ),
-    ).map((field) => field.id)
-    return matchingFieldIds
   }
 
   function setLinkDestination(linkId: string, destination: string) {
@@ -500,7 +481,14 @@ export function ContentScreen({
       autosaveTimerRef.current = null
     }
     await autosavePromiseRef.current
-    return sessionRef.current || session
+    const latest = sessionRef.current || session
+    if (auth && latest && changedCount) {
+      const data = await saveSessionDraftFields(auth, latest, changed.shared, changed.acf)
+      sessionRef.current = data.session
+      onSessionChange(data.session)
+      return data.session
+    }
+    return latest
   }
 
   async function pollJob(jobId: string, signal?: AbortSignal) {
@@ -568,13 +556,61 @@ export function ContentScreen({
     return () => controller.abort()
   }, [auth, session?.session_id])
 
+  function captureLinkSelection(fieldId: string, element: HTMLInputElement | HTMLTextAreaElement) {
+    const start = element.selectionStart || 0
+    const end = element.selectionEnd || 0
+    setLinkSelection(end > start ? { fieldId, start, end, text: element.value.slice(start, end) } : null)
+  }
+
+  async function handleCandidateAction(action: "add" | "remove" | "refresh", id?: string) {
+    if (!auth || !session || operation === "loading") return
+    setOperation("loading")
+    try {
+      const latest = await latestSessionAfterAutosave()
+      if (!latest) return
+      const data = await editSessionLinkCandidates(auth, latest, action, id)
+      sessionRef.current = data.session
+      onSessionChange(data.session)
+      if (id) removeQueuedLink(id)
+      if (action === "refresh") setQueuedLinks({})
+      setOperation("success")
+      setMessage(action === "refresh" ? "Unplaced candidates refreshed. Placed links kept; fewer suggestions are shown if no relevant alternatives remain."
+        : action === "remove" ? "Candidate removed. Any linked text was kept." : "Candidate added. Select it to place it during revision.")
+    } catch (error) {
+      setOperation("error")
+      setMessage(error instanceof Error ? error.message : "Could not change candidates.")
+    }
+  }
+
+  async function handleInsertLink() {
+    if (!auth || !session || !linkSelection || operation === "loading") return
+    const field = fields.find((field) => field.id === linkSelection.fieldId)
+    if (!field) return
+    setOperation("loading")
+    try {
+      const latest = await latestSessionAfterAutosave()
+      if (!latest) return
+      const data = await insertSessionLink(auth, latest, field.key, linkUrl, linkSelection)
+      sessionRef.current = data.session
+      onSessionChange(data.session)
+      setLinkDialogOpen(false)
+      setLinkSelection(null)
+      setOperation("success")
+      setMessage("Link added to the selected text.")
+    } catch (error) {
+      setLinkDialogOpen(false)
+      setOperation("error")
+      setMessage(error instanceof Error ? error.message : "Could not add link.")
+    }
+  }
+
   const { confirm, warningDialog } = useActionWarning()
 
   async function handleGenerate() {
     if (!auth || !session) return
     if (draftReady && !await confirm({
       message: "Regenerating replaces the full draft and refreshes internal links and media metadata. Revise selected fields to limit the changes.",
-      alternative: selectedRevisionFieldIds.length ? { label: "Revise selected fields", action: onOpenAgent } : undefined,
+      alternative: selectedRevisionFieldIds.length || hasQueuedLinks ? { label: "Revise selected fields", action: onOpenAgent } : undefined,
     })) return
     const isFirstGeneration = !draftReady
     setOperation("loading")
@@ -739,6 +775,19 @@ export function ContentScreen({
   return (
     <>
       {warningDialog}
+      {linkDialogOpen && <dialog ref={linkDialog} aria-label="Add link" onCancel={() => setLinkDialogOpen(false)}
+        className="m-auto w-[calc(100%-2rem)] max-w-md rounded-xl border border-border bg-card p-5 text-foreground backdrop:bg-black/50">
+        <form onSubmit={(event) => { event.preventDefault(); void handleInsertLink() }}>
+          <h2 className="font-semibold">Add link to selected text</h2>
+          <p className="my-3 break-words text-sm">{linkSelection?.text}</p>
+          <input autoFocus type="url" required aria-label="Link URL" placeholder="https://…" value={linkUrl}
+            onChange={(event) => setLinkUrl(event.target.value)} className="w-full rounded-md border border-border bg-background p-2 text-sm" />
+          <div className="mt-4 flex justify-end gap-2">
+            <button type="button" onClick={() => setLinkDialogOpen(false)} className="rounded-md border border-border px-3 py-2 text-sm">Cancel</button>
+            <button type="submit" disabled={operation === "loading"} className="rounded-md bg-ai px-3 py-2 text-sm text-ai-foreground disabled:opacity-50">Add link</button>
+          </div>
+        </form>
+      </dialog>}
       <div className="pb-28">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -868,6 +917,7 @@ export function ContentScreen({
                           id={`s2p-content-field-${field.id}`}
                           label={field.label}
                           value={value}
+                          onSelect={(element) => captureLinkSelection(field.id, element)}
                           patterns={(workbook?.html_patterns || []).filter((pattern) => field.htmlPatternKeys.includes(pattern.pattern_key))}
                           onChange={(nextValue) => setDrafts((current) => ({ ...current, [field.id]: nextValue }))}
                         />
@@ -876,6 +926,7 @@ export function ContentScreen({
                           id={`s2p-content-field-${field.id}`}
                           value={value}
                           rows={4}
+                          onSelect={(event) => captureLinkSelection(field.id, event.currentTarget)}
                           onChange={(event) => setDrafts((current) => ({ ...current, [field.id]: event.target.value }))}
                           className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none focus:ring-2 focus:ring-gold/40"
                         />
@@ -883,9 +934,16 @@ export function ContentScreen({
                         <input
                           id={`s2p-content-field-${field.id}`}
                           value={value}
+                          onSelect={(event) => captureLinkSelection(field.id, event.currentTarget)}
                           onChange={(event) => setDrafts((current) => ({ ...current, [field.id]: event.target.value }))}
                           className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-gold/40"
                         />
+                      )}
+                      {draftReady && field.scope === "acf" && linkOptions?.fields.some((item) => item.field_key === field.key) && (
+                        <button type="button" id={`s2p-content-add-link-${field.id}`} disabled={operation === "loading" || linkSelection?.fieldId !== field.id}
+                          title="Select text in this editor, then paste a URL. In HTML fields, select text in the source editor."
+                          onClick={() => { setLinkUrl(""); setLinkDialogOpen(true) }}
+                          className="mt-2 rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">Add link to selected text</button>
                       )}
                       {openTrace === field.id && <div className="mt-2"><TracePanel trace={field.trace || {}} /></div>}
                     </div>
@@ -984,90 +1042,10 @@ export function ContentScreen({
                   </div>
                 </details>
               )}
-              <details open id="s2p-content-internal-links" className="group order-1 scroll-mt-28 rounded-xl border border-border bg-card">
-                <summary className="flex cursor-pointer list-none items-center gap-2 p-4">
-                  <h2 className="text-sm font-semibold">Internal links</h2>
-                  <span className="text-xs text-muted-foreground">({linkCandidates.length})</span>
-                  <ChevronDown className="ml-auto size-4 text-muted-foreground transition-transform group-open:rotate-180" />
-                </summary>
-                <div className="border-t border-border px-4 pb-4">
-                <div className="mt-3 space-y-2">
-                  {linkCandidates.length ? linkCandidates.map((candidate) => {
-                    const used = usedLinkIds.has(candidate.link_id)
-                    const queued = Object.prototype.hasOwnProperty.call(queuedLinks, candidate.link_id)
-                    return (
-                      <div key={candidate.link_id} className="rounded-md border border-border bg-background p-2.5">
-                        <label className="flex items-start gap-2">
-                          {used ? (
-                            <Check className="mt-0.5 size-4 shrink-0 text-confirm" aria-label="Used" />
-                          ) : (
-                            <input
-                              id={`s2p-content-link-${candidate.link_id}`}
-                              type="checkbox"
-                              checked={queued}
-                              onChange={(event) => {
-                                const firstDestination = workbook?.internal_link_acf_fields?.[0]?.acf_field_name || ""
-                                if (event.target.checked && firstDestination) {
-                                  setLinkDestination(candidate.link_id, firstDestination)
-                                } else {
-                                  removeQueuedLink(candidate.link_id)
-                                }
-                              }}
-                              disabled={!workbook?.internal_link_acf_fields?.length}
-                              className="mt-0.5 size-4 accent-gold"
-                            />
-                          )}
-                          <span className="min-w-0">
-                            <span className="block text-xs font-medium text-foreground">{candidate.anchor_text}</span>
-                            <span className="block truncate text-[11px] text-muted-foreground">{candidate.target_url}</span>
-                          </span>
-                        </label>
-                        {!used && queued && (
-                          <select
-                            id={`s2p-content-link-destination-${candidate.link_id}`}
-                            autoFocus
-                            value={queuedLinks[candidate.link_id]}
-                            onChange={(event) => {
-                              const destination = event.target.value
-                              setLinkDestination(candidate.link_id, destination)
-                            }}
-                            className="mt-2 w-full rounded-md border border-border bg-card px-2 py-1.5 text-xs text-foreground"
-                          >
-                            {(workbook?.internal_link_acf_fields || []).map((field) => (
-                              <option key={field.acf_field_name} value={field.acf_field_name}>{field.acf_field_name}</option>
-                            ))}
-                          </select>
-                        )}
-                        {!used && queued && queuedLinks[candidate.link_id] && (
-                          <p className="mt-2 text-[11px] text-muted-foreground">
-                            This ACF is preferred; the agent may fall back to another suitable field.
-                          </p>
-                        )}
-                      </div>
-                    )
-                  }) : <p className="text-xs text-muted-foreground">No eligible link candidates.</p>}
-                </div>
-                <label
-                  htmlFor="s2p-content-ai-assisted-placement"
-                  className="mt-4 flex items-start gap-3 rounded-lg border border-ai/40 bg-ai/10 p-3 text-xs text-muted-foreground shadow-sm"
-                >
-                  <input
-                    id="s2p-content-ai-assisted-placement"
-                    type="checkbox"
-                    checked={aiAssistedLinkPlacement}
-                    onChange={(event) => setAiAssistedLinkPlacement(event.target.checked)}
-                    disabled={operation === "loading"}
-                    className="mt-0.5 size-4 shrink-0 accent-ai"
-                  />
-                  <span>
-                    <span className="block font-semibold text-foreground">AI-assisted placement</span>
-                    <span className="mt-0.5 block">
-                      Let the agent place selected links by rewriting text when an exact anchor is not already present.
-                    </span>
-                  </span>
-                </label>
-                </div>
-              </details>
+              <InternalLinksPanel session={session} options={linkOptions} queued={queuedLinks} busy={operation === "loading" || backgroundMetadata}
+                onDestination={setLinkDestination}
+                onToggle={(id) => Object.hasOwn(queuedLinks, id) ? removeQueuedLink(id) : setLinkDestination(id, "")}
+                onAction={(action, id) => { void handleCandidateAction(action, id) }} />
 
               {!!Object.keys(session.validation_report || {}).length && (
                 <details className="group order-3 rounded-xl border border-warn/40 bg-card p-4">

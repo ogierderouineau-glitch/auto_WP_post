@@ -152,6 +152,7 @@ export type ContentSession = {
   acf_source_fields: Record<string, unknown>
   selected_links: Record<string, string>[]
   eligible_link_ids: string[]
+  excluded_link_ids?: string[]
   processed_images: Record<string, unknown>[]
   processed_videos: Record<string, unknown>[]
   image_metadata: Record<string, unknown>[]
@@ -684,7 +685,6 @@ export async function regenerateSessionDraft(
   message: string,
   revisionFieldIds: string[],
   selectedLinks = session.selected_links || [],
-  aiAssistedLinkPlacement = false,
 ) {
   const linkInstructions = selectedLinks
     .filter((link) => link.revision_requested === "true")
@@ -706,7 +706,6 @@ export async function regenerateSessionDraft(
       selected_links: selectedLinks,
       current_url: null,
       use_vision_for_image_metadata: false,
-      ai_assisted_link_placement: aiAssistedLinkPlacement,
       link_placement_only: linkPlacementOnly,
       message: revisionInstruction,
       revision_field_ids: revisionFieldIds,
@@ -832,4 +831,28 @@ export function hasSavedTranscript(session: ContentSession | null) {
     ...Object.values(session.image_context_transcripts || {}),
     ...Object.values(session.video_context_transcripts || {}),
   ].some((text) => !!text?.trim())
+}
+
+export type SessionLinkOptions = {
+  maximum: number | null
+  placed_link_ids: string[]
+  placed_field_keys: Record<string, string[]>
+  fields: { field_key: string; acf_field_name: string; label: string }[]
+  links: (InternalLinkCandidate & { suggested_field_key?: string | null })[]
+}
+
+export function loadSessionLinkOptions(auth: ApiClientOptions, session: ContentSession) {
+  return apiRequest<SessionLinkOptions>(`/api/content-sessions/${session.session_id}/links`, auth, { json: false })
+}
+
+export function editSessionLinkCandidates(auth: ApiClientOptions, session: ContentSession, action: "add" | "remove" | "refresh", linkId?: string) {
+  return apiRequest<SessionResponse>(`/api/content-sessions/${session.session_id}/link-candidates`, auth, {
+    method: "PUT", body: { expected_version: session.version, action, link_id: linkId || null },
+  })
+}
+
+export function insertSessionLink(auth: ApiClientOptions, session: ContentSession, fieldKey: string, url: string, selection: { start: number; end: number; text: string }) {
+  return apiRequest<SessionResponse>(`/api/content-sessions/${session.session_id}/links`, auth, {
+    method: "POST", body: { expected_version: session.version, field_key: fieldKey, url, start: selection.start, end: selection.end, selected_text: selection.text },
+  })
 }

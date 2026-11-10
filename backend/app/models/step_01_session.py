@@ -79,6 +79,7 @@ class ContentSession(BaseModel):
     acf_source_fields: dict[str, Any] = Field(default_factory=dict)
     selected_links: list[dict[str, str]] = Field(default_factory=list)
     eligible_link_ids: list[str] = Field(default_factory=list)
+    excluded_link_ids: list[str] = Field(default_factory=list)
     processed_images: list[dict[str, Any]] = Field(default_factory=list)
     processed_videos: list[dict[str, Any]] = Field(default_factory=list)
     image_metadata: list[dict[str, Any]] = Field(default_factory=list)
