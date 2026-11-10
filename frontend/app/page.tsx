@@ -12,6 +12,7 @@ import {
   Wrench,
   SlidersHorizontal,
 } from "lucide-react"
+import { SessionName } from "@/components/session-name"
 import { MediaScreen } from "@/components/media-screen"
 import { FactsScreen } from "@/components/facts-screen"
 import { ContentScreen } from "@/components/content-screen"
@@ -21,6 +22,7 @@ import { SessionModal } from "@/components/session-modal"
 import { RecordingWidget } from "@/components/recording-widget"
 import { OtherFunctionsDrawer, type OperationLogEntry } from "@/components/other-functions-drawer"
 import {
+  saveSessionName,
   createContentSession,
   deleteContentSession,
   loadContentSession,
@@ -233,6 +235,7 @@ export default function Page() {
   const handleSessionChange = useCallback((nextSession: ContentSession) => {
     sessionRef.current = nextSession
     setSession(nextSession)
+    setRecentSessions((current) => current.map((item) => item.session_id === nextSession.session_id ? { ...item, name: nextSession.name } : item))
     sessionStorage.setItem(STORAGE_SESSION_ID, nextSession.session_id)
     setStatusText(`Session ${nextSession.state}`)
   }, [])
@@ -537,7 +540,11 @@ export default function Page() {
 
           <div className="ml-1 hidden flex-wrap items-center gap-1.5 lg:flex">
             <MetaChip label="Client:" value={auth?.client.client_id || "-"} />
-            <MetaChip label="Session:" value={session ? session.session_id.slice(0, 8) : "-"} />
+            {session ? <SessionName key={session.session_id} sessionId={session.session_id} name={session.name} onSave={async (name) => {
+              if (!apiAuth) return
+              const data = await saveSessionName(apiAuth, sessionRef.current || session, name)
+              handleSessionChange(data.session)
+            }} /> : <MetaChip label="Session:" value="-" />}
             <MetaChip label="Post type:" value={selectedPostTypeLabel} />
           </div>
 
@@ -576,7 +583,11 @@ export default function Page() {
         {/* meta chips on mobile */}
         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2.5 lg:hidden">
           <MetaChip label="Client:" value={auth?.client.client_id || "-"} />
-          <MetaChip label="Session:" value={session ? session.session_id.slice(0, 8) : "-"} />
+          {session ? <SessionName key={session.session_id} sessionId={session.session_id} name={session.name} onSave={async (name) => {
+              if (!apiAuth) return
+              const data = await saveSessionName(apiAuth, sessionRef.current || session, name)
+              handleSessionChange(data.session)
+            }} /> : <MetaChip label="Session:" value="-" />}
           <MetaChip label="Post type:" value={selectedPostTypeLabel} />
         </div>
         </header>
@@ -662,6 +673,7 @@ export default function Page() {
             session={session}
             onSessionChange={handleSessionChange}
             onBackToContent={() => setScreen("content")}
+            templateUrl={workbook?.post_types.find((item) => item.post_type_key === selectedPostType)?.single_template_url}
           />
         ) : (
           <ContentScreen
@@ -669,6 +681,7 @@ export default function Page() {
             session={session}
             workbook={workbook}
             onSessionChange={handleSessionChange}
+            onOpenAgent={() => setAgentOpen(true)}
             onRevisionFieldIdsChange={setContentRevisionFieldIds}
             onSelectedLinksChange={setContentSelectedLinks}
             onAiAssistedLinkPlacementChange={setContentAiAssistedLinkPlacement}

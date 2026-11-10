@@ -26,6 +26,47 @@ The current production workflow is workbook-driven. The workbook is the source o
 The Next.js app in `frontend/` is the user interface. It talks to the
 FastAPI backend through the structured `/api/content-sessions` API.
 
+## Session names and workflow safeguards
+
+Click the session label in the top bar to rename a session (up to 80 characters).
+The first successful fact extraction suggests a short name in the session language
+when no manual name exists. Older unnamed sessions are named when opened if they
+contain saved facts or draft content. Empty sessions show “Untitled session”.
+Naming uses the existing language-model provider and usage tracking; failure does
+not block the workflow or repeat automatically. Session IDs remain unchanged and
+appear as tooltips in both archives. Names are also shown under Current session.
+
+Repeated fact extraction, full draft regeneration and post re-creation use red
+buttons and confirmation dialogs. A selected-fact/field revision alternative is
+offered only when there is a selection; post updates are offered when available.
+Re-creating a post creates a separate WordPress post and switches the session's
+current target. The original post remains online.
+
+Media AI recropping, restoring an original picture and removing a picture require
+OK/Cancel confirmation before executing.
+
+The Media status indicators stay unchecked until media is uploaded; counts include
+both images and videos.
+The Media screen accepts dropped pictures and MP4 videos through the same upload
+flow as the file picker. Drops elsewhere on that screen cannot navigate away.
+“Tell your story” highlights the selected media transcript until text is added or
+the selected media changes. The recording button opens the agent and starts/stops
+recording. Fact sections expand independently and empty sections start collapsed; revision
+checkboxes appear after extraction. Extraction is disabled until a non-empty
+transcript has been saved (general text, audio transcript, picture or video notes).
+The Media agent provides “Save transcript” for its general text. Fact updates stay
+disabled until the first extraction; content revision requires a generated draft
+and selected fields. The Content screen’s Quality check and Revise selected fields
+buttons are hidden until a draft exists. Disabled actions explain the prerequisite on hover or keyboard
+focus. Content revision opens the existing agent for the selected fields.
+
+On the WordPress screen, “Open template” opens the active post type's
+`post_types.single_template_url` in a new tab when an HTTP(S) URL is configured.
+The publishing checklist checks “Featured image assigned” only when an uploaded
+image is marked as featured; sessions without images leave it unchecked.
+Workbook uploads show a prominent confirmation with the uploaded filename.
+Operations from today show local time; older operations show local date and time.
+
 ## Project structure
 
 ```text
@@ -145,6 +186,13 @@ Run the full suite:
 
 ```bash
 .venv/bin/python -m pytest
+```
+
+Workbook-dependent tests use `data/knowledge/test-client.xlsm` by default and
+skip when it is absent. To use another compatible workbook without renaming it:
+
+```bash
+V2_TEST_WORKBOOK="data/knowledge/your-client.xlsm" .venv/bin/python -m pytest
 ```
 
 Run focused structured workflow checks:

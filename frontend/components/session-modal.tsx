@@ -131,7 +131,7 @@ export function SessionModal({
                       aria-current={isActive ? "true" : undefined}
                       className="min-w-0 flex-1 px-3 py-2 text-left disabled:opacity-60"
                     >
-                      <span className="block truncate text-sm font-medium text-foreground">{session.session_id}</span>
+                      <span title={session.session_id} className="block truncate text-sm font-medium text-foreground">{session.name || "Untitled session"}</span>
                       <span className="mt-0.5 block text-xs text-muted-foreground">
                         {formatTimestamp(session.created_at)} - {session.post_type_key || session.post_type || "-"} - {session.state || session.status || "-"}
                       </span>

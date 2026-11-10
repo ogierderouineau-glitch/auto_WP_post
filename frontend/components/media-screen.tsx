@@ -1,6 +1,11 @@
 "use client"
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react"
+import { ActionHint } from "@/components/action-hint"
+import { useActionWarning } from "@/components/action-warning"
+
+import { hasExtractedFacts, hasSavedTranscript } from "@/lib/content-sessions"
+
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
   Bot,
@@ -428,6 +433,7 @@ export function MediaScreen({
   extractFactsLoading: boolean
   pictureTranscriptSavingImmediately: boolean
 }) {
+  const { confirm, warningDialog } = useActionWarning()
   const images = useMemo(() => (session ? sessionImages(session) : []), [session])
   const videos = useMemo(() => (session ? sessionVideos(session) : []), [session])
   const [selectedMediaId, setSelectedMediaId] = useState("")
@@ -442,6 +448,10 @@ export function MediaScreen({
   const [useMetadataVision, setUseMetadataVision] = useState(false)
   const [operation, setOperation] = useState<OperationState>("idle")
   const [transcriptSaving, setTranscriptSaving] = useState(false)
+  const extractDisabledReason = !auth || !session ? "Create or load a session first."
+    : pictureTranscriptSavingImmediately || transcriptSaving ? "Wait for the transcript to finish saving."
+    : extractFactsLoading ? "Wait for facts extraction to finish."
+    : !hasSavedTranscript(session) ? "Record or type a transcript and wait for it to save before extracting facts." : ""
   const [message, setMessage] = useState("")
   const [mobilePreviewOriginal, setMobilePreviewOriginal] = useState(false)
   const [editPromptOpen, setEditPromptOpen] = useState(false)
@@ -677,15 +687,34 @@ export function MediaScreen({
     }
   }
 
-  async function uploadFiles(event: ChangeEvent<HTMLInputElement>) {
-    if (!auth || !session) return
+  const [transcriptHighlight, setTranscriptHighlight] = useState<{ mediaId: string | null; text: string } | null>(null)
+  const highlightTranscript = !!transcriptHighlight && transcriptHighlight.mediaId === selectedMediaId && pictureTranscript.length <= transcriptHighlight.text.length
+  useEffect(() => {
+    if (transcriptHighlight && (transcriptHighlight.mediaId !== selectedMediaId || pictureTranscript.length > transcriptHighlight.text.length)) setTranscriptHighlight(null)
+  }, [pictureTranscript, selectedMediaId, transcriptHighlight])
+
+  useEffect(() => {
+    const preventFileNavigation = (event: DragEvent) => {
+      if (!event.dataTransfer?.types.includes("Files") || event.defaultPrevented) return
+      event.preventDefault()
+      if (event.type === "drop") setMessage("Drop pictures or MP4 videos inside the media workspace to upload them.")
+    }
+    window.addEventListener("dragover", preventFileNavigation)
+    window.addEventListener("drop", preventFileNavigation)
+    return () => {
+      window.removeEventListener("dragover", preventFileNavigation)
+      window.removeEventListener("drop", preventFileNavigation)
+    }
+  }, [])
+
+  async function uploadFiles(files: File[]) {
+    if (!auth || !session) { setMessage("Create or load a session before uploading media."); return }
+    if (operation === "loading") return
     const requestAuth = auth
-    const files = [...(event.target.files || [])]
-    event.target.value = ""
     const mediaFiles = files.filter(
       (file) => file.type.startsWith("image/") || file.type === "video/mp4" || file.name.toLowerCase().endsWith(".mp4"),
     )
-    if (!mediaFiles.length) return
+    if (!mediaFiles.length) { setMessage("Choose pictures or MP4 videos to upload."); return }
 
     const pending = mediaFiles.map((file) => ({
       id: `pending-${crypto.randomUUID()}`,
@@ -909,8 +938,9 @@ export function MediaScreen({
     setEditPromptOpen(true)
   }
 
-  function recropWithAi() {
+  async function recropWithAi() {
     if (!auth || !session || !selectedImage) return
+    if (!await confirm({ message: "Recrop this picture from its original using AI? This replaces the current processed version and uses a paid AI analysis.", confirmLabel: "OK" })) return
     void runAction(async (currentSession) => {
       setMessage("Analyzing the original image and finding a new focal point...")
       const data = await recropSessionImageWithAi(auth, currentSession, selectedOriginalFilename)
@@ -929,16 +959,18 @@ export function MediaScreen({
     }, "Image optimized.")
   }
 
-  function restoreOriginal() {
+  async function restoreOriginal() {
     if (!auth || !session || !selectedImage) return
+    if (!await confirm({ message: "Restore the original picture? This replaces the current processed version and discards its crop and AI edits.", confirmLabel: "OK" })) return
     void runAction(async (currentSession) => {
       const data = await restoreSessionImageOriginal(auth, currentSession, selectedOriginalFilename)
       return data.session
     }, "Original restored.")
   }
 
-  function removeImage() {
+  async function removeImage() {
     if (!auth || !session || !selectedImage) return
+    if (!await confirm({ message: "Remove this picture from the session, including its processed version and saved notes?", confirmLabel: "OK" })) return
     void runAction(async (currentSession) => {
       const data = await removeSessionImage(auth, currentSession, selectedOriginalFilename)
       return data.session
@@ -953,19 +985,22 @@ export function MediaScreen({
     }, "Video removed.")
   }
 
+  const hasUploadedMedia = images.length + videos.length > 0
+  const mediaBusy = operation === "loading" || transcriptSaving
   const statusItems = [
     {
-      label: operation === "loading" || transcriptSaving ? "Media operation running" : "Media ready",
-      state: operation === "loading" || transcriptSaving ? "active" : "done",
+      label: mediaBusy ? "Media operation running" : hasUploadedMedia ? "Media ready" : "No media uploaded yet",
+      state: mediaBusy ? "active" : hasUploadedMedia ? "done" : "pending",
     },
     {
-      label: `${images.length} image(s) in this session`,
-      state: "done",
+      label: `${images.length} image(s), ${videos.length} video(s) in this session`,
+      state: hasUploadedMedia ? "done" : "pending",
     },
   ] as const
 
   return (
     <>
+      {warningDialog}
       {editPromptOpen && selectedImage && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 px-4">
           <section className="w-full max-w-lg rounded-lg border border-border bg-card p-4 shadow-xl">
@@ -1015,17 +1050,19 @@ export function MediaScreen({
           </section>
         </div>
       )}
-      <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)_320px] lg:grid-rows-[auto_1fr]">
+      <div onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault() }}
+        onDrop={(event) => { if (!event.dataTransfer.types.includes("Files")) return; event.preventDefault(); void uploadFiles([...event.dataTransfer.files]) }}
+        className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)_320px] lg:grid-rows-[auto_1fr]">
         <section aria-label="Media library" className="min-w-0 lg:row-span-2">
           <div className="overflow-hidden rounded-lg border border-dashed border-gold/50 bg-gold/10 text-foreground transition-colors hover:border-gold hover:bg-gold/15">
             <label className="flex w-full cursor-pointer items-center gap-2 px-3 py-3 text-left text-sm">
-              <input id="s2p-media-upload" type="file" multiple accept="image/*,video/mp4,.mp4" onChange={uploadFiles} className="sr-only" />
+              <input id="s2p-media-upload" type="file" multiple accept="image/*,video/mp4,.mp4" onChange={(event) => { const files = [...(event.target.files || [])]; event.target.value = ""; void uploadFiles(files) }} className="sr-only" />
               <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gold text-gold-foreground">
                 <ImagePlus className="size-5" aria-hidden="true" />
               </span>
               <span>
                 <span className="block font-semibold text-gold">Add pictures &amp; videos</span>
-                <span className="block text-xs text-muted-foreground">Pictures and MP4 videos</span>
+                <span className="block text-xs text-muted-foreground">Pictures and MP4 videos · drop files anywhere in this workspace</span>
               </span>
             </label>
             <div className="flex border-t border-gold/20 px-3 py-2.5 text-xs">
@@ -1047,7 +1084,7 @@ export function MediaScreen({
           <button
             id="s2p-media-open-agent"
             type="button"
-            onClick={onOpenAgent}
+            onClick={() => { setTranscriptHighlight({ mediaId: selectedMediaId, text: pictureTranscript }); onOpenAgent() }}
             className="mt-2 flex cursor-pointer w-full items-center gap-2 rounded-lg border border-dashed border-ai/50 bg-ai/10 px-3 py-3 text-left text-sm transition-colors hover:border-ai hover:bg-ai/15"
           >
             <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-ai text-ai-foreground">
@@ -1060,17 +1097,19 @@ export function MediaScreen({
               </span>
             </span>
           </button>
+          <ActionHint reason={extractDisabledReason} className="w-full">
           <button
             id="s2p-media-extract-facts"
-            title="Facts will be used to create a truthful content"
+            title={extractDisabledReason || "Facts will be used to create truthful content"}
             type="button"
             onClick={onExtractFacts}
-            disabled={!session || extractFactsLoading}
-            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-confirm px-3 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:opacity-50"
+            disabled={!!extractDisabledReason}
+            className={`mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors hover:opacity-90 disabled:opacity-50 ${hasExtractedFacts(session) ? "bg-destructive text-white" : "bg-confirm text-confirm-foreground"}`}
           >
             {extractFactsLoading ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <FileText className="size-4" aria-hidden="true" />}
             {extractFactsLoading ? "Extracting facts..." : "All set? Extract facts"}
           </button>
+          </ActionHint>
 
           <div className="mt-3 flex items-center gap-2">
             <button
@@ -1455,7 +1494,7 @@ export function MediaScreen({
                   ? `Record with the floating mic or type notes for this ${selectedVideo || selectedPendingImage?.kind === "video" ? "video" : "picture"}.`
                   : "Select media to add notes."
               }
-              className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none focus:ring-2 focus:ring-gold/40 disabled:text-muted-foreground"
+              className={`w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none focus:ring-2 focus:ring-gold/40 disabled:text-muted-foreground ${highlightTranscript ? "ring-2 ring-ai bg-ai/10" : ""}`}
             />
             <p className="mt-2 text-xs text-muted-foreground">
               The floating mic saves these notes per media item for fact extraction.
@@ -1471,10 +1510,12 @@ export function MediaScreen({
                     <span className="flex size-5 items-center justify-center rounded-full bg-confirm/15 text-confirm">
                       <Check className="size-3.5" aria-hidden="true" />
                     </span>
-                  ) : (
+                  ) : status.state === "active" ? (
                     <span className="flex size-5 items-center justify-center rounded-full bg-warn/20 text-warn-foreground">
                       <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
                     </span>
+                  ) : (
+                    <span className="size-5 rounded-full border border-border bg-muted" aria-hidden="true" />
                   )}
                   <span className={status.state === "done" ? "text-muted-foreground" : "text-foreground"}>
                     {status.label}

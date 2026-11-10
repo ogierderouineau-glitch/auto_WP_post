@@ -14,6 +14,7 @@ export type ClientsResponse = {
 }
 
 export type PostTypeOption = {
+  single_template_url?: string | null
   post_type_key: string
   display_name_de: string
   wp_category_name?: string
@@ -130,6 +131,9 @@ export type SelectedMediaContext = {
 }
 
 export type ContentSession = {
+  name?: string
+  name_generation_attempted?: boolean
+  facts_extracted?: boolean
   session_id: string
   user_id: string
   post_type_key: string
@@ -197,6 +201,7 @@ export type SessionResponse = {
 }
 
 export type RecentSession = {
+  name?: string
   session_id: string
   user_id?: string
   client_id?: string
@@ -266,9 +271,12 @@ export async function createContentSession(auth: ApiClientOptions, postTypeKey: 
 }
 
 export async function loadContentSession(auth: ApiClientOptions, sessionId: string) {
-  return apiRequest<SessionResponse>(`/api/content-sessions/${encodeURIComponent(sessionId)}`, auth, {
-    json: false,
-  })
+  const data = await apiRequest<SessionResponse>(`/api/content-sessions/${encodeURIComponent(sessionId)}`, auth, { json: false })
+  const session = data.session
+  if (!session.name && !session.name_generation_attempted && (hasExtractedFacts(session) || Object.keys(session.shared_fields).length || Object.keys(session.acf_source_fields).length)) {
+    try { return await saveSessionName(auth, session, null) } catch { /* Naming must not block loading. */ }
+  }
+  return data
 }
 
 export async function saveSessionGenerationSettings(
@@ -806,4 +814,22 @@ export function imageUrl(session: ContentSession, filename: string, original = f
 
 export function videoUrl(session: ContentSession, filename: string) {
   return `/backend/api/content-sessions/${session.session_id}/media/videos/${encodeURIComponent(filename)}?v=${session.version}`
+}
+
+export function hasExtractedFacts(session: ContentSession | null) {
+  return !!session && (!!session.facts_extracted || Object.keys(session.extracted_facts).length > 0 || session.operation_log?.some((entry) => entry.operation === "analysis" && entry.status === "success"))
+}
+
+export function saveSessionName(auth: ApiClientOptions, session: ContentSession, name: string | null) {
+  return apiRequest<SessionResponse>(`/api/content-sessions/${encodeURIComponent(session.session_id)}/name`, auth, {
+    method: "PUT", body: { name, expected_version: session.version },
+  })
+}
+
+export function hasSavedTranscript(session: ContentSession | null) {
+  return !!session && [
+    session.manual_text, session.transcript,
+    ...Object.values(session.image_context_transcripts || {}),
+    ...Object.values(session.video_context_transcripts || {}),
+  ].some((text) => !!text?.trim())
 }

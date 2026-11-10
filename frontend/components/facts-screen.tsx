@@ -1,5 +1,7 @@
 "use client"
 
+import { hasExtractedFacts } from "@/lib/content-sessions"
+
 import { useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
@@ -98,6 +100,7 @@ function FactRow({
   value,
   changed,
   selectedForReview,
+  reviewAvailable,
   onChange,
   onBlur,
   onReviewSelectionChange,
@@ -106,6 +109,7 @@ function FactRow({
   value: string
   changed: boolean
   selectedForReview: boolean
+  reviewAvailable: boolean
   onChange: (value: string) => void
   onBlur: (nextTarget: EventTarget | null) => void
   onReviewSelectionChange: () => void
@@ -115,14 +119,14 @@ function FactRow({
   return (
     <div className="rounded-lg border border-border bg-card p-3 lg:grid lg:grid-cols-[minmax(170px,210px)_minmax(0,1fr)_max-content_92px] lg:items-start lg:gap-3 lg:rounded-none lg:border-0 lg:border-b lg:border-border lg:bg-transparent lg:p-2.5">
       <label className="flex min-w-0 cursor-pointer items-start gap-2">
-        <input
+        {reviewAvailable && <input
           id={`s2p-facts-review-${fact.key}`}
           type="checkbox"
           checked={selectedForReview}
           onChange={onReviewSelectionChange}
           aria-label={`Include ${fact.label} in AI review`}
           className="mt-0.5 size-4 shrink-0 accent-ai"
-        />
+        />}
         <span className="min-w-0">
           <span className="block text-sm font-medium text-foreground">{fact.label}</span>
           <span className="block font-mono text-[11px] text-muted-foreground">{fact.key}</span>
@@ -301,7 +305,10 @@ export function FactsScreen({
 }) {
   const rows = useMemo(() => buildRows(workbook?.fact_schema || [], session), [session, workbook])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const [openSection, setOpenSection] = useState<SectionId | null>(null)
+  const [openSections, setOpenSections] = useState<SectionId[]>(() =>
+    (["required", "optional", "ai"] as SectionId[]).filter((id) => rows.some((row) => row.section === id)),
+  )
+  const reviewAvailable = hasExtractedFacts(session)
   const [operation, setOperation] = useState<OperationState>("idle")
   const [message, setMessage] = useState("")
 
@@ -326,15 +333,8 @@ export function FactsScreen({
     ai: rows.filter((row) => row.section === "ai"),
   }
 
-  useEffect(() => {
-    setOpenSection((current) => {
-      if (current && grouped[current].length) return current
-      return (["required", "optional", "ai"] as SectionId[]).find((id) => grouped[id].length) || null
-    })
-  }, [grouped.required.length, grouped.optional.length, grouped.ai.length])
-
   function toggleSection(id: SectionId) {
-    setOpenSection((current) => current === id ? null : id)
+    setOpenSections((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   }
 
   function toggleFactSelection(key: string) {
@@ -398,6 +398,7 @@ export function FactsScreen({
           value={drafts[fact.key] ?? fact.value}
           changed={(drafts[fact.key] ?? fact.value) !== fact.value}
           selectedForReview={selectedFacts.has(fact.key)}
+          reviewAvailable={reviewAvailable}
           onChange={(value) => setDrafts((current) => ({ ...current, [fact.key]: value }))}
           onBlur={(nextTarget) => {
             if (nextTarget instanceof Element && nextTarget.closest("[data-facts-action]")) return
@@ -434,10 +435,10 @@ export function FactsScreen({
         </div>
 
         <div className="mt-4 rounded-xl border border-border bg-card p-4">
-          <p className="text-xs text-muted-foreground">
+          <p hidden={!reviewAvailable} className="text-xs text-muted-foreground">
             {selectedFactKeys.length} of {rows.length} facts selected for AI review.
           </p>
-          <button
+          {reviewAvailable && <button
             id="s2p-facts-toggle-all"
             type="button"
             onClick={() => onSelectedFactKeysChange(allFactsSelected ? [] : rows.map((row) => row.key))}
@@ -445,21 +446,21 @@ export function FactsScreen({
             className="mt-2 inline-flex items-center rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
           >
             {allFactsSelected ? "Unselect all facts for revision" : "Select all facts for revision"}
-          </button>
+          </button>}
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
-            <button id="s2p-facts-summary-required" type="button" onClick={() => toggleSection("required")} aria-pressed={openSection === "required"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "required" ? "bg-destructive/15 ring-1 ring-destructive/30" : "bg-destructive/5 hover:bg-destructive/10"}`}>
+            <button id="s2p-facts-summary-required" type="button" onClick={() => toggleSection("required")} aria-pressed={openSections.includes("required")} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSections.includes("required") ? "bg-destructive/15 ring-1 ring-destructive/30" : "bg-destructive/5 hover:bg-destructive/10"}`}>
               <CircleAlert className="size-4 shrink-0 text-destructive" aria-hidden="true" />
               <span className="text-sm text-foreground">
                 <span className="font-semibold">{missingRequired}</span> required facts missing
               </span>
             </button>
-            <button id="s2p-facts-summary-optional" type="button" onClick={() => toggleSection("optional")} aria-pressed={openSection === "optional"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "optional" ? "bg-warn/25 ring-1 ring-warn/40" : "bg-warn/10 hover:bg-warn/20"}`}>
+            <button id="s2p-facts-summary-optional" type="button" onClick={() => toggleSection("optional")} aria-pressed={openSections.includes("optional")} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSections.includes("optional") ? "bg-warn/25 ring-1 ring-warn/40" : "bg-warn/10 hover:bg-warn/20"}`}>
               <CircleHelp className="size-4 shrink-0 text-warn-foreground" aria-hidden="true" />
               <span className="text-sm text-foreground">
                 <span className="font-semibold">{missingOptional}</span> optional facts missing
               </span>
             </button>
-            <button id="s2p-facts-summary-ai" type="button" onClick={() => toggleSection("ai")} aria-pressed={openSection === "ai"} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSection === "ai" ? "bg-confirm/15 ring-1 ring-confirm/30" : "bg-confirm/5 hover:bg-confirm/10"}`}>
+            <button id="s2p-facts-summary-ai" type="button" onClick={() => toggleSection("ai")} aria-pressed={openSections.includes("ai")} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${openSections.includes("ai") ? "bg-confirm/15 ring-1 ring-confirm/30" : "bg-confirm/5 hover:bg-confirm/10"}`}>
               <Sparkles className="size-4 shrink-0 text-confirm" aria-hidden="true" />
               <span className="text-sm text-foreground">
                 <span className="font-semibold">{aiRows.length}</span> populated facts
@@ -494,7 +495,7 @@ export function FactsScreen({
             id="required"
             title="Missing required facts"
             count={grouped.required.length}
-            open={openSection === "required"}
+            open={openSections.includes("required")}
             onToggle={() => toggleSection("required")}
           >
             {renderRows(grouped.required)}
@@ -504,7 +505,7 @@ export function FactsScreen({
             id="optional"
             title="Missing optional facts"
             count={grouped.optional.length}
-            open={openSection === "optional"}
+            open={openSections.includes("optional")}
             onToggle={() => toggleSection("optional")}
           >
             {renderRows(grouped.optional)}
@@ -514,7 +515,7 @@ export function FactsScreen({
             id="ai"
             title="AI-populated facts"
             count={grouped.ai.length}
-            open={openSection === "ai"}
+            open={openSections.includes("ai")}
             onToggle={() => toggleSection("ai")}
           >
             {renderRows(grouped.ai)}

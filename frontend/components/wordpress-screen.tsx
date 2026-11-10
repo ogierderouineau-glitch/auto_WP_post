@@ -1,5 +1,7 @@
 "use client"
 
+import { useActionWarning } from "@/components/action-warning"
+
 import { useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
@@ -100,12 +102,16 @@ export function WordPressScreen({
   session,
   onSessionChange,
   onBackToContent,
+  templateUrl,
 }: {
   auth: ApiClientOptions | null
   session: ContentSession | null
   onSessionChange: (session: ContentSession) => void
   onBackToContent: () => void
+  templateUrl?: string | null
 }) {
+  const { confirm, warningDialog } = useActionWarning()
+  const safeTemplateUrl = templateUrl && /^https?:\/\//i.test(templateUrl) ? templateUrl : null
   const [postStatus, setPostStatus] = useState<PublishStatus>("draft")
   const [operation, setOperation] = useState<OperationState>("idle")
   const [activePublishAction, setActivePublishAction] = useState<PublishAction | null>(null)
@@ -222,6 +228,7 @@ export function WordPressScreen({
 
   return (
     <div className="pb-24">
+      {warningDialog}
       <div className="mb-4">
         <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">Publish to WordPress</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -288,10 +295,16 @@ export function WordPressScreen({
                 <button
                   id="s2p-wordpress-create-post"
                   type="button"
-                  onClick={() => runPublish({ forceCreateNew: true })}
+                  onClick={async () => {
+                    if (postId && !await confirm({
+                      message: "This creates another WordPress post and uploads the media again. The existing post stays online, and this session switches to the new post.",
+                      alternative: canPublish && !noChange ? { label: "Update current post", action: () => { void runPublish({ targetPostId: Number(postId), partialUpdate: true }) } } : undefined,
+                    })) return
+                    void runPublish({ forceCreateNew: true })
+                  }}
                   disabled={operation === "loading" || !canCreatePost}
                   aria-describedby={postId ? "s2p-wordpress-recreate-tooltip" : undefined}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-confirm px-4 py-2.5 text-sm font-semibold text-confirm-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                  className={`inline-flex w-full items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-semibold transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 ${postId ? "bg-destructive text-white" : "bg-confirm text-confirm-foreground"}`}
                 >
                   {activePublishAction === "create" ? <Loader2 className="size-4 animate-spin" /> : <CloudUpload className="size-4" />}
                   {postId ? "Re-create Post" : "Create post"}
@@ -374,6 +387,10 @@ export function WordPressScreen({
                       Edit post
                     </a>
                   )}
+                  {safeTemplateUrl && <a id="s2p-wordpress-open-template" href={safeTemplateUrl} target="_blank" rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground hover:bg-muted">
+                    <ExternalLink className="size-4" aria-hidden="true" />Open template
+                  </a>}
                   <button
                     id="s2p-wordpress-update-post"
                     type="button"
@@ -422,7 +439,9 @@ export function WordPressScreen({
               {[
                 { label: "Content approved", ok: approved },
                 { label: "WordPress payload generated", ok: Object.keys(session.wordpress_payload || {}).length > 0 },
-                { label: "Featured image assigned", ok: session.image_metadata.some((row) => row.image_usage === "featured") || !session.image_refs.length },
+                { label: "Featured image assigned", ok: session.image_refs.some((image) =>
+                  session.image_metadata.some((row) => row.media_id === image.media_id && row.image_usage === "featured"),
+                ) },
               ].map((item) => (
                 <li key={item.label} className="flex items-center gap-2 text-muted-foreground">
                   <span

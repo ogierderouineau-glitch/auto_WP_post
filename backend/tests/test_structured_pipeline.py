@@ -51,7 +51,9 @@ class WorkbookFakeLanguageModel(LanguageModelProvider):
             "total_tokens": 15,
             "estimated_cost_usd": None,
         }
-        if task == "fact_extraction":
+        if task == "session_naming":
+            data = {"name": "Event in Berlin"}
+        elif task == "fact_extraction":
             allowed_fields = set(schema.model_fields)
             rows = [
                 row for row in self.snapshot.acf_fields

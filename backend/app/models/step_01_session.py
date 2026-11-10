@@ -61,6 +61,9 @@ class ContentSession(BaseModel):
     state: str
     workbook_hash: str
     language: str
+    name: str = ""
+    name_generation_attempted: bool = False
+    facts_extracted: bool = False
     manual_text: str = ""
     audio_refs: list[MediaReference] = Field(default_factory=list)
     image_refs: list[MediaReference] = Field(default_factory=list)

@@ -22,6 +22,10 @@ class VersionedRequest(BaseModel):
     expected_version: int
 
 
+class SessionNameRequest(VersionedRequest):
+    name: str | None = Field(default=None, max_length=80)
+
+
 class GenerationSettingsRequest(VersionedRequest):
     language_model: Literal[
         "gpt-5-mini",

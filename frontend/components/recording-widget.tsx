@@ -1,5 +1,10 @@
 "use client"
 
+import { ActionHint } from "@/components/action-hint"
+
+import { useActionWarning } from "@/components/action-warning"
+import { hasExtractedFacts, hasSavedTranscript } from "@/lib/content-sessions"
+
 import { useEffect, useRef, useState } from "react"
 import { Bot, CircleDot, Loader2, Mic, Send, Square, Trash2 } from "lucide-react"
 import type { ApiClientOptions } from "@/lib/api"
@@ -149,6 +154,7 @@ export function RecordingWidget({
   const [transcript, setTranscript] = useState("")
   const [status, setStatus] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [savingTranscript, setSavingTranscript] = useState(false)
   const recorder = useRef<MediaRecorder | null>(null)
   const chunks = useRef<Blob[]>([])
   const transcriptRef = useRef("")
@@ -158,11 +164,23 @@ export function RecordingWidget({
   const hasContentInstruction = transcript.trim() || automaticContentRevisionInstruction.trim() || selectedContentLinks.some(
     (link) => link.revision_requested === "true",
   )
+  const draftReady = !!session && (Object.keys(session.shared_fields || {}).length > 0 || Object.keys(session.acf_source_fields || {}).length > 0)
+  const submitDisabledReason = !auth || !session ? "Create or load a session first."
+    : submitting ? "Wait for the current agent action to finish."
+    : savingTranscript ? "Wait for the transcript to finish saving."
+    : items.some((item) => item.status === "transcribing") ? "Wait for transcription to finish."
+    : activeScreen === "media" && !hasSavedTranscript(session) ? "Save a transcript before extracting facts."
+    : activeScreen === "facts" && !hasExtractedFacts(session) ? "Extract facts on the Media screen before updating them."
+    : activeScreen === "facts" && !selectedFactKeys.length ? "Select at least one fact to update."
+    : activeScreen === "content" && !draftReady ? "Generate content before revising fields."
+    : activeScreen === "content" && !selectedContentFieldIds.length ? "Select at least one content field to revise."
+    : activeScreen === "content" && !hasContentInstruction ? "Add revision instructions or select an internal link to place."
+    : activeScreen === "facts" && !transcript.trim() ? "Add instructions for updating the selected facts." : ""
   const speechStructure = voiceInstructionItems(voiceInstructions)
 
   useEffect(() => {
-    onSubmittingChange(submitting)
-  }, [onSubmittingChange, submitting])
+    onSubmittingChange(submitting || savingTranscript)
+  }, [onSubmittingChange, submitting, savingTranscript])
 
   function setSyncedTranscript(value: string) {
     transcriptRef.current = value
@@ -307,15 +325,37 @@ export function RecordingWidget({
     void transcribe(item.file, item.id)
   }
 
+  async function saveMediaTranscript() {
+    if (!auth || !session || savingTranscript || submitting || !transcript.trim()) return
+    const epoch = recordingEpoch.current
+    setSavingTranscript(true)
+    try {
+      const data = await saveSessionTranscript(auth, session, transcript)
+      if (epoch !== recordingEpoch.current) return
+      onSessionChange(data.session)
+      setStatus("Transcript saved. You can now extract facts.")
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not save transcript.")
+    } finally {
+      setSavingTranscript(false)
+    }
+  }
+
+  const { confirm, warningDialog } = useActionWarning()
+
   async function submitToAgent() {
-    if (!auth || !session || submitting) return
+    if (!auth || !session || submitDisabledReason) return
     if (activeScreen === "wordpress") return
+    if (activeScreen === "media" && hasExtractedFacts(session) && !await confirm({
+      message: "Extracting facts again can change previously reviewed facts. Revise selected facts to limit the changes.",
+      alternative: selectedFactKeys.length ? { label: "Revise selected facts", action: () => { onNavigateFacts(); onOpenChange(true) } } : undefined,
+    })) return
     if (items.some((item) => item.status === "transcribing")) {
       setStatus("Wait for all recordings to finish transcribing.")
       return
     }
     const pictureTranscripts = activeScreen === "media" ? combinedPictureTranscripts(session) : ""
-    if (activeScreen !== "content" && !transcript.trim() && !pictureTranscripts) {
+    if (activeScreen === "facts" && !transcript.trim()) {
       setStatus("Add an instruction or describe at least one media item first.")
       return
     }
@@ -327,7 +367,7 @@ export function RecordingWidget({
     setStatus(activeScreen === "content" ? "Regenerating content..." : "Updating facts...")
     try {
       if (activeScreen === "media") {
-        let data = await saveSessionTranscript(auth, session, appendText(pictureTranscripts, transcript))
+        let data = await saveSessionTranscript(auth, session, appendText(pictureTranscripts, transcript) || session.manual_text || session.transcript)
         onSessionChange(data.session)
         setStatus("Extracting facts...")
         data = await analyzeSessionInputs(auth, data.session)
@@ -384,6 +424,7 @@ export function RecordingWidget({
 
   return (
     <div className="fixed bottom-20 right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2">
+      {warningDialog}
       {open && (
         <section className="w-[min(380px,calc(100vw-2rem))] rounded-lg border border-border bg-card p-3 shadow-xl">
           <div className="mb-3 flex items-start justify-between gap-3">
@@ -424,16 +465,19 @@ export function RecordingWidget({
           </div>
 
           <div className="mt-3">
+            <ActionHint reason={submitDisabledReason} className="w-full">
             <button
               id="s2p-recording-agent-submit"
+              title={submitDisabledReason || undefined}
               type="button"
               onClick={submitToAgent}
-              disabled={submitting || !session || (activeScreen === "facts" && !selectedFactKeys.length)}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-ai px-3 py-2.5 text-sm font-semibold text-ai-foreground transition-colors hover:opacity-90 disabled:opacity-60"
+              disabled={!!submitDisabledReason}
+              className={`inline-flex w-full items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold transition-colors hover:opacity-90 disabled:opacity-60 ${activeScreen === "media" && hasExtractedFacts(session) ? "bg-destructive text-white" : "bg-ai text-ai-foreground"}`}
             >
               {submitting ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
               {copy.action}
             </button>
+            </ActionHint>
           </div>
 
           {activeScreen === "media" && speechStructure.length > 0 && (
@@ -512,6 +556,13 @@ export function RecordingWidget({
             className="mt-3 w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none focus:ring-2 focus:ring-gold/40"
           />
 
+          {activeScreen === "media" && transcript.trim() && (
+            <button id="s2p-recording-save-transcript" type="button" onClick={saveMediaTranscript}
+              disabled={savingTranscript || submitting || !session}
+              className="mt-2 rounded-md border border-border px-3 py-2 text-sm font-semibold disabled:opacity-60">
+              {savingTranscript ? "Saving transcript…" : "Save transcript"}
+            </button>
+          )}
           {items.length > 0 && (
             <ul className="mt-3 space-y-2">
               {items.map((item) => (
@@ -549,7 +600,7 @@ export function RecordingWidget({
         <button
           id="s2p-recording-agent-record"
           type="button"
-          onClick={recording ? stopRecording : startRecording}
+          onClick={() => { onOpenChange(true); if (recording) stopRecording(); else void startRecording() }}
           disabled={!session}
           aria-label={recording ? "Stop recording" : "Start recording"}
           aria-pressed={recording}

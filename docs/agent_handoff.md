@@ -55,6 +55,23 @@ transport/adapters and inspect route/request models instead of copying a static
 endpoint inventory into new code. The backend owns generation, validation,
 media processing and WordPress publication.
 
+## UX safeguards and session labels
+
+Session names are optional persisted labels; never replace or derive session IDs
+from them. `PUT /api/content-sessions/{session_id}/name` accepts `name` (1–80
+characters) and `expected_version`; `name: null` requests an optional AI suggestion.
+Ownership and active-job checks apply. Naming runs during first extraction or when
+an older unnamed session with saved facts/draft is opened through the frontend
+adapter. A persisted attempt flag prevents repeated calls after failure; manual
+names take precedence. `facts_extracted` records extraction even with empty output;
+older sessions also use extracted fields/successful analysis logs as evidence.
+
+Repeated extraction, draft regeneration and post re-creation share a native modal
+confirmation hook. Alternatives open the existing revision agent or update flow
+only when usable. Media drag-and-drop reuses the existing uploader and backend
+validation. Template links come from the active post type's workbook configuration.
+See README for user-facing behavior and the configurable workbook test command.
+
 ## Workbook versus application ownership
 
 Client-owned sheets define post types, shared/ACF fields, SEO constraints,

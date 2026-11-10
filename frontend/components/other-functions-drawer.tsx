@@ -83,7 +83,9 @@ function Section({
 function formatTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  return date.toDateString() === new Date().toDateString()
+    ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : formatTimestamp(value)
 }
 
 function formatDuration(seconds: number) {
@@ -264,6 +266,7 @@ export function OtherFunctionsDrawer({
   const [jobRecoveryMessage, setJobRecoveryMessage] = useState("")
   const [workbookOperation, setWorkbookOperation] = useState<"idle" | "uploading" | "downloading">("idle")
   const [workbookMessage, setWorkbookMessage] = useState("")
+  const [workbookSuccess, setWorkbookSuccess] = useState(false)
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [settingsMessage, setSettingsMessage] = useState("")
   const settingsSavingRef = useRef(false)
@@ -307,12 +310,14 @@ export function OtherFunctionsDrawer({
     }
   }
 
-  async function runWorkbookAction(action: "uploading" | "downloading", callback: () => Promise<void>) {
+  async function runWorkbookAction(action: "uploading" | "downloading", callback: () => Promise<void>, filename?: string) {
     setWorkbookOperation(action)
     setWorkbookMessage("")
+    setWorkbookSuccess(false)
     try {
       await callback()
-      setWorkbookMessage(action === "uploading" ? "Database Datei aktualisiert." : "Database Datei heruntergeladen.")
+      setWorkbookSuccess(true)
+      setWorkbookMessage(action === "uploading" ? `Workbook updated successfully: ${filename}. The new configuration is loaded for this client.` : "Workbook downloaded successfully.")
     } catch (error) {
       setWorkbookMessage(error instanceof Error ? error.message : "Workbook operation failed.")
     } finally {
@@ -526,7 +531,7 @@ export function OtherFunctionsDrawer({
                       aria-current={isActive ? "true" : undefined}
                       className="min-w-0 flex-1 px-3 py-2 text-left disabled:opacity-60"
                     >
-                      <span className="block truncate font-mono text-xs text-foreground">{item.session_id}</span>
+                      <span title={item.session_id} className="block truncate text-sm text-foreground">{item.name || "Untitled session"}</span>
                       <span className="mt-0.5 block text-xs text-muted-foreground">
                         {formatTimestamp(item.created_at)} - {item.post_type_key || item.post_type || "-"} - {item.state || item.status || "-"}
                       </span>
@@ -576,7 +581,7 @@ export function OtherFunctionsDrawer({
                   onChange={(event) => {
                     const file = event.target.files?.[0]
                     event.target.value = ""
-                    if (file) void runWorkbookAction("uploading", () => onUploadWorkbook(file))
+                    if (file) void runWorkbookAction("uploading", () => onUploadWorkbook(file), file.name)
                   }}
                 />
               </label>
@@ -591,7 +596,7 @@ export function OtherFunctionsDrawer({
                 Aktuelle Database Datei herunterladen
               </button>
             </div>
-            {workbookMessage && <p className="mt-2 text-xs text-muted-foreground">{workbookMessage}</p>}
+            {workbookMessage && <p role={workbookSuccess ? "status" : "alert"} className={`mt-3 rounded-lg border p-3 text-sm font-semibold ${workbookSuccess ? "border-confirm/40 bg-confirm/10 text-foreground" : "border-destructive/40 bg-destructive/10 text-foreground"}`}>{workbookSuccess && <Check className="mr-2 inline size-4 text-confirm" />}{workbookMessage}</p>}
           </Section>
 
           <Section title="Credentials" icon={<KeyRound className="size-4 text-gold" aria-hidden="true" />}>
@@ -605,6 +610,7 @@ export function OtherFunctionsDrawer({
           <Section title="Current session" icon={<Info className="size-4 text-gold" aria-hidden="true" />}>
             {session ? (
               <div className="divide-y divide-border rounded-md border border-border bg-panel px-3">
+                <InfoRow label="Name" value={session.name || "Untitled session"} />
                 <InfoRow label="Session ID" value={<span className="font-mono text-xs">{session.session_id}</span>} />
                 <InfoRow label="Post type" value={session.post_type_key} />
                 <InfoRow label="Images" value={session.image_refs.length} />

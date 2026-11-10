@@ -31,6 +31,7 @@ from backend.app.api.step_01_models import (
     InputsRequest,
     PublishRequest,
     SessionResponse,
+    SessionNameRequest,
     SessionsDeleteRequest,
     VersionedRequest,
     VideoMetadataUpdateRequest,
@@ -115,6 +116,7 @@ def create_router(
             },
             "post_types": [
                 {
+                    "single_template_url": row.single_template_url,
                     "post_type_key": row.post_type_key,
                     "display_name_de": row.display_name_de,
                     "wp_category_name": row.wp_category_name,
@@ -250,6 +252,15 @@ def create_router(
     ) -> SessionResponse:
         service_provider().require_owner(session_id, get_active_client_id())
         return SessionResponse(session=service_provider().get(session_id))
+
+    @router.put("/{session_id}/name", response_model=SessionResponse)
+    async def rename_session(session_id: str, payload: SessionNameRequest) -> SessionResponse:
+        service = service_provider()
+        service.require_owner(session_id, get_active_client_id())
+        _raise_if_session_job_active(session_id)
+        return SessionResponse(session=service.rename(
+            session_id, name=payload.name, expected_version=payload.expected_version,
+        ))
 
     @router.post("/{session_id}/inputs", response_model=SessionResponse)
     async def add_inputs(

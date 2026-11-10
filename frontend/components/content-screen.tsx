@@ -1,5 +1,9 @@
 "use client"
 
+import { ActionHint } from "@/components/action-hint"
+
+import { useActionWarning } from "@/components/action-warning"
+
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
@@ -283,6 +287,7 @@ export function ContentScreen({
   onAiAssistedLinkPlacementChange,
   onBackToFacts,
   onContinueToWordPress,
+  onOpenAgent,
 }: {
   auth: ApiClientOptions | null
   session: ContentSession | null
@@ -293,6 +298,7 @@ export function ContentScreen({
   onAiAssistedLinkPlacementChange: (enabled: boolean) => void
   onBackToFacts: () => void
   onContinueToWordPress: () => void
+  onOpenAgent: () => void
 }) {
   const fields = useMemo(() => buildFields(session, workbook), [session, workbook])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -361,6 +367,10 @@ export function ContentScreen({
     ])],
     [linkRevisionFieldIds, manualRevisionFieldIds],
   )
+  const revisionDisabledReason = !auth || !session ? "Create or load a session first."
+    : operation === "loading" ? "Wait for the current content operation to finish."
+    : !draftReady ? "Generate content before revising fields."
+    : !selectedRevisionFieldIds.length ? "Select at least one content field to revise." : ""
   const selectedRevisionFields = new Set(selectedRevisionFieldIds)
   const allRevisionFieldsSelected = fields.length > 0 && selectedRevisionFieldIds.length === fields.length
 
@@ -558,8 +568,14 @@ export function ContentScreen({
     return () => controller.abort()
   }, [auth, session?.session_id])
 
+  const { confirm, warningDialog } = useActionWarning()
+
   async function handleGenerate() {
     if (!auth || !session) return
+    if (draftReady && !await confirm({
+      message: "Regenerating replaces the full draft and refreshes internal links and media metadata. Revise selected fields to limit the changes.",
+      alternative: selectedRevisionFieldIds.length ? { label: "Revise selected fields", action: onOpenAgent } : undefined,
+    })) return
     const isFirstGeneration = !draftReady
     setOperation("loading")
     setActiveAction("generate")
@@ -722,6 +738,7 @@ export function ContentScreen({
 
   return (
     <>
+      {warningDialog}
       <div className="pb-28">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -731,24 +748,36 @@ export function ContentScreen({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              id="s2p-content-quality-check"
-              type="button"
-              onClick={handleQualityCheck}
-              title="Reviews the saved draft without changing it."
-              disabled={operation === "loading" || !draftReady}
-              className="inline-flex items-center gap-2 rounded-md border border-ai/40 bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-ai/10 disabled:opacity-60"
-            >
-              {activeAction === "review" ? <Loader2 className="size-4 animate-spin" /> : <ScanText className="size-4 text-ai" />}
-              Quality check
-            </button>
+            {draftReady && (
+              <>
+                <button
+                  id="s2p-content-quality-check"
+                  type="button"
+                  onClick={handleQualityCheck}
+                  title="Reviews the saved draft without changing it."
+                  disabled={operation === "loading" || !draftReady}
+                  className="inline-flex items-center gap-2 rounded-md border border-ai/40 bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-ai/10 disabled:opacity-60"
+                >
+                  {activeAction === "review" ? <Loader2 className="size-4 animate-spin" /> : <ScanText className="size-4 text-ai" />}
+                  Quality check
+                </button>
+                <ActionHint reason={revisionDisabledReason}>
+                <button type="button" id="s2p-content-revise-selected" onClick={onOpenAgent}
+                  disabled={!!revisionDisabledReason}
+                  title={revisionDisabledReason || "Give the content agent instructions for the selected fields."}
+                  className="rounded-md border border-ai/40 bg-card px-3 py-2 text-sm font-semibold text-foreground disabled:opacity-60">
+                  Revise selected fields
+                </button>
+                </ActionHint>
+              </>
+            )}
             <button
               id="s2p-content-generate-draft"
               type="button"
               onClick={handleGenerate}
               title={draftReady ? "Regenerates the full draft, ranks fresh internal-link candidates, and refreshes media metadata." : "Generates the draft and ranks internal-link candidates."}
               disabled={operation === "loading" || !canGenerate}
-              className="inline-flex items-center gap-2 rounded-md bg-ai px-3 py-2 text-sm font-semibold text-ai-foreground transition-colors hover:opacity-90 disabled:opacity-60"
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition-colors hover:opacity-90 disabled:opacity-60 ${draftReady ? "bg-destructive text-white" : "bg-ai text-ai-foreground"}`}
             >
               {activeAction === "generate" ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
               {draftReady ? "Regenerate draft" : "Generate draft"}
