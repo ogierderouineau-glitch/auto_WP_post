@@ -13,6 +13,7 @@ class LinkMarkup(HTMLParser):
         self.links: list[tuple[str, tuple[int, int], tuple[int, int]]] = []
         self.text_ranges: list[tuple[int, int]] = []
         self.anchors: list[tuple[str, tuple[int, int]]] = []
+        self.anchor_tags: list[tuple[str, list[tuple[str, str | None]], int]] = []
         self.protected: list[str] = []
         self.feed(source)
 
@@ -25,6 +26,7 @@ class LinkMarkup(HTMLParser):
             self.protected.append(tag)
         if tag == "a":
             start = self.source_offset()
+            self.anchor_tags.append((self.get_starttag_text(), attrs, start))
             self.anchors.append((dict(attrs).get("href") or "", (start, start + len(self.get_starttag_text()))))
 
     def handle_endtag(self, tag):
@@ -72,3 +74,31 @@ def insert_link(value: str, *, url: str, start: int, end: int, selected_text: st
     if not any(left <= first < last <= right for left, right in LinkMarkup(value).text_ranges):
         raise ValueError("Select text within one paragraph, without HTML tags or existing links.")
     return value[:first] + f'<a href="{escape(url, quote=True)}">' + value[first:last] + "</a>" + value[last:]
+
+
+def protect_links(value: str) -> tuple[str, dict[str, str]]:
+    """Hide existing link markup from a model while leaving opaque, restorable slots."""
+    from uuid import uuid4
+    nonce = uuid4().hex
+    replacements = {}
+    for index, (_, opening, closing) in reversed(list(enumerate(LinkMarkup(value).links))):
+        token = f"__S2P_LINK_{nonce}_{index}__"
+        replacements[token] = value[opening[0]:closing[1]]
+        value = value[:opening[0]] + token + value[closing[1]:]
+    return value, replacements
+
+
+def restore_links(value: str, replacements: dict[str, str]) -> str:
+    """Restore exact HTML only when each link slot survives once in ordinary text."""
+    # All original links were masked. Any links returned by the model are new:
+    # keep their text, but let deterministic placement supply approved URLs.
+    for url in link_urls([value]):
+        value = unlink_url(value, url)
+    markup = LinkMarkup(value)
+    for token in replacements:
+        start = value.find(token)
+        if value.count(token) != 1 or not any(left <= start and start + len(token) <= right for left, right in markup.text_ranges):
+            raise ValueError("The link revision could not preserve an existing link. Try a different destination field. Draft unchanged.")
+    for token, html in replacements.items():
+        value = value.replace(token, html)
+    return value

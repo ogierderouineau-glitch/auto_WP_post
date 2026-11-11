@@ -57,6 +57,7 @@ type QualityCheck = {
   summary: string
   findings: QualityFinding[]
   reviewed_at?: string
+  applied_finding_count: number
 }
 const ACTIVE_JOB_STORAGE = "speech2post_active_job"
 
@@ -236,6 +237,7 @@ function contentQualityCheck(session: ContentSession | null): QualityCheck | nul
     summary: review.summary,
     findings: Array.isArray(review.findings) ? review.findings as QualityFinding[] : [],
     reviewed_at: typeof review.reviewed_at === "string" ? review.reviewed_at : undefined,
+    applied_finding_count: typeof review.applied_finding_count === "number" ? review.applied_finding_count : 0,
   }
 }
 
@@ -972,19 +974,25 @@ export function ContentScreen({
                     </div>
                     <span className={[
                       "shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold",
-                      review.rating === "natural"
+                      (review.applied_finding_count > 0 && !review.findings.length) || review.rating === "natural"
                         ? "bg-confirm/12 text-confirm"
                         : review.rating === "formulaic"
                           ? "bg-warn/20 text-warn-foreground"
                           : "bg-ai/10 text-ai",
                     ].join(" ")}>
-                      {review.rating.replace("_", " ")}
+                      {review.applied_finding_count ? `${review.findings.length} remaining` : review.rating.replace("_", " ")}
                     </span>
                   </summary>
                   <div className="border-t border-border px-4 pb-4">
                     <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                      Overall diagnostic: {review.summary}
+                      {review.applied_finding_count
+                        ? `${review.applied_finding_count} recommendations applied; ${review.findings.length} remaining from the last quality check.`
+                        : `Overall diagnostic: ${review.summary}`}
                     </p>
+                    {!!review.applied_finding_count && <details className="mt-2 text-xs text-muted-foreground">
+                      <summary className="cursor-pointer">Original diagnostic ({review.rating.replace("_", " ")})</summary>
+                      <p className="mt-2 leading-relaxed">{review.summary}</p>
+                    </details>}
                     {!!review.findings.length && (
                       <div className="mt-3 flex items-center justify-between gap-2">
                       <span className="text-[11px] text-muted-foreground">
@@ -1042,7 +1050,7 @@ export function ContentScreen({
                       </div>
                       )) : (
                         <p className="rounded-md bg-confirm/10 px-3 py-2 text-xs text-foreground">
-                          No concrete quality issues were found.
+                          {review.applied_finding_count ? "All recommendations applied. Run Quality check again for a fresh assessment." : "No concrete quality issues were found."}
                         </p>
                       )}
                     </div>

@@ -86,13 +86,45 @@ The Content screen reuses the existing revision job for free candidates. Explici
 link requests first use deterministic injection, then one focused structured AI
 revision for unresolved destinations (provider/schema retries still apply).
 Field choice is local; examples and unrelated fields are excluded from fallback
-context. No requested-link placement is saved if any request or final validation
+context. Existing anchors are masked with per-request slots before the model
+rewrite and restored byte-for-byte afterward by `protect_links`/`restore_links`.
+The model sees readable anchor text separately, without the existing link markup.
+Model-created anchor tags are unwrapped before the app injects configured URLs;
+slot integrity and the existing-link check still guard the saved result. No requested-link placement is saved if any request or final validation
 fails. HTML source edits use the small parser in `internal_links/step_02_editor.py`;
 selection offsets are converted from browser UTF-16 units. Removing a placed link
 or inserting a manual link rebuilds the payload and clears approval. The legacy
 `ai_assisted_link_placement` API parameter is accepted but ignored by this flow.
 See README for user behavior and `backend/tests/test_link_workflow.py` for tests
 with arbitrary post-type/field keys and an unrelated industry.
+
+## Editorial quality check
+
+Review instructions use the `instruction_de` property consumed by
+`structured_task_input`; an `instruction` property is silently omitted from system
+rules. The reviewer follows `session.language` and ignores template placeholders,
+shortcodes, HTML and inline-style critiques in its summary, findings and rating.
+This is editorial-review policy only; source content and validation are unchanged.
+Targeted revisions retain `quality_check` and prune findings only for explicitly
+requested fields with changed values after a successful non-link-only revision.
+`applied_finding_count` and `last_applied_at` track that action. The UI shows
+remaining counts and retains the original diagnostic as collapsed reference;
+ratings are not recalculated without a new review. Failed/no-op revisions and
+link edits preserve remaining findings. Full regeneration clears the report.
+
+
+## External-link targets
+
+The container passes each client's configured `wp_base_url` to its session service
+and `PayloadBuilder`. `payloads/step_03_link_targets.py` adds `_blank`/`noopener` to
+external HTTP(S) anchor tags in WordPress and ACF payload values, including nested
+ACF structures. It reuses source offsets from `LinkMarkup` to preserve text and
+unrelated HTML. No other client's domain is used when configuration is absent.
+Session reads project this rule onto the returned payload without writing source
+or storage; publication applies it before payload diffs, including text-only
+updates. This makes existing posts show pending changes and lets the normal update
+button apply the policy without regeneration. Published payloads retain the new
+attributes so subsequent unchanged updates stay synchronized.
 
 ## Required outputs added to older drafts
 

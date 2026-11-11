@@ -67,6 +67,19 @@ image is marked as featured; sessions without images leave it unchecked.
 Workbook uploads show a prominent confirmation with the uploaded filename.
 Operations from today show local time; older operations show local date and time.
 Agent-popup errors appear in red; progress and success messages remain neutral.
+Quality check reviews wording in the session language. It ignores template
+placeholders/dynamic shortcodes and HTML/inline styles (including in fields
+described as plain text) in its summary, findings and rating. It does not rewrite
+or remove those elements from the draft.
+After successfully applying recommendations to selected fields, the saved quality
+check keeps its remaining findings. Only findings for requested fields whose
+content actually changed are removed. Failed/no-op revisions and link-only actions
+keep the findings. The original diagnostic stays in a collapsed reference section;
+remaining/applied counts do not claim a fresh AI assessment. A new quality check
+replaces the report, while full draft regeneration clears it.
+The Agent popup and its selected-field/fact lists have bounded, scrollable heights
+so long selections do not push its controls off-screen.
+
 Targeted revision also fills absent or empty required outputs from the active
 workbook, using the existing generation request or confirmed-fact derivation.
 Missing configured output fields also appear as blank editors in the Content
@@ -104,7 +117,11 @@ candidates show their destination fields.
 If exact placement fails, the app requests a small AI revision for only the needed
 eligible fields, without sending examples or unrelated draft fields. This can
 include a field outside the manually checked set. The app then injects links and
-validates the draft. Existing links must survive unchanged. If any requested link
+validates the draft. Existing links are temporarily replaced by protected text
+slots during the AI rewrite, then restored with their exact original HTML. Any
+new link tags returned by the model are unwrapped; the app supplies configured
+URLs through deterministic placement. Missing, duplicated or misplaced protected
+slots stop the operation without saving. Existing links must survive unchanged. If any requested link
 cannot be placed safely, the saved draft stays unchanged and the action reports an
 error. The former AI-assisted-placement checkbox is no longer needed.
 
@@ -117,6 +134,16 @@ URL matching an eligible workbook link joins the candidate list and counts towar
 its maximum. Other pasted URLs remain direct content edits rather than candidates.
 Changing content refreshes the WordPress payload but does not update the live post
 until the normal approval and update/publish flow is used.
+
+External HTTP(S) links in outgoing WordPress and ACF content get
+`target="_blank"` and `rel="noopener"`. The active client's configured WordPress
+hostname identifies internal links; the `www` and bare-host variants are treated
+as the same site. Relative links, fragments and non-web links such as mailto/tel
+are unchanged. Existing link text, nested formatting and unrelated attributes are
+preserved. This is a payload transformation, so saved source fields remain intact.
+For existing posts, reload the app/session and use **Update current post** to send
+the pending link-attribute changes. No draft regeneration or AI call is needed.
+
 
 ## Project structure
 

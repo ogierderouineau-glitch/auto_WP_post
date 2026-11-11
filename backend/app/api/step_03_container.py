@@ -207,6 +207,7 @@ def get_v2_service(client_id: str | None = None) -> ContentSessionService:
             knowledge=KnowledgeBaseService(workbook_path),
             repository=repository,
             wordpress=ExistingWordPressProvider(client_id=resolved_client_id),
+            wordpress_site_url=get_client_config(resolved_client_id).wp_base_url,
             language_model=language_model,
             revision_language_model=revision_language_model,
             metadata_language_model=metadata_language_model,

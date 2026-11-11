@@ -301,7 +301,7 @@ def test_raw_url_mentions_are_not_treated_as_placed_links(tmp_path):
     assert service.link_options(session.session_id)["placed_link_ids"] == []
 
 
-def test_revision_places_only_checked_candidates_and_clears_stale_quality_report(tmp_path):
+def test_revision_places_only_checked_candidates_and_keeps_quality_report(tmp_path):
     service, session, _ = fixture(tmp_path)
     session = edit(service, session, "add", "alpha")
     session = edit(service, session, "add", "beta")
@@ -319,4 +319,103 @@ def test_revision_places_only_checked_candidates_and_clears_stale_quality_report
     assert service.link_options(session.session_id)["placed_link_ids"] == ["alpha"]
     assert len(revised.selected_links) == 2
     assert revised.acf_source_fields["detail_y"] == session.acf_source_fields["detail_y"]
-    assert "quality_check" not in revised.generation_trace
+    assert revised.generation_trace["quality_check"] == session.generation_trace["quality_check"]
+
+
+class LinkStrippingProvider(MinimalProvider):
+    """Simulate a model interpreting 'do not add URLs' as removing existing tags."""
+    def structured(self, *, task, context, schema):
+        import re
+        payload = json.loads(context["messages"][1]["content"])["context"]
+        self.calls.append((task, payload))
+        values = {key: re.sub(r"<a\b[^>]*>(.*?)</a>", r"\1", value, flags=re.DOTALL)
+                  for key, value in payload["current_acf_source_fields"].items()}
+        for assignment in payload["assignments"]:
+            values[assignment["field_key"]] += f' Choose {assignment["approved_anchors"][0]} for this installation.'
+        return schema.model_validate(values)
+
+
+def linked_session(tmp_path, provider):
+    service, session, snapshot = fixture(tmp_path, provider=provider)
+    existing = '<a class="reference" href="https://reference.example/?a=1&amp;b=2" target="_blank" rel="nofollow noopener"><strong>Existing</strong> &amp; details</a>'
+    source = f'<p>Solar battery installation. See {existing} for background.</p>'
+    session = service.repository.save(session.model_copy(update={
+        "acf_source_fields": {**session.acf_source_fields, "detail_x": source},
+    }), expected_version=session.version)
+    session = edit(service, session, "add", "beta")
+    return service, session, existing
+
+
+def test_link_only_fallback_restores_existing_links_exactly_without_prompt_or_checked_field(tmp_path):
+    provider = LinkStrippingProvider()
+    service, session, existing = linked_session(tmp_path, provider)
+    updated = revise(service, session)
+    assert existing in updated.acf_source_fields["detail_x"]
+    assert "beta" in service.link_options(session.session_id)["placed_link_ids"]
+    assert updated.acf_source_fields["detail_y"] == session.acf_source_fields["detail_y"]
+    assert len(provider.calls) == 1
+    sent = provider.calls[0][1]["current_acf_source_fields"]["detail_x"]
+    assert "__S2P_LINK_" in sent
+    assert "https://reference.example" not in sent
+    assert "__S2P_LINK_" not in updated.acf_source_fields["detail_x"]
+
+
+@pytest.mark.parametrize("damage", ["delete", "duplicate", "attribute"])
+def test_damaged_protected_links_still_fail_without_saving(tmp_path, damage):
+    class DamagingProvider(MinimalProvider):
+        def structured(self, *, task, context, schema):
+            payload = json.loads(context["messages"][1]["content"])["context"]
+            values = dict(payload["current_acf_source_fields"])
+            for key, text_by_token in payload["existing_link_text"].items():
+                for token in text_by_token:
+                    replacement = "removed" if damage == "delete" else token + token if damage == "duplicate" else f'<span data-link="{token}">reference</span>'
+                    values[key] = values[key].replace(token, replacement)
+            return schema.model_validate(values)
+    service, session, _ = linked_session(tmp_path, DamagingProvider())
+    before = service.repository.get(session.session_id)
+    with pytest.raises(InvalidInternalLinksError, match="could not preserve an existing link"):
+        revise(service, session)
+    assert service.repository.get(session.session_id) == before
+
+
+def test_link_only_job_accepts_no_prompt_and_no_field_selection_with_existing_links(tmp_path):
+    async def check():
+        service, session, existing = linked_session(tmp_path, LinkStrippingProvider())
+        app = FastAPI()
+        app.add_exception_handler(V2Error, v2_error_handler)
+        app.include_router(create_router(lambda: service))
+        try:
+            set_active_client("energy-client")
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(f"/api/content-sessions/{session.session_id}/draft-chat-job", json={
+                    "expected_version": session.version, "message": "", "revision_field_ids": [],
+                    "link_placement_only": True,
+                    "selected_links": [dict(item, revision_requested="true") for item in session.selected_links],
+                })
+                assert response.status_code == 200
+                job_id = response.json()["job_id"]
+                for _ in range(100):
+                    job = (await client.get(f"/api/content-sessions/jobs/{job_id}")).json()
+                    if job["status"] in {"failed", "complete"}:
+                        break
+                    await asyncio.sleep(0.01)
+                assert job["status"] == "complete", job.get("error")
+                assert existing in job["session"]["acf_source_fields"]["detail_x"]
+        finally:
+            set_active_client(DEFAULT_CLIENT_ID)
+    asyncio.run(check())
+
+
+def test_fallback_discards_ai_link_urls_but_keeps_text_for_approved_injection(tmp_path):
+    class LinkingProvider(LinkStrippingProvider):
+        def structured(self, *, task, context, schema):
+            generated = super().structured(task=task, context=context, schema=schema)
+            values = generated.model_dump()
+            for key, value in values.items():
+                values[key] = value.replace("solar beta", '<a href="https://invented.example">solar beta</a>')
+            return schema.model_validate(values)
+    service, session, existing = linked_session(tmp_path, LinkingProvider())
+    updated = revise(service, session)
+    assert existing in updated.acf_source_fields["detail_x"]
+    assert "https://invented.example" not in updated.acf_source_fields["detail_x"]
+    assert "beta" in service.link_options(session.session_id)["placed_link_ids"]

@@ -429,7 +429,7 @@ export function RecordingWidget({
     <div className="fixed bottom-20 right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2">
       {warningDialog}
       {open && (
-        <section className="w-[min(380px,calc(100vw-2rem))] rounded-lg border border-border bg-card p-3 shadow-xl">
+        <section className="max-h-[calc(100dvh_-_11rem)] w-[min(380px,calc(100vw-2rem))] overflow-y-auto overscroll-contain rounded-lg border border-border bg-card p-3 shadow-xl">
           <div className="mb-3 flex items-start justify-between gap-3">
             <div className="flex items-center gap-2">
               <span className="flex size-8 items-center justify-center rounded-md bg-gold/15 text-gold">
@@ -499,7 +499,7 @@ export function RecordingWidget({
               <summary className="cursor-pointer text-xs font-semibold text-foreground">
                 Facts list
               </summary>
-              <ul className="mt-2 list-disc space-y-1.5 pl-5 text-xs leading-relaxed text-muted-foreground">
+              <ul className="mt-2 max-h-48 list-disc space-y-1.5 overflow-y-auto overscroll-contain pl-5 pr-1 text-xs leading-relaxed text-muted-foreground">
                 {factDescriptions.map((description, index) => (
                   <li key={`${index}-${description}`}>{description}</li>
                 ))}
@@ -531,7 +531,7 @@ export function RecordingWidget({
               </summary>
               {selectedContentFieldIds.length ? (
                 <>
-                  <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
+                  <ul className="mt-2 max-h-48 space-y-1.5 overflow-y-auto overscroll-contain pr-1 text-xs text-muted-foreground">
                     {selectedContentFieldIds.map((fieldId) => (
                       <li key={fieldId} className="rounded-md border border-border bg-background px-2.5 py-1.5">
                         {contentFieldLabel(fieldId)}

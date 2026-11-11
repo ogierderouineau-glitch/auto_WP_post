@@ -46,7 +46,7 @@ from backend.app.errors import (
     WordPressRequestError,
 )
 from backend.app.internal_links.step_01_service import EligibleLinks, InternalLinkInjectionResult, InternalLinkService
-from backend.app.internal_links.step_02_editor import LinkMarkup, insert_link, link_urls, unlink_url
+from backend.app.internal_links.step_02_editor import LinkMarkup, insert_link, link_urls, protect_links, restore_links, unlink_url
 from backend.app.images.step_02_processor import PillowProcessor
 from backend.app.images.step_03_metadata_context import (
     ImageMetadataFieldContextBuilder,
@@ -95,6 +95,7 @@ class ContentSessionService:
         object_storage: ObjectStorageProvider | None = None,
         image_processor: PillowProcessor | None = None,
         video_processor: FfmpegVideoProcessor | None = None,
+        wordpress_site_url: str = "",
     ) -> None:
         self.knowledge = knowledge
         self.repository = repository
@@ -110,7 +111,7 @@ class ContentSessionService:
         self.video_processor = video_processor or FfmpegVideoProcessor()
         self.clarification = ClarificationService()
         self.context_builder = GenerationContextBuilder()
-        self.payload_builder = PayloadBuilder()
+        self.payload_builder = PayloadBuilder(wordpress_site_url)
         self.internal_links = InternalLinkService()
         self.draft_validator = DraftValidator()
         self.generation_condition_evaluator = GenerationConditionEvaluator()
@@ -193,7 +194,10 @@ class ContentSessionService:
         return created
 
     def get(self, session_id: str) -> ContentSession:
-        return self.repository.get(session_id)
+        session = self.repository.get(session_id)
+        # Show pending link-attribute changes for older posts without mutating storage.
+        payload = self.payload_builder.prepare_payload(session.wordpress_payload)
+        return session.model_copy(update={"wordpress_payload": payload})
 
     def _suggest_name(self, session: ContentSession) -> ContentSession:
         if session.name or session.name_generation_attempted or self.language_model is None:
@@ -464,14 +468,21 @@ class ContentSessionService:
                 task="content_quality_check",
                 instructions=[
                     {
-                        "instruction": (
-                            "Act as a German-language editorial quality reviewer, not an AI-text detector. "
+                        "instruction_de": (
+                            "Act as an editorial quality reviewer in the supplied session language, not an AI-text detector. "
                             "Identify only concrete issues with clarity, specificity, repetition, sentence "
                             "rhythm, transitions, translated phrasing, generic marketing language, overly "
                             "polished wording, or unsupported personalization. "
+                            "Ignore template placeholders such as {{...}} and dynamic shortcodes: they are "
+                            "intentional template syntax, not unfinished prose. Never suggest removing, resolving "
+                            "or replacing them, or infer missing facts or broken rendering from them. "
+                            "Ignore HTML markup, attributes and inline styles, including in fields described "
+                            "as plain text. Do not recommend stripping markup or simplifying inline styles. "
+                            "These exclusions apply to the summary, findings and rating. Review only the readable wording. "
                             "Do not penalize necessary SEO terminology, factual business language, "
-                            "HTML markup, field length constraints, or a professional tone. "
-                            "Return concise, actionable findings. Do not rewrite the content."
+                            "field length constraints, or a professional tone. "
+                            "Return concise, actionable editorial findings only; an empty findings list is valid. "
+                            "Do not manufacture minor issues or rewrite the content."
                         )
                     }
                 ],
@@ -1612,7 +1623,8 @@ class ContentSessionService:
             session = state_machine.transition(session, "generating")
         generation_trace = dict(session.generation_trace)
         generation_trace.pop("humanness_review", None)
-        generation_trace.pop("quality_check", None)
+        if not targeted_revision:
+            generation_trace.pop("quality_check", None)
         eligible = self.internal_links.eligible(
             snapshot,
             post_type_key=session.post_type_key,
@@ -1997,6 +2009,23 @@ class ContentSessionService:
             no_eligible_links=not eligible.candidates,
             session=session,
         )
+        review = generation_trace.get("quality_check")
+        if targeted_revision and not link_placement_only and isinstance(review, dict):
+            addressed_fields = {
+                field_id for field_id in revision_field_ids or []
+                if (field_id.startswith("shared:") and routed_shared.get(field_id[7:]) != session.shared_fields.get(field_id[7:]))
+                or (field_id.startswith("acf:") and routed_acf.get(field_id[4:]) != session.acf_source_fields.get(field_id[4:]))
+            }
+            findings = review.get("findings", [])
+            remaining = [finding for finding in findings
+                         if not isinstance(finding, dict) or finding.get("field_id") not in addressed_fields]
+            applied_count = len(findings) - len(remaining)
+            if applied_count:
+                generation_trace["quality_check"] = {
+                    **review, "findings": remaining,
+                    "applied_finding_count": review.get("applied_finding_count", 0) + applied_count,
+                    "last_applied_at": datetime.now(timezone.utc).isoformat(),
+                }
         image_metadata = list(session.image_metadata)
         payload = self.payload_builder.build(
             snapshot,
@@ -3219,16 +3248,26 @@ class ContentSessionService:
             snapshot=snapshot, task="generation", post_type_key=session.post_type_key,
             session=session, field_keys=sorted(keys),
         )
+        protected = {key: protect_links(result.acf_source_fields[key]) for key in keys}
         provider = self.revision_language_model
         generated = self._structured(
             task="internal_link_revision",
             messages=structured_task_input(
                 task="internal_link_revision", instructions=context.instructions,
                 context={
-                    "instruction": "Minimally revise only these fields so each assigned link has one approved anchor phrase verbatim. Preserve facts, meaning, HTML structure and every existing link. Do not add URLs or new links; the application inserts those. Follow the supplied field rules.",
+                    "instruction": (
+                        "Minimally revise these fields so each assigned link has one approved anchor phrase verbatim. "
+                        "Preserve facts, meaning and HTML structure. Each __S2P_LINK_...__ token is an existing link: "
+                        "keep every token exactly once, unchanged, as text outside tags and links. "
+                        "Do not rewrite, expand or wrap those tokens. Do not add URLs or links; the application restores "
+                        "existing links and inserts the requested ones. Follow the supplied field rules."
+                    ),
                     "fields": {key: value.model_dump(by_alias=True) for key, value in context.fields.items()},
                     "confirmed_facts": context.confirmed_facts,
-                    "current_acf_source_fields": {key: result.acf_source_fields[key] for key in keys},
+                    "current_acf_source_fields": {key: protected[key][0] for key in keys},
+                    "existing_link_text": {key: {token: re.sub(r"<[^>]+>", "", html)
+                                                 for token, html in protected[key][1].items()} for key in keys},
+                    "minimum_words_between_links": self._minimum_words_between_internal_links(snapshot),
                     "assignments": assignments,
                 },
             ),
@@ -3239,6 +3278,13 @@ class ContentSessionService:
         if set(replacements) != keys:
             raise InvalidInternalLinksError("The link revision did not return every required field. Draft unchanged.")
         for key, value in replacements.items():
+            if not isinstance(value, str):
+                raise InvalidInternalLinksError("The link revision did not return valid field text. Draft unchanged.")
+            try:
+                value = restore_links(value, protected[key][1])
+            except ValueError as exc:
+                raise InvalidInternalLinksError(str(exc)) from exc
+            replacements[key] = value
             original_markup = LinkMarkup(result.acf_source_fields[key])
             revised_markup = LinkMarkup(value) if isinstance(value, str) else None
             original_links = [(url, original_markup.source[opening[1]:closing[0]])
@@ -3299,7 +3345,6 @@ class ContentSessionService:
                 media=self._publication_media(snapshot, session),
             )
             trace = dict(session.generation_trace)
-            trace.pop("quality_check", None)
             trace.pop("humanness_review", None)
             trace.pop("internal_links", None)
             updates.update(wordpress_payload=payload.model_dump(), approval=Approval(),
@@ -3561,6 +3606,9 @@ class ContentSessionService:
                 media=publication_media,
             )
             refined = refined.model_copy(update={"wordpress_payload": payload.model_dump()})
+        refined = refined.model_copy(update={
+            "wordpress_payload": self.payload_builder.prepare_payload(refined.wordpress_payload),
+        })
         publishing = (
             refined.model_copy(update={"state": "publishing"})
             if refined.state == "published"

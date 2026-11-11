@@ -71,6 +71,8 @@ class ContentQualityLanguageModel:
     def structured(self, *, task: str, context: dict[str, Any], schema: type[Any]) -> Any:
         if task != "content_quality_check":
             raise AssertionError(f"Unexpected fake model task: {task}")
+        self.last_system = json.loads(context["messages"][0]["content"])
+        self.last_context = json.loads(context["messages"][1]["content"])["context"]
         self.last_usage = {
             "service": "openai_text",
             "call_name": task,
@@ -238,6 +240,36 @@ class ContentQualityCheckTests(unittest.TestCase):
             self.assertEqual(report["findings"][0]["field_id"], "shared:title")
             self.assertEqual(reviewed.shared_fields, session.shared_fields)
             self.assertEqual(reviewed.ai_usage["total_tokens"], 8)
+
+    def test_review_instructions_reach_model_and_exclude_template_and_html_critiques(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = FileSessionRepository(temporary)
+            source = '<div style="font-weight:700">Meet {{expert_name}}. [post_variable name="specialty"]</div>'
+            session = repository.create(ContentSession(
+                session_id="clinical-guide", user_id="clinic-client", post_type_key="clinical_profile_27",
+                state="needs_review", workbook_hash="hash", language="en",
+                shared_fields={"title": source}, acf_source_fields={"profile_body_43": source},
+                wordpress_payload={"wordpress": {"title": source}},
+            ))
+            model = ContentQualityLanguageModel()
+            service = ContentSessionService(knowledge=StaticKnowledge(SimpleNamespace()),
+                                            repository=repository, revision_language_model=model)
+            result = service.review_content_quality(session.session_id, expected_version=session.version)
+            rules = model.last_system["rules"]
+            self.assertTrue(rules)
+            self.assertTrue(all(isinstance(rule, str) and rule for rule in rules))
+            instruction = " ".join(rules)
+            self.assertIn("Ignore template placeholders such as {{...}}", instruction)
+            self.assertIn("dynamic shortcodes", instruction)
+            self.assertIn("Ignore HTML markup, attributes and inline styles", instruction)
+            self.assertIn("fields described as plain text", instruction)
+            self.assertIn("summary, findings and rating", instruction)
+            self.assertIn("supplied session language", instruction)
+            self.assertNotIn("German-language", instruction)
+            self.assertEqual(model.last_context["language"], "en")
+            self.assertEqual(result.shared_fields, session.shared_fields)
+            self.assertEqual(result.acf_source_fields, session.acf_source_fields)
+            self.assertEqual(result.wordpress_payload, session.wordpress_payload)
 
 
 class InternalLinkInjectionTests(unittest.TestCase):

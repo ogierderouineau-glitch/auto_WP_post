@@ -7,10 +7,18 @@ from typing import Any
 from backend.app.knowledge_base.step_01_models import WorkbookSnapshot
 from backend.app.models.step_02_payload import WordPressFields, WordPressPayload
 from backend.app.payloads.step_01_transforms import apply_transform
+from backend.app.payloads.step_03_link_targets import ExternalLinkTargets
 
 
 class PayloadBuilder:
     """Route values exclusively through workbook destination metadata."""
+
+    def __init__(self, wordpress_site_url: str = "") -> None:
+        self.link_targets = ExternalLinkTargets(wordpress_site_url)
+
+    def prepare_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {key: self.link_targets.apply(value) if key in {"wordpress", "acf"} else value
+                for key, value in payload.items()}
 
     def build(
         self,
@@ -96,10 +104,11 @@ class PayloadBuilder:
         if generated_variables:
             meta["_generated_variables"] = generated_variables
 
+        content = self.prepare_payload({"wordpress": wordpress, "acf": acf})
         return WordPressPayload(
-            wordpress=WordPressFields.model_validate(wordpress),
+            wordpress=WordPressFields.model_validate(content["wordpress"]),
             meta=meta,
-            acf=acf,
+            acf=content["acf"],
             taxonomies=taxonomies,
             media_taxonomies=media_taxonomies,
             media=media or [],
