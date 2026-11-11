@@ -1,3 +1,5 @@
+from backend.model_settings import resolve_model
+
 import json
 import os
 import secrets
@@ -222,8 +224,8 @@ for bucket_setting, bucket_name in (
     if bucket_name and (bucket_name.startswith("gs://") or "/" in bucket_name):
         raise RuntimeError(f"{bucket_setting} must contain only a GCS bucket name.")
 V2_SESSION_ROOT = os.getenv("V2_SESSION_ROOT", "data/v2_sessions")
-V2_LANGUAGE_MODEL = os.getenv("V2_LANGUAGE_MODEL", "gpt-5.6")
-V2_VISION_MODEL = os.getenv("V2_VISION_MODEL", "gpt-5-mini")
+V2_LANGUAGE_MODEL = resolve_model(os.getenv("V2_LANGUAGE_MODEL", "gpt-5.6-sol"))
+V2_VISION_MODEL = resolve_model(os.getenv("V2_VISION_MODEL", "gpt-5.6-terra"))
 V2_TRANSCRIPTION_MODEL = os.getenv("V2_TRANSCRIPTION_MODEL", "gpt-4o-transcribe")
 V2_IMAGE_EDIT_MODEL = os.getenv("V2_IMAGE_EDIT_MODEL", "gpt-image-2")
 V2_IMAGE_EDIT_QUALITY = os.getenv("V2_IMAGE_EDIT_QUALITY", "medium").strip().lower()

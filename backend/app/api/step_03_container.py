@@ -160,7 +160,7 @@ def get_v2_service(client_id: str | None = None) -> ContentSessionService:
             if OPENAI_API_KEY and V2_LANGUAGE_MODEL
             else None
         )
-        metadata_model_name = os.getenv("V2_METADATA_MODEL", "gpt-5-mini").strip()
+        metadata_model_name = os.getenv("V2_METADATA_MODEL", "gpt-5.6-terra").strip()
         metadata_language_model = (
             OpenAILanguageModelProvider(
                 api_key=OPENAI_API_KEY,
@@ -169,7 +169,7 @@ def get_v2_service(client_id: str | None = None) -> ContentSessionService:
             if OPENAI_API_KEY and metadata_model_name
             else language_model
         )
-        revision_model_name = os.getenv("V2_REVISION_MODEL", "gpt-5-mini").strip()
+        revision_model_name = os.getenv("V2_REVISION_MODEL", "gpt-5.6-terra").strip()
         revision_language_model = (
             OpenAILanguageModelProvider(
                 api_key=OPENAI_API_KEY,

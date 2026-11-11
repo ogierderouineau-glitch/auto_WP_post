@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from backend.model_settings import resolve_model, resolve_reasoning_effort
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 FactSource = Literal[
@@ -53,6 +55,9 @@ class OperationRecord(BaseModel):
 
 class ContentSession(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
+
+    _resolve_model = field_validator("language_model", mode="before")(resolve_model)
+    _resolve_effort = field_validator("reasoning_effort", mode="before")(resolve_reasoning_effort)
 
     session_id: str
     user_id: str

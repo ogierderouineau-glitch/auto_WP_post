@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import get_args
+from backend.model_settings import LanguageModel, ReasoningEffort, resolve_reasoning_effort
+
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -113,9 +116,9 @@ def create_router(
             "selected_post_type_key": selected_post_type_key,
             "generation_settings": {
                 "default_language_model": V2_LANGUAGE_MODEL,
-                "default_reasoning_effort": os.getenv("V2_TEXT_REASONING_EFFORT", "low").strip() or "none",
-                "language_models": ["gpt-5-mini", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6"],
-                "reasoning_efforts": ["none", "minimal", "low", "medium", "high", "xhigh"],
+                "default_reasoning_effort": resolve_reasoning_effort(os.getenv("V2_TEXT_REASONING_EFFORT", "low").strip()) or "none",
+                "language_models": list(get_args(LanguageModel)),
+                "reasoning_efforts": list(get_args(ReasoningEffort)),
             },
             "post_types": [
                 {

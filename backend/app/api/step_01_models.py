@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from backend.model_settings import (
+    LanguageModel, ReasoningEffort, resolve_model, resolve_reasoning_effort,
+)
 
 from backend.app.models.step_01_session import ContentSession
 
@@ -27,14 +31,11 @@ class SessionNameRequest(VersionedRequest):
 
 
 class GenerationSettingsRequest(VersionedRequest):
-    language_model: Literal[
-        "gpt-5-mini",
-        "gpt-5.5",
-        "gpt-5.6-luna",
-        "gpt-5.6-terra",
-        "gpt-5.6",
-    ]
-    reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+    _resolve_model = field_validator("language_model", mode="before")(resolve_model)
+    _resolve_effort = field_validator("reasoning_effort", mode="before")(resolve_reasoning_effort)
+
+    language_model: LanguageModel
+    reasoning_effort: ReasoningEffort
     generation_mode: Literal["batched", "single"] = "single"
 
 

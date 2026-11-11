@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from backend.model_settings import resolve_model, resolve_reasoning_effort
+
 import uuid
 import hashlib
 import json
@@ -394,8 +396,8 @@ class ContentSessionService:
         session = self.repository.get(session_id)
         return self.repository.save(
             session.model_copy(update={
-                "language_model": language_model,
-                "reasoning_effort": reasoning_effort,
+                "language_model": resolve_model(language_model),
+                "reasoning_effort": resolve_reasoning_effort(reasoning_effort),
                 "generation_mode": generation_mode,
                 "updated_at": datetime.now(timezone.utc),
             }),

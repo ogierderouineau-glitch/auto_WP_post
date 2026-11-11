@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from backend.model_settings import resolve_model, resolve_reasoning_effort
+
+from datetime import date
+
 import base64
 import mimetypes
 import json
@@ -28,6 +32,10 @@ from backend.app.providers.step_01_interfaces import (
 )
 
 MODEL_PRICES_PER_MILLION_TOKENS_USD: dict[str, tuple[float, float]] = {
+    # Sol promotional pricing is published through 2026-11-30 only.
+    "gpt-5.6-sol": (4.0, 20.0),
+    "gpt-5.6-terra": (2.0, 12.0),
+    "gpt-5.6-luna": (0.2, 1.2),
     "gpt-5.5": (1.25, 10.0),
     "gpt-5": (1.25, 10.0),
     "gpt-5-mini": (0.25, 2.0),
@@ -48,8 +56,8 @@ class OpenAILanguageModelProvider(LanguageModelProvider):
             timeout=float(os.getenv("V2_TEXT_TIMEOUT_SECONDS", "120")),
             max_retries=int(os.getenv("V2_TEXT_MAX_RETRIES", "2")),
         )
-        self.model = model
-        self.reasoning_effort = (
+        self.model = resolve_model(model)
+        self.reasoning_effort = resolve_reasoning_effort(
             reasoning_effort
             if reasoning_effort is not None
             else os.getenv("V2_TEXT_REASONING_EFFORT", "low").strip()
@@ -119,7 +127,7 @@ class OpenAISpeechToTextProvider(SpeechToTextProvider):
 class OpenAIVisionProvider(VisionProvider):
     def __init__(self, *, api_key: str, model: str) -> None:
         self.client = OpenAI(api_key=api_key)
-        self.model = model
+        self.model = resolve_model(model)
         self.last_usage: dict[str, Any] | None = None
 
     def analyze(
@@ -320,17 +328,26 @@ def _estimate_cost_usd(
     completion_tokens: int,
 ) -> float | None:
     normalized = model.lower()
+    if normalized.startswith("gpt-5.6-sol") and date.today() > date(2026, 11, 30):
+        return None  # Do not silently keep expired promotional estimates.
+    prefixes = sorted(MODEL_PRICES_PER_MILLION_TOKENS_USD, key=len, reverse=True)
     prices = next(
         (
-            value
-            for prefix, value in MODEL_PRICES_PER_MILLION_TOKENS_USD.items()
-            if normalized.startswith(prefix)
+            MODEL_PRICES_PER_MILLION_TOKENS_USD[prefix]
+            for prefix in prefixes
+            if normalized == prefix or (
+                normalized.startswith(prefix + "-")
+                and normalized[len(prefix) + 1:len(prefix) + 5].isdigit()
+            )
         ),
         None,
     )
     if prices is None:
         return None
     input_price, output_price = prices
+    if normalized.startswith("gpt-5.6-") and prompt_tokens > 272_000:
+        input_price *= 2
+        output_price *= 1.5
     return round(
         (prompt_tokens / 1_000_000 * input_price)
         + (completion_tokens / 1_000_000 * output_price),

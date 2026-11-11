@@ -263,6 +263,12 @@ When a task changes architecture, configuration, workflow or a known gap, update
 the corresponding documentation in the same task. Keep this guide concise;
 record future proposals separately and clearly mark them as unimplemented.
 
+## Proposals (not implemented)
+
+[google_drive_workbooks_proposal.md](google_drive_workbooks_proposal.md) designs
+Google Sheets-hosted client workbooks (phase 1) and natural-language workbook
+edits (phase 2). Treat it as a proposal; current code still uses GCS/local files.
+
 ## Historical phase plan
 
 `docs/speech2post_local_phases.md` was deleted in commit `340ff18` during the
@@ -291,3 +297,18 @@ Preserve existing uncommitted changes. Update affected documentation as you work
 
 Current goal: [describe the change and expected behavior]
 ```
+
+## Model migration (2026-11-11)
+
+`backend/model_settings.py` owns text-model choices and legacy-ID/effort aliases.
+Generation defaults to Sol, smaller-model roles (including vision) to Terra.
+Provider construction handles old environment values; session/API validators
+handle saved settings without bulk-editing client storage. The picker uses the
+shared model choices. Responses schemas and prompts are unchanged. See README
+for cost-estimate limitations and the Sol promotional pricing expiry. Regression
+coverage is in `backend/tests/test_model_migration.py`.
+
+Migration validation: 11 targeted checks passed; frontend typecheck and lint
+passed (38 existing warnings). Full V9 workbook suite: 247 passed, 8 known
+failures (3 workbook expectations, 2 production-auth checks, 3 image-metadata
+mock signatures). No paid API calls or live model-access verification performed.

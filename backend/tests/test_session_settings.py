@@ -31,6 +31,6 @@ def test_generation_settings_merge_into_latest_session_version() -> None:
         )
 
         assert updated.version == latest.version + 1
-        assert updated.language_model == "gpt-5.6"
+        assert updated.language_model == "gpt-5.6-sol"
         assert updated.reasoning_effort == "low"
         assert updated.generation_mode == "single"

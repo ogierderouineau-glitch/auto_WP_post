@@ -216,7 +216,7 @@ Useful environment variables:
 | `GCS_KNOWLEDGE_BUCKET` | Canonical client workbook bucket |
 | `GCS_DATA_BUCKET` | Client session and uploaded-object bucket |
 | `V2_SESSION_ROOT` | Local file-backed session storage |
-| `V2_LANGUAGE_MODEL` | Structured text generation model |
+| `V2_LANGUAGE_MODEL` | Structured text generation model (default `gpt-5.6-sol`) |
 | `V2_VISION_MODEL` | Image analysis model |
 | `V2_TRANSCRIPTION_MODEL` | Speech-to-text model |
 | `V2_MILESTONE_LOGS=0` | Disables terminal milestone logs |
@@ -478,3 +478,19 @@ Keep business behavior in the workbook whenever possible. Code should mainly pro
 - a small authenticated API for the frontend.
 
 If a seemingly simple request requires a lot of code, first ask whether the same behavior can be expressed in the workbook with fewer moving parts.
+
+Model defaults: generation uses `gpt-5.6-sol`; vision, metadata and focused
+revision use `gpt-5.6-terra` (`V2_VISION_MODEL`, `V2_METADATA_MODEL`,
+`V2_REVISION_MODEL`). Environment overrides remain supported. The picker offers
+Luna, Terra and Sol. Legacy GPT-5/GPT-5.5 selections and the `gpt-5.6` alias
+resolve to Sol; GPT-5-mini selections resolve to Terra, including the retired
+snapshot IDs. Saved sessions migrate on load without changing IDs or historical
+operation records. Legacy `minimal` reasoning becomes `low`; other efforts remain
+unchanged. Text reasoning still defaults to `low`.
+
+Token cost figures are estimates without cache discounts/write charges. The
+5.6 estimates apply published long-context multipliers above 272K input tokens.
+Sol's published promotional rate expires November 30, 2026; its estimates become
+unavailable afterward until pricing is refreshed. Terra has higher token prices
+than GPT-5-mini. See [OpenAI migration guidance](https://developers.openai.com/api/docs/guides/latest-model/gpt-5.6)
+and [pricing](https://developers.openai.com/api/docs/pricing).

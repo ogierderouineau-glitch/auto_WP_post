@@ -277,15 +277,12 @@ export function OtherFunctionsDrawer({
   }, [session])
 
   const generationSettings = workbook?.generation_settings
-  const selectedLanguageModel = session?.language_model || generationSettings?.default_language_model || "gpt-5.6"
+  const selectedLanguageModel = session?.language_model || generationSettings?.default_language_model || "gpt-5.6-sol"
   const configuredReasoningEffort = session?.reasoning_effort || generationSettings?.default_reasoning_effort || "low"
-  const selectedReasoningEffort = selectedLanguageModel === "gpt-5-mini" && configuredReasoningEffort === "none"
-    ? "minimal"
-    : configuredReasoningEffort
+  const selectedReasoningEffort = configuredReasoningEffort
   const selectedGenerationMode = session?.generation_mode || "batched"
   const languageModels = Array.from(new Set([selectedLanguageModel, ...(generationSettings?.language_models || [])]))
   const reasoningEfforts = Array.from(new Set([selectedReasoningEffort, ...(generationSettings?.reasoning_efforts || [])]))
-    .filter((effort) => selectedLanguageModel !== "gpt-5-mini" || effort !== "none")
 
   async function saveGenerationSettings(
     languageModel: string,
@@ -394,9 +391,7 @@ export function OtherFunctionsDrawer({
                   disabled={!session || loading || settingsSaving}
                   onChange={(event) => {
                     const model = event.target.value
-                    const effort = model === "gpt-5-mini" && selectedReasoningEffort === "none"
-                      ? "minimal"
-                      : selectedReasoningEffort
+                    const effort = selectedReasoningEffort
                     void saveGenerationSettings(model, effort)
                   }}
                   className="w-full rounded-md border border-border bg-panel px-3 py-2 text-sm text-foreground disabled:opacity-60"
