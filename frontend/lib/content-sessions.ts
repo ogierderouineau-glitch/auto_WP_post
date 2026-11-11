@@ -856,3 +856,21 @@ export function insertSessionLink(auth: ApiClientOptions, session: ContentSessio
     method: "POST", body: { expected_version: session.version, field_key: fieldKey, url, start: selection.start, end: selection.end, selected_text: selection.text },
   })
 }
+
+export type DraftFieldOption = {
+  field_key: string
+  label: string
+  value_type: string
+  required: boolean
+  acf_field_name: string
+  html_pattern_keys: string[]
+}
+export type DraftFieldOptions = { shared_fields: DraftFieldOption[]; acf_fields: DraftFieldOption[] }
+
+export function loadDraftFieldOptions(auth: ApiClientOptions, session: ContentSession) {
+  return apiRequest<DraftFieldOptions>(`/api/content-sessions/${session.session_id}/draft-fields`, auth, { json: false })
+}
+
+export function mergeDraftFieldValues(values: Record<string, unknown>, fields: DraftFieldOption[] = []) {
+  return { ...Object.fromEntries(fields.map((field) => [field.field_key, ""])), ...values }
+}

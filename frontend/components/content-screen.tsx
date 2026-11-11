@@ -23,6 +23,9 @@ import {
   editSessionLinkCandidates,
   insertSessionLink,
   loadSessionLinkOptions,
+  loadDraftFieldOptions,
+  mergeDraftFieldValues,
+  type DraftFieldOptions,
   type SessionLinkOptions,
   approveSessionContent,
   loadContentSession,
@@ -110,23 +113,23 @@ function fieldTrace(session: ContentSession, key: string) {
   return null
 }
 
-function buildFields(session: ContentSession | null, workbook: WorkbookStatus | null): DraftField[] {
+function buildFields(session: ContentSession | null, workbook: WorkbookStatus | null, options: DraftFieldOptions | null): DraftField[] {
   if (!session) return []
-  const shared = Object.entries(session.shared_fields || {}).map(([key, value]) => ({
+  const shared = Object.entries(mergeDraftFieldValues(session.shared_fields || {}, options?.shared_fields)).map(([key, value]) => ({
     id: `shared:${key}`,
     scope: "shared" as const,
     key,
     displayKey: key,
-    label: labelFromKey(key),
+    label: options?.shared_fields.find((field) => field.field_key === key)?.label || labelFromKey(key),
     value: displayValue(value),
-    valueType: "string",
+    valueType: options?.shared_fields.find((field) => field.field_key === key)?.value_type || "string",
     htmlPatternKeys: [],
     section: "wordpress" as const,
     trace: fieldTrace(session, key),
   }))
-  const acf = Object.entries(session.acf_source_fields || {}).map(([key, value]) => {
+  const acf = Object.entries(mergeDraftFieldValues(session.acf_source_fields || {}, options?.acf_fields)).map(([key, value]) => {
     const trace = fieldTrace(session, key)
-    const schema = workbook?.acf_fields?.find((field) => field.field_key === key)
+    const schema = options?.acf_fields.find((field) => field.field_key === key) || workbook?.acf_fields?.find((field) => field.field_key === key)
     return { id: `acf:${key}`, scope: "acf" as const, key, displayKey: schema?.acf_field_name || key, label: schema?.label || labelFromKey(key), value: displayValue(value), valueType: schema?.value_type || "string", htmlPatternKeys: schema?.html_pattern_keys || [], section: "acf" as const, trace }
   })
   return [...shared, ...acf]
@@ -306,7 +309,8 @@ export function ContentScreen({
   onContinueToWordPress: () => void
   onOpenAgent: () => void
 }) {
-  const fields = useMemo(() => buildFields(session, workbook), [session, workbook])
+  const [draftFieldOptions, setDraftFieldOptions] = useState<DraftFieldOptions | null>(null)
+  const fields = useMemo(() => buildFields(session, workbook, draftFieldOptions), [session, workbook, draftFieldOptions])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [operation, setOperation] = useState<OperationState>("idle")
   const [activeAction, setActiveAction] = useState<"generate" | "revise" | "review" | null>(null)
@@ -348,10 +352,13 @@ export function ContentScreen({
   useEffect(() => {
     if (!auth || !session || !draftReady) return
     let cancelled = false
-    loadSessionLinkOptions(auth, session).then((options) => {
-      if (!cancelled) setLinkOptions(options)
+    Promise.all([loadSessionLinkOptions(auth, session), loadDraftFieldOptions(auth, session)]).then(([links, fields]) => {
+      if (!cancelled) {
+        setLinkOptions(links)
+        setDraftFieldOptions(fields)
+      }
     }).catch((error) => {
-      if (!cancelled) setMessage(error instanceof Error ? error.message : "Could not load link candidates.")
+      if (!cancelled) setMessage(error instanceof Error ? error.message : "Could not load draft fields or link candidates.")
     })
     return () => { cancelled = true }
   }, [auth, session, draftReady])

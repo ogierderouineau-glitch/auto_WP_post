@@ -66,6 +66,17 @@ The publishing checklist checks “Featured image assigned” only when an uploa
 image is marked as featured; sessions without images leave it unchecked.
 Workbook uploads show a prominent confirmation with the uploaded filename.
 Operations from today show local time; older operations show local date and time.
+Agent-popup errors appear in red; progress and success messages remain neutral.
+Targeted revision also fills absent or empty required outputs from the active
+workbook, using the existing generation request or confirmed-fact derivation.
+Missing configured output fields also appear as blank editors in the Content
+screen for existing drafts. Users can type into them (using the existing autosave)
+or select them for AI revision. The list excludes input facts, ineligible outputs
+and fields populated only during publication. Loading the list makes no AI calls.
+It preserves other populated fields and keeps full-draft validation. This allows
+older sessions to acquire newly required fields without a full regeneration.
+Optional missing fields are not generated automatically. If required outputs still
+cannot be filled, the error lists them and suggests full regeneration.
 
 ## Internal links
 

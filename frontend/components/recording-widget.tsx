@@ -5,7 +5,7 @@ import { ActionHint } from "@/components/action-hint"
 import { useActionWarning } from "@/components/action-warning"
 import { hasExtractedFacts, hasSavedTranscript } from "@/lib/content-sessions"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Bot, CircleDot, Loader2, Mic, Send, Square, Trash2 } from "lucide-react"
 import type { ApiClientOptions } from "@/lib/api"
 import {
@@ -150,7 +150,12 @@ export function RecordingWidget({
   const [recording, setRecording] = useState(false)
   const [items, setItems] = useState<RecordingItem[]>([])
   const [transcript, setTranscript] = useState("")
-  const [status, setStatus] = useState("")
+  const [status, setStatusMessage] = useState("")
+  const [statusError, setStatusError] = useState(false)
+  const setStatus = useCallback((message: string, isError = false) => {
+    setStatusMessage(message)
+    setStatusError(isError)
+  }, [])
   const [submitting, setSubmitting] = useState(false)
   const [savingTranscript, setSavingTranscript] = useState(false)
   const recorder = useRef<MediaRecorder | null>(null)
@@ -194,7 +199,7 @@ export function RecordingWidget({
     setSyncedTranscript("")
     setItems([])
     setStatus("")
-  }, [activeScreen, session?.session_id])
+  }, [activeScreen, session?.session_id, setStatus])
 
   async function transcribe(file: File, id: string, requestSession = session, epoch = recordingEpoch.current) {
     if (!auth || !requestSession) return
@@ -215,7 +220,7 @@ export function RecordingWidget({
           setSyncedTranscript("")
           setStatus(pictureIsUploading ? "Transcript queued for the uploading picture." : "Transcript saved to the active picture.")
         } catch (error) {
-          setStatus(error instanceof Error ? error.message : "Picture transcript could not be saved.")
+          setStatus(error instanceof Error ? error.message : "Picture transcript could not be saved.", true)
         }
       } else {
         const nextTranscript = appendText(transcriptRef.current, text)
@@ -238,7 +243,7 @@ export function RecordingWidget({
             : item,
         ),
       )
-      setStatus("Transcription failed.")
+      setStatus("Transcription failed.", true)
       // Retry and delete controls live in the popup.
       onOpenChange(true)
     }
@@ -246,15 +251,15 @@ export function RecordingWidget({
 
   async function startRecording() {
     if (!auth || !session) {
-      setStatus("Create or load a session first.")
+      setStatus("Create or load a session first.", true)
       return
     }
     if (!window.isSecureContext) {
-      setStatus("Microphone access requires HTTPS or localhost. This page is using insecure HTTP.")
+      setStatus("Microphone access requires HTTPS or localhost. This page is using insecure HTTP.", true)
       return
     }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setStatus("Recording is not supported by this browser.")
+      setStatus("Recording is not supported by this browser.", true)
       return
     }
     let stream: MediaStream
@@ -267,6 +272,7 @@ export function RecordingWidget({
           : error instanceof Error
             ? `Could not start recording: ${error.message}`
             : "Could not start recording.",
+        true,
       )
       return
     }
@@ -333,7 +339,7 @@ export function RecordingWidget({
       onSessionChange(data.session)
       setStatus("Transcript saved. You can now extract facts.")
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Could not save transcript.")
+      setStatus(error instanceof Error ? error.message : "Could not save transcript.", true)
     } finally {
       setSavingTranscript(false)
     }
@@ -408,7 +414,7 @@ export function RecordingWidget({
         setStatus("Content regenerated.")
       }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Agent action failed.")
+      setStatus(error instanceof Error ? error.message : "Agent action failed.", true)
     } finally {
       setSubmitting(false)
     }
@@ -588,7 +594,10 @@ export function RecordingWidget({
             </ul>
           )}
 
-          {status && <p className="mt-3 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">{status}</p>}
+          {status && <p role={statusError ? "alert" : "status"}
+            className={`mt-3 rounded-md px-3 py-2 text-xs ${statusError ? "border border-destructive/30 bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>
+            {status}
+          </p>}
           </>}
         </section>
       )}

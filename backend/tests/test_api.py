@@ -295,3 +295,31 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["error_code"], "invalid_state_transition")
+
+
+class JobErrorMessageTests(unittest.TestCase):
+    def test_missing_required_fields_during_revision_explain_how_to_recover(self) -> None:
+        from backend.app.api.step_02_routes import _session_job_error_message
+        from backend.app.errors import DraftValidationError, ErrorDetail
+        error = DraftValidationError("Draft validation failed with 2 error(s).", details=[
+            ErrorDetail(sheet="ACF_fields_schema", row=2, column=key,
+                        error_code="missing_required_field", message="Required ACF source field is empty.")
+            for key in ("product_heading_27", "technical_summary_81")
+        ])
+        message = _session_job_error_message(error, "draft_chat")
+        self.assertIn("Regenerate draft on the Content screen", message)
+        self.assertIn("product_heading_27", message)
+        self.assertIn("technical_summary_81", message)
+        self.assertIn("replaces the full draft", message)
+        self.assertNotIn("Regenerate draft", _session_job_error_message(error, "generate"))
+
+    def test_other_validation_errors_keep_their_specific_guidance(self) -> None:
+        from backend.app.api.step_02_routes import _session_job_error_message
+        from backend.app.errors import DraftValidationError, ErrorDetail
+        error = DraftValidationError("Draft validation failed.", details=[
+            ErrorDetail(sheet="shared_fields_schema", row=2, column="page_title",
+                        error_code="maximum_characters_exceeded", message="Expected at most 60 characters; received 70.")
+        ])
+        message = _session_job_error_message(error, "draft_chat")
+        self.assertIn("page_title: Expected at most 60 characters", message)
+        self.assertNotIn("Regenerate draft", message)

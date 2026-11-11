@@ -94,6 +94,21 @@ or inserting a manual link rebuilds the payload and clears approval. The legacy
 See README for user behavior and `backend/tests/test_link_workflow.py` for tests
 with arbitrary post-type/field keys and an unrelated industry.
 
+## Required outputs added to older drafts
+
+Targeted generation extends the requested field scope with missing/empty required
+shared and eligible ACF outputs from the active workbook. Existing populated,
+unselected fields remain unchanged. Fact-derived outputs are filled locally;
+AI-generated outputs use the existing generation groups and filtered context.
+Link-only revisions also fill required outputs when necessary. Full validation
+still runs before saving, and failure preserves the saved draft. No placeholder
+values or client-specific field names are used to bypass required-field checks.
+`GET /{session_id}/draft-fields` returns eligible output descriptors from the active
+workbook with ownership checks. The frontend merges blank display slots with
+saved values; reading metadata does not persist placeholders. Newly configured
+fields are valid explicit revision targets. Manual draft edits use the current
+workbook when rebuilding the payload, so newly added fields are routed correctly.
+
 ## Workbook versus application ownership
 
 Client-owned sheets define post types, shared/ACF fields, SEO constraints,

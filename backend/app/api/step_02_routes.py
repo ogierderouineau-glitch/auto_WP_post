@@ -41,6 +41,7 @@ from backend.app.api.step_01_models import (
 from backend.config import V2_LANGUAGE_MODEL, get_active_client_id
 from backend.app.api.step_03_container import client_knowledge_gcs_uri
 from backend.app.errors import (
+    DraftValidationError,
     InvalidUploadError,
     SessionBusyError,
     SessionOwnershipError,
@@ -568,6 +569,12 @@ def create_router(
         _raise_if_session_job_active(session_id)
         return SessionResponse(session=service.insert_manual_link(session_id, **payload.model_dump()))
 
+    @router.get("/{session_id}/draft-fields")
+    async def draft_field_options(session_id: str) -> dict[str, Any]:
+        service = service_provider()
+        service.require_owner(session_id, get_active_client_id())
+        return service.draft_field_options(session_id)
+
     @router.put("/{session_id}/draft-fields", response_model=SessionResponse)
     async def update_draft_fields(
         session_id: str,
@@ -871,6 +878,23 @@ def _raise_if_session_job_active(
         )
 
 
+def _session_job_error_message(exc: Exception, operation: str) -> str:
+    if (
+        operation == "draft_chat" and isinstance(exc, DraftValidationError) and exc.details
+        and all(detail.error_code == "missing_required_field" for detail in exc.details)
+    ):
+        fields = ", ".join(dict.fromkeys(detail.column for detail in exc.details if detail.column))
+        return (
+            f"This draft is missing required fields: {fields}. "
+            "Use Regenerate draft on the Content screen to fill the required fields, "
+            "then try revising again. Regenerating replaces the full draft."
+        )
+    if isinstance(exc, V2Error) and exc.details:
+        details = "; ".join(f"{detail.column or detail.error_code}: {detail.message}" for detail in exc.details)
+        return f"{exc} {details}"
+    return str(exc)
+
+
 def _run_session_job(
     job_id: str,
     service_provider: Callable[[], ContentSessionService],
@@ -956,13 +980,7 @@ def _run_session_job(
         job["session"] = session.model_dump(mode="json")
         job["updated_at"] = datetime.now(timezone.utc).isoformat()
     except Exception as exc:
-        error_message = str(exc)
-        if isinstance(exc, V2Error) and exc.details:
-            detail_text = "; ".join(
-                f"{detail.column or detail.error_code}: {detail.message}"
-                for detail in exc.details
-            )
-            error_message = f"{error_message} {detail_text}"
+        error_message = _session_job_error_message(exc, operation)
         try:
             service.record_operation(
                 session_id,

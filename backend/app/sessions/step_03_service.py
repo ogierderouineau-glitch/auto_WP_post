@@ -1566,10 +1566,15 @@ class ContentSessionService:
             for field_id in revision_field_ids or []
             if field_id.startswith("acf:")
         }
+        derived_acf_fields = self._derive_acf_fields_from_facts(snapshot, session)
+        missing_shared_keys: set[str] = set()
+        missing_acf_keys: set[str] = set()
         if targeted_revision:
             available_field_ids = {
                 *(f"shared:{key}" for key in session.shared_fields),
                 *(f"acf:{key}" for key in session.acf_source_fields),
+                *(f"{scope.removesuffix('_fields')}:{row['field_key']}"
+                  for scope, rows in self._draft_field_options(snapshot, session).items() for row in rows),
             }
             invalid_field_ids = set(revision_field_ids or []) - available_field_ids
             if invalid_field_ids:
@@ -1578,6 +1583,25 @@ class ContentSessionService:
                 )
             shared_fields = dict(session.shared_fields)
             acf_source_fields = dict(session.acf_source_fields)
+            # Workbook updates can add required outputs to an existing draft.
+            # Fill only absent/empty required outputs, alongside the requested edit.
+            missing_shared_keys = {
+                row.field_key for row in snapshot.shared_fields
+                if row.enabled and row.required_for_output and row.include_in_ai_schema
+                and self.draft_validator._empty(shared_fields.get(row.field_key))
+            }
+            missing_acf_keys = {
+                row.field_key for row in snapshot.acf_fields
+                if row.enabled and row.post_type_key == session.post_type_key
+                and row.field_role != "input_fact" and row.required_for_output
+                and (row.include_in_ai_schema or row.field_key in derived_acf_fields)
+                and not (row.generation_stage == "payload_construction" and row.source_mode == "derived")
+                and self._acf_field_is_eligible(row, session)
+                and self.draft_validator._empty(acf_source_fields.get(row.field_key))
+            }
+            selected_shared_keys.update(missing_shared_keys)
+            selected_acf_keys.update(missing_acf_keys)
+            acf_source_fields.update({key: derived_acf_fields[key] for key in missing_acf_keys if key in derived_acf_fields})
         missing = self.clarification.missing_required_dependencies(snapshot, session)
         if missing:
             raise MissingRequiredFactsError(
@@ -1629,14 +1653,14 @@ class ContentSessionService:
                 row.list_name: tuple(snapshot.validation_family(row.list_name))
                 for row in snapshot.validation_values
             }
-            should_generate = (not link_placement_only) if targeted_revision else (not shared_fields or not acf_source_fields)
+            needs_required_generation = bool(missing_shared_keys or missing_acf_keys - derived_acf_fields.keys())
+            should_generate = (not link_placement_only or needs_required_generation) if targeted_revision else (not shared_fields or not acf_source_fields)
             if should_generate:
                 shared_rows = [
                     row for row in snapshot.shared_fields
                     if row.enabled and row.include_in_ai_schema
                     and (not targeted_revision or row.field_key in selected_shared_keys)
                 ]
-                derived_acf_fields = self._derive_acf_fields_from_facts(snapshot, session)
                 acf_rows = [
                     row for row in snapshot.acf_fields
                     if row.enabled
@@ -1728,6 +1752,16 @@ class ContentSessionService:
                             "selected_shared_field_keys": sorted(selected_shared_keys),
                             "selected_acf_field_keys": sorted(selected_acf_keys),
                             "unchecked_fields_must_not_change": True,
+                            "requested_field_ids": revision_field_ids or [],
+                            "additional_required_field_ids": sorted({
+                                *(f"shared:{key}" for key in missing_shared_keys),
+                                *(f"acf:{key}" for key in missing_acf_keys),
+                            }),
+                            "missing_field_instruction": (
+                                "Fill additional missing required fields using their workbook rules and existing facts. "
+                                "Apply the user's revision request to the originally requested fields. "
+                                "Preserve all other populated fields; do not invent missing facts."
+                            ),
                         }
                     model = build_generation_model(
                         rows,
@@ -3382,6 +3416,26 @@ class ContentSessionService:
         updated = SessionStateMachine(snapshot).transition(updated, "ready_to_publish")
         return self.repository.save(updated, expected_version=expected_version)
 
+    def draft_field_options(self, session_id: str) -> dict[str, list[dict[str, Any]]]:
+        return self._draft_field_options(self.knowledge.current(), self.repository.get(session_id))
+
+    @classmethod
+    def _draft_field_options(cls, snapshot: Any, session: ContentSession) -> dict[str, list[dict[str, Any]]]:
+        def describe(row: Any) -> dict[str, Any]:
+            return {
+                "field_key": row.field_key, "label": row.description_de or row.field_key,
+                "value_type": row.value_type, "required": row.required_for_output,
+                "acf_field_name": getattr(row, "acf_field_name", None) or row.field_key,
+                "html_pattern_keys": list(getattr(row, "html_pattern_keys", ())),
+            }
+        return {
+            "shared_fields": [describe(row) for row in snapshot.shared_fields if row.enabled and row.include_in_payload],
+            "acf_fields": [describe(row) for row in snapshot.acf_fields
+                           if row.enabled and row.post_type_key == session.post_type_key and row.field_role != "input_fact"
+                           and not (row.generation_stage == "payload_construction" and row.source_mode == "derived")
+                           and cls._acf_field_is_eligible(row, session)],
+        }
+
     def update_draft_fields(
         self,
         session_id: str,
@@ -3396,7 +3450,13 @@ class ContentSessionService:
         session = self.repository.get(session_id)
         if not session.wordpress_payload:
             raise DraftValidationError("Generate a draft before saving manual draft edits.")
-        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        snapshot = self.knowledge.current()
+        post_type = snapshot.post_type(session.post_type_key)
+        if post_type is None or not post_type.enabled:
+            raise UnknownPostTypeError(session.post_type_key)
+        session = session.model_copy(update={
+            "workbook_hash": snapshot.version.sha256, "wordpress_post_type": post_type.wp_post_type,
+        })
         updated_shared = {
             **session.shared_fields,
             **(shared_fields or {}),
