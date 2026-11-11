@@ -147,3 +147,14 @@
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes recording-wave {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .recording-wave-bar {
+    animation: recording-wave 850ms ease-in-out infinite;
+  }
+}

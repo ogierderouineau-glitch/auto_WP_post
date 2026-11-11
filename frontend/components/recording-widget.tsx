@@ -460,8 +460,8 @@ export function RecordingWidget({
             {[6, 12, 20, 14, 26, 30, 18, 28, 10, 22, 30, 16, 24, 12, 20, 8, 18, 26, 14, 10].map((h, index) => (
               <span
                 key={index}
-                className={`w-1 rounded-full bg-gold/70 ${recording ? "animate-pulse" : ""}`}
-                style={{ height: `${h}px` }}
+                className={`w-1 rounded-full bg-gold/70 ${recording ? "recording-wave-bar" : ""}`}
+                style={{ height: `${h}px`, animationDelay: `${index * -65}ms` }}
                 aria-hidden="true"
               />
             ))}

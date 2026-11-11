@@ -307,7 +307,7 @@ export function WordPressScreen({
                   className={`inline-flex w-full items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-semibold transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 ${postId ? "bg-destructive text-white" : "bg-confirm text-confirm-foreground"}`}
                 >
                   {activePublishAction === "create" ? <Loader2 className="size-4 animate-spin" /> : <CloudUpload className="size-4" />}
-                  {postId ? "Re-create Post" : "Create post"}
+                  {postId ? "Create new additional Post" : "Create post"}
                 </button>
                 {postId && (
                   <span
@@ -393,6 +393,7 @@ export function WordPressScreen({
                   </a>}
                   <button
                     id="s2p-wordpress-update-post"
+                    title={!canPublish ? "Approve the content before updating the post" : ""}
                     type="button"
                     onClick={() => runPublish({ targetPostId: Number(postId), partialUpdate: true })}
                     disabled={operation === "loading" || !canPublish || noChange}

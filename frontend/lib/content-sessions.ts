@@ -308,6 +308,25 @@ export async function loadRecentContentSessions(auth: ApiClientOptions, limit = 
   })
 }
 
+export type UsageReportRow = {
+  period: string
+  service: string
+  model: string
+  call_name: string
+  call_count: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  estimated_cost_usd: number
+  unknown_usage_calls: number
+}
+
+export async function loadUsageReport(auth: ApiClientOptions) {
+  return apiRequest<Record<"day" | "week" | "month", UsageReportRow[]>>("/api/content-sessions/_usage-report", auth, {
+    json: false,
+  })
+}
+
 export async function deleteContentSession(auth: ApiClientOptions, sessionId: string) {
   return apiRequest<{ deleted: number; deleted_ids: string[]; errors: Record<string, string> }>(
     "/api/content-sessions/delete",

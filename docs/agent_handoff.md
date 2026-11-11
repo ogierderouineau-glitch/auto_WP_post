@@ -72,6 +72,10 @@ only when usable. Media drag-and-drop reuses the existing uploader and backend
 validation. Template links come from the active post type's workbook configuration.
 See README for user-facing behavior and the configurable workbook test command.
 
+The recording widget animates its decorative bars as a staggered wave only while
+recording. Reduced-motion preferences keep them static; the existing Recording
+label remains visible. This is a recording indicator, not microphone-level data.
+
 ## Internal-link editing
 
 `selected_links` is the persisted session candidate list; `excluded_link_ids`
@@ -140,6 +144,16 @@ workbook with ownership checks. The frontend merges blank display slots with
 saved values; reading metadata does not persist placeholders. Newly configured
 fields are valid explicit revision targets. Manual draft edits use the current
 workbook when rebuilding the payload, so newly added fields are routed correctly.
+
+## Dev-only client usage report
+
+`GET /api/content-sessions/_usage-report` aggregates the stored per-call
+`ai_usage.calls` of the active client's sessions by day, ISO week and month (grouped
+by service, model and call name). It returns 404 when `RENDER` is set. The Other
+functions drawer shows its "All client uage report" button (label as requested) only when
+`NODE_ENV === "development"`; it opens a dialog. Each session keeps its last 500
+calls, so very large sessions undercount; calls without a timestamp are "undated".
+Tests: `backend/tests/test_usage_report.py`.
 
 ## Workbook versus application ownership
 

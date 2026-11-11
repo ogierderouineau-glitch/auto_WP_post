@@ -15,7 +15,7 @@ import traceback
 import uuid
 from time import perf_counter
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
 from backend.app.api.step_01_models import (
@@ -242,6 +242,12 @@ def create_router(
                 limit=limit,
             )
         }
+
+    @router.get("/_usage-report")
+    async def usage_report() -> dict[str, Any]:
+        if os.getenv("RENDER"):  # Development-only diagnostic report.
+            raise HTTPException(status_code=404, detail="Not found")
+        return service_provider().usage_report(user_id=get_active_client_id())
 
     @router.post("/delete")
     async def delete_sessions(

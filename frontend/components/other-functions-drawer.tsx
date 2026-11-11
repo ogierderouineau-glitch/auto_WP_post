@@ -21,9 +21,11 @@ import {
 import type { AuthResult } from "@/components/auth-modal"
 import {
   loadSessionJob,
+  loadUsageReport,
   saveSessionGenerationSettings,
   type ContentSession,
   type RecentSession,
+  type UsageReportRow,
   type WorkbookStatus,
 } from "@/lib/content-sessions"
 import { formatTimestamp } from "@/lib/utils"
@@ -120,6 +122,77 @@ function formatUsd(value: unknown) {
 
 function formatServiceName(value: string) {
   return value.replace(/^openai_/, "").replaceAll("_", " ")
+}
+
+const IS_DEV = process.env.NODE_ENV === "development"
+
+// Development-only: AI usage of every session of the active client, grouped by period.
+function ClientUsageReport({ auth }: { auth: AuthResult | null }) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  const [report, setReport] = useState<Awaited<ReturnType<typeof loadUsageReport>> | null>(null)
+  const [granularity, setGranularity] = useState<"day" | "week" | "month">("day")
+  const [state, setState] = useState<"idle" | "loading" | "error">("idle")
+  async function open() {
+    if (!auth) return
+    setState("loading")
+    try {
+      setReport(await loadUsageReport(auth))
+      setState("idle")
+      dialog.current?.showModal()
+    } catch {
+      setState("error")
+    }
+  }
+  const rows: UsageReportRow[] = report?.[granularity] ?? []
+  const total = (field: "estimated_cost_usd" | "call_count" | "total_tokens") => rows.reduce((sum, row) => sum + row[field], 0)
+  return (
+    <div className="mt-3">
+      <button type="button" onClick={open} disabled={!auth || state === "loading"} className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-60">
+        {state === "loading" ? "Generating…" : "All client uage report"}
+      </button>
+      {state === "error" ? <p className="mt-2 text-xs text-destructive">Could not load the report.</p> : null}
+      <dialog ref={dialog} aria-label="Client AI usage report" className="m-auto w-[calc(100%-2rem)] max-w-5xl rounded-xl border border-border bg-card p-5 text-foreground shadow-xl backdrop:bg-black/50">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">AI usage · {auth?.client.client_id}</h2>
+          <button type="button" onClick={() => dialog.current?.close()} className="rounded-md border border-border px-3 py-1 text-sm">Close</button>
+        </div>
+        <div className="mt-3 flex gap-2">
+          {(["day", "week", "month"] as const).map((name) => (
+            <button key={name} type="button" onClick={() => setGranularity(name)} aria-pressed={granularity === name}
+              className={`rounded-md border border-border px-3 py-1 text-sm capitalize ${granularity === name ? "bg-ai text-ai-foreground" : ""}`}>{name}</button>
+          ))}
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">
+          Total: {formatUsd(total("estimated_cost_usd"))} · {formatInteger(total("call_count"))} calls · {formatInteger(total("total_tokens"))} tokens.
+          Each session keeps its last 500 calls, so older calls of very large sessions are missing.
+        </p>
+        <div className="mt-3 max-h-[60vh] overflow-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="sticky top-0 bg-card">
+              <tr>{["Period", "Service", "Model", "Call", "Calls", "Input", "Output", "Total", "Cost", "No price"].map((title) => <th key={title} className="px-2 py-1 font-semibold">{title}</th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={[row.period, row.service, row.model, row.call_name].join("|")} className="border-t border-border">
+                  <td className="px-2 py-1">{row.period}</td>
+                  <td className="px-2 py-1">{formatServiceName(row.service)}</td>
+                  <td className="px-2 py-1">{row.model}</td>
+                  <td className="px-2 py-1">{row.call_name}</td>
+                  <td className="px-2 py-1">{formatInteger(row.call_count)}</td>
+                  <td className="px-2 py-1">{formatInteger(row.prompt_tokens)}</td>
+                  <td className="px-2 py-1">{formatInteger(row.completion_tokens)}</td>
+                  <td className="px-2 py-1">{formatInteger(row.total_tokens)}</td>
+                  <td className="px-2 py-1">{formatUsd(row.estimated_cost_usd)}</td>
+                  <td className="px-2 py-1">{formatInteger(row.unknown_usage_calls)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length === 0 ? <p className="py-3 text-sm text-muted-foreground">No AI usage recorded yet.</p> : null}
+        </div>
+      </dialog>
+    </div>
+  )
 }
 
 function UsageSummary({ usage }: { usage: Record<string, unknown> }) {
@@ -445,6 +518,7 @@ export function OtherFunctionsDrawer({
             ) : (
               <p className="text-sm text-muted-foreground">No AI usage recorded for this session yet.</p>
             )}
+            {IS_DEV ? <ClientUsageReport auth={auth} /> : null}
           </Section>
 
           <Section title="Operations log" icon={<FileClock className="size-4 text-gold" aria-hidden="true" />}>

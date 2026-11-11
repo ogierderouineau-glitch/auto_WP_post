@@ -280,6 +280,43 @@ class ContentSessionService:
             return True
         return session.user_id in cls._user_id_candidates(user_id)
 
+    def usage_report(self, *, user_id: str | None) -> dict[str, list[dict[str, Any]]]:
+        """Aggregate stored per-call AI usage by day/week/month, service, model and call name."""
+        rows: dict[str, dict[tuple[str, ...], dict[str, Any]]] = {"day": {}, "week": {}, "month": {}}
+        for session in self.repository.list():
+            if user_id and not self._matches_user_scope(session, user_id):
+                continue
+            for call in (session.ai_usage or {}).get("calls") or []:
+                try:
+                    moment = datetime.fromisoformat(str(call.get("updated_at")))
+                except ValueError:
+                    moment = None
+                iso = moment.isocalendar() if moment else None
+                periods = {
+                    "day": moment.date().isoformat() if moment else "undated",
+                    "week": f"{iso.year}-W{iso.week:02d}" if iso else "undated",
+                    "month": moment.strftime("%Y-%m") if moment else "undated",
+                }
+                cost = call.get("estimated_cost_usd")
+                for granularity, period in periods.items():
+                    key = (period, str(call.get("service")), str(call.get("model")), str(call.get("call_name")))
+                    row = rows[granularity].setdefault(key, {
+                        "period": period, "service": key[1], "model": key[2], "call_name": key[3],
+                        "call_count": 0, "prompt_tokens": 0, "completion_tokens": 0,
+                        "total_tokens": 0, "estimated_cost_usd": 0.0, "unknown_usage_calls": 0,
+                    })
+                    row["call_count"] += 1
+                    for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                        row[field] += int(call.get(field) or 0)
+                    if cost is None:
+                        row["unknown_usage_calls"] += 1
+                    else:
+                        row["estimated_cost_usd"] = round(row["estimated_cost_usd"] + float(cost), 8)
+        return {
+            name: sorted(values.values(), key=lambda row: row["period"], reverse=True)
+            for name, values in rows.items()
+        }
+
     def list_recent(
         self,
         *,
