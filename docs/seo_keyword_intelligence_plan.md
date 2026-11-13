@@ -38,7 +38,11 @@ selection. With no selection, the AI chooses keywords itself and records them.
 ## Data sources
 
 ### 1. WordPress scan
-- Scan the REST collection of the session's configured `wp_post_type`, plus the
+- Scan the posts of the session's post type, **including legacy posts written before
+  the automation**. Several post types share one `wp_post_type` (for the pilot all
+  use `post`), so they are told apart by category: a post counts when it has a
+  category whose name equals the post type's `display_name_de` or `wp_category_name`
+  (exact match, case-insensitive; clients correct names in the workbook). Plus the
   service pages listed in the **internal links tab** (`internal_links_database`):
   rows whose `category` is the client's service category, **regardless of
   `post_type_key`** ([InternalLinkRecord](../backend/app/knowledge_base/step_01_models.py)
@@ -80,8 +84,9 @@ selection. With no selection, the AI chooses keywords itself and records them.
    Both return plain typed rows; each is unit-tested with mocked HTTP.
 3. **Plugin:** update the REST compat plugin once, exposing a broad set of Yoast
    meta so it does not need touching again. Register them for every REST-enabled
-   post type, bump the version and update its README. Fields marked read-only get an
-   `auth_callback` that allows reading but no app writes.
+   post type, bump the version and update its README. The app only reads these
+   keys; the plugin keeps the same `edit_posts` permission as the existing keys so
+   Yoast's own editor saving is not affected.
    - Needed now (read-only): `_yoast_wpseo_focuskw` (focus keyphrase).
    - Likely useful soon (read-only): `_yoast_wpseo_keywordsynonyms`,
      `_yoast_wpseo_focuskeywords` (related keyphrases, Premium, JSON string),

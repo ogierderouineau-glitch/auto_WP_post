@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Speech2Post REST Compatibility
- * Description: Exposes the V2 workbook Yoast/Open Graph destinations through WordPress REST.
- * Version: 0.1.0
+ * Description: Exposes the V2 workbook Yoast/Open Graph destinations and read-only Yoast SEO data through WordPress REST.
+ * Version: 0.2.0
  * Author: Speech2Post
  */
 
@@ -32,6 +32,44 @@ function speech2post_register_yoast_rest_meta(): void {
     }
 }
 add_action('init', 'speech2post_register_yoast_rest_meta');
+
+/**
+ * Expose Yoast SEO data for every REST-enabled post type so the app can scan
+ * existing keyphrases. The app only reads these keys. Add future keys here.
+ */
+function speech2post_register_yoast_seo_scan_meta(): void {
+    $keys = [
+        '_yoast_wpseo_focuskw',
+        '_yoast_wpseo_keywordsynonyms',
+        '_yoast_wpseo_focuskeywords',
+        '_yoast_wpseo_title',
+        '_yoast_wpseo_metadesc',
+        '_yoast_wpseo_linkdex',
+        '_yoast_wpseo_content_score',
+        '_yoast_wpseo_is_cornerstone',
+        '_yoast_wpseo_canonical',
+        '_yoast_wpseo_meta-robots-noindex',
+        '_yoast_wpseo_primary_category',
+        '_yoast_wpseo_twitter-title',
+        '_yoast_wpseo_twitter-description',
+        '_yoast_wpseo_opengraph-image',
+        '_yoast_wpseo_bctitle',
+    ];
+
+    foreach (get_post_types(['show_in_rest' => true], 'names') as $post_type) {
+        foreach ($keys as $key) {
+            register_post_meta($post_type, $key, [
+                'type' => 'string',
+                'single' => true,
+                'show_in_rest' => true,
+                'auth_callback' => static function (): bool {
+                    return current_user_can('edit_posts');
+                },
+            ]);
+        }
+    }
+}
+add_action('init', 'speech2post_register_yoast_seo_scan_meta', 20);
 
 /**
  * Synchronize workbook-friendly REST keys to Yoast's native Open Graph keys.

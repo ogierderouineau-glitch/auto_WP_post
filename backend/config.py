@@ -40,6 +40,10 @@ class WordPressClientConfig:
     wp_app_password: str
     session_prefix: str
     knowledge_workbook: str
+    # Optional SEO sources; empty means the source is skipped for this client.
+    search_console_property: str = ""
+    search_console_credentials_file: str = ""
+    service_link_category: str = ""
 
 
 def _required_string(record: dict[str, Any], key: str, context: str) -> str:
@@ -109,6 +113,11 @@ def _load_clients() -> tuple[dict[str, WordPressClientConfig], Path | None]:
                 "knowledge_workbook": value.get("knowledge_workbook"),
             }
 
+        search_console = value.get("search_console")
+        search_console = search_console if isinstance(search_console, dict) else {}
+        seo = value.get("seo")
+        seo = seo if isinstance(seo, dict) else {}
+
         import_key = _required_string(value, "import_api_key", f"clients.{client_id}")
         if import_key in import_keys:
             raise RuntimeError(f"Duplicate import_api_key in {path}.")
@@ -134,6 +143,15 @@ def _load_clients() -> tuple[dict[str, WordPressClientConfig], Path | None]:
                 f"clients.{client_id}.storage",
                 f"clients/{client_id}/knowledge/current.xlsm",
             ).strip("/"),
+            search_console_property=_string_or_default(
+                search_console, "property_url", f"clients.{client_id}.search_console", ""
+            ),
+            search_console_credentials_file=_string_or_default(
+                search_console, "credentials_file", f"clients.{client_id}.search_console", ""
+            ),
+            service_link_category=_string_or_default(
+                seo, "service_link_category", f"clients.{client_id}.seo", ""
+            ),
         )
     return clients, path
 

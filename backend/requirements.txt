@@ -5,4 +5,5 @@ requests==2.34.2
 Pillow==12.3.0
 openai==2.45.0
 openpyxl==3.1.5
+google-auth==2.62.1
 google-cloud-storage==3.13.0

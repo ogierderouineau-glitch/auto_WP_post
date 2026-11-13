@@ -5,7 +5,13 @@ without weakening the workbook contract:
 
 - exposes `yoast_wpseo_opengraph_title` through REST;
 - exposes `yoast_wpseo_opengraph_description` through REST;
-- synchronizes the friendly REST keys to Yoast native Open Graph meta keys.
+- synchronizes the friendly REST keys to Yoast native Open Graph meta keys;
+- (0.2.0) exposes Yoast SEO meta for every REST-enabled post type so Speech2Post
+  can scan existing focus keyphrases. Keys: focus keyphrase, keyword synonyms,
+  related keyphrases (Premium), SEO title, meta description, SEO and readability
+  scores, cornerstone, canonical, noindex, primary category, Twitter title and
+  description, Open Graph image, breadcrumb title. The app only reads them. The
+  list lives in `speech2post_register_yoast_seo_scan_meta()`.
 
 ## Install on staging
 

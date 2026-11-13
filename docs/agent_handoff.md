@@ -326,6 +326,11 @@ shared model choices. Responses schemas and prompts are unchanged. See README
 for cost-estimate limitations and the Sol promotional pricing expiry. Regression
 coverage is in `backend/tests/test_model_migration.py`.
 
+Local dev workbook (2026-11-13): `data/knowledge/flairlab workbook-DEV.xlsm`; run
+workbook tests with `V2_TEST_WORKBOOK` pointing at it (261 passed, the same 8 known
+failures). The app itself still loads `{client_id}.xlsm`, so that file name is not
+picked up automatically.
+
 Migration validation: 11 targeted checks passed; frontend typecheck and lint
 passed (38 existing warnings). Full V9 workbook suite: 247 passed, 8 known
 failures (3 workbook expectations, 2 production-auth checks, 3 image-metadata

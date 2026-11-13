@@ -1,7 +1,8 @@
 # Workbook audit: which tabs and columns are really integrated
 
 **Status: read-only findings, nothing has been changed.** Audited 2026-11-11 on
-`data/knowledge/FLAIRLAB V9.xlsm` (17 sheets), against the loader, models,
+`FLAIRLAB V9.xlsm` (17 sheets; since replaced locally by
+`data/knowledge/flairlab workbook-DEV.xlsm`), against the loader, models,
 validator, context builder, prompts and services under `backend/app/`. This is
 input for the workbook documentation and cleanup step in
 [google_drive_workbooks_proposal.md](google_drive_workbooks_proposal.md).
@@ -142,6 +143,6 @@ post type (no ACF rows). Keep documented; decide per case whether to test or dro
    field has no documented consumer, so the doc cannot drift.
 
 Changing required columns affects the other client workbooks, so each change should
-be checked against every client's workbook (only the pilot's V9 and an older
-`FLAIRLAB_EventPost_Master_Knowledge.xlsm` exist locally) and loaded with the
+be checked against every client's workbook (only the pilot's
+`flairlab workbook-DEV.xlsm` exists locally) and loaded with the
 existing validator before merging.

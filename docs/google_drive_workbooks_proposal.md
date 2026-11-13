@@ -48,7 +48,8 @@ KnowledgeBaseService swaps snapshot   keep last good snapshot,
 Why this shape:
 
 - **No new parsing code.** The export is an ordinary `.xlsx`; the loader and
-  validator stay untouched. I checked the current workbook (`FLAIRLAB V9.xlsm`):
+  validator stay untouched. I checked the then-current workbook (`FLAIRLAB V9.xlsm`, since replaced by
+  `flairlab workbook-DEV.xlsm`):
   17 sheets, ~4,900 cells, no macros (no `vbaProject.bin`), longest cell 4,960
   characters (Sheets allows 50,000), 26 formulas (exports carry computed values),
   dropdown validations (carried over by Sheets). Fidelity should be fine, but verify
