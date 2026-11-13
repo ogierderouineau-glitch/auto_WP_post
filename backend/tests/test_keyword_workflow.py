@@ -34,8 +34,8 @@ class FakeScanner:
         self.scanned_with = category_ids
         return self.collection
 
-    def find_by_url(self, url):
-        return self.service.get(url)
+    def find_by_urls(self, urls):
+        return {url: self.service.get(url) for url in urls}
 
 
 class FakeSearchConsole:

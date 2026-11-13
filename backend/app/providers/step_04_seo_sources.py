@@ -76,11 +76,6 @@ def _entry(record: dict[str, Any], post_type: str = "") -> SiteEntry:
     )
 
 
-def _same_url(left: str, right: str) -> bool:
-    """Compare paths only: the client's staging and live domains mirror each other."""
-    return urlparse(left.strip()).path.rstrip("/") == urlparse(right.strip()).path.rstrip("/")
-
-
 class WordPressSiteScanner:
     """Read-only REST scan using one client's own WordPress credentials."""
 
@@ -100,6 +95,12 @@ class WordPressSiteScanner:
         self._headers = {"Authorization": f"Basic {token}"}
         self._session = session or requests.Session()
         self._timeout = timeout
+        self._types: dict[str, Any] | None = None  # per scanner, so per run
+
+    def _get_types(self) -> dict[str, Any]:
+        if self._types is None:
+            self._types = self._get("/types", {"context": "edit"}).json()
+        return self._types
 
     def _get(self, path: str, params: dict[str, Any]) -> requests.Response:
         response = self._session.get(
@@ -112,7 +113,7 @@ class WordPressSiteScanner:
     def rest_base_for(self, wp_post_type: str) -> str:
         """The REST collection name WordPress reports for a post type (for example
         `page` is served at `pages`)."""
-        for type_info in self._get("/types", {"context": "edit"}).json().values():
+        for type_info in self._get_types().values():
             if type_info.get("slug") == wp_post_type and type_info.get("rest_base"):
                 return str(type_info["rest_base"])
         return wp_post_type
@@ -156,25 +157,31 @@ class WordPressSiteScanner:
             page += 1
         return entries
 
-    def find_by_url(self, url: str) -> SiteEntry | None:
-        """Resolve a URL to an entry by slug across the site's viewable REST types."""
-        slug = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
-        if not slug:
-            return None
-        types = self._get("/types", {"context": "edit"}).json()
-        for type_info in types.values():
+    def find_by_urls(self, urls: list[str]) -> dict[str, SiteEntry | None]:
+        """Resolve URLs by slug with one request per viewable REST type. Matching is on
+        the URL path, since staging and live domains mirror each other."""
+        slugs = {url: urlparse(url).path.rstrip("/").rsplit("/", 1)[-1] for url in urls}
+        wanted = sorted({slug for slug in slugs.values() if slug})
+        found: dict[str, SiteEntry] = {}
+        for type_info in self._get_types().values() if wanted else ():
             if type_info.get("viewable") is False or not type_info.get("rest_base"):
                 continue
             response = self._get(
                 f"/{type_info['rest_base']}",
-                {"slug": slug, "status": "publish", "context": "edit", "_fields": SCAN_FIELDS},
+                {"slug": ",".join(wanted), "per_page": 100, "status": "publish",
+                 "context": "edit", "_fields": SCAN_FIELDS},
             )
             if response.status_code == 400:
                 continue
             for item in response.json():
-                if _same_url(str(item.get("link") or ""), url):
-                    return _entry(item, str(type_info.get("slug") or ""))
-        return None
+                found.setdefault(
+                    urlparse(str(item.get("link") or "")).path.rstrip("/"),
+                    _entry(item, str(type_info.get("slug") or "")),
+                )
+        return {url: found.get(urlparse(url).path.rstrip("/")) for url in urls}
+
+    def find_by_url(self, url: str) -> SiteEntry | None:
+        return self.find_by_urls([url])[url]
 
 
 def _month_start(day: date, months_back: int) -> date:

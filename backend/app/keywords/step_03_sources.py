@@ -67,18 +67,17 @@ class SeoSources:
         snapshot.entries.extend(entries)
 
         if self._service_category:
-            unresolved = 0
-            for row in internal_links:
-                if (
-                    row.category.strip().lower() != self._service_category
-                    or not row.active
-                    or not row.target_url.startswith("http")
-                ):
-                    continue
-                found = scanner.find_by_url(row.target_url)
-                if found is None:
-                    unresolved += 1
-                elif (found.wp_id, found.post_type) not in seen:
+            urls = [
+                row.target_url
+                for row in internal_links
+                if row.category.strip().lower() == self._service_category
+                and row.active
+                and row.target_url.startswith("http")
+            ]
+            resolved = scanner.find_by_urls(urls)
+            unresolved = sum(1 for url in urls if resolved.get(url) is None)
+            for found in resolved.values():
+                if found is not None and (found.wp_id, found.post_type) not in seen:
                     seen.add((found.wp_id, found.post_type))
                     snapshot.entries.append(found)
             if unresolved:

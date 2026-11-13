@@ -37,7 +37,7 @@ class FakeWordPress:
                 [{"id": 5, "name": "Events"}, {"id": 6, "name": "auto event post"}, {"id": 8, "name": "Eventually"}]
             )
         if url.endswith("/pages"):
-            if params.get("slug") == "tax-advice":
+            if "tax-advice" in str(params.get("slug", "")).split(","):
                 return FakeResponse(
                     [{"id": 7, "type": "page", "slug": "tax-advice", "title": {"raw": "Tax advice"},
                       "link": "https://www.example.com/tax-advice/", "meta": {}}]
@@ -100,6 +100,17 @@ class WordPressSiteScannerTests(unittest.TestCase):
         self.assertEqual((entry.wp_id, entry.post_type), (7, "page"))
         self.assertFalse(any(url.endswith("/media") for url, _ in self.session.calls))
         self.assertIsNone(self.scanner.find_by_url("https://example.com/unknown"))
+
+    def test_many_urls_use_one_request_per_type(self):
+        self.session.calls.clear()
+        found = self.scanner.find_by_urls(
+            ["https://a.example/tax-advice", "https://a.example/missing", "https://a.example/x/"]
+        )
+        self.assertEqual(found["https://a.example/tax-advice"].wp_id, 7)
+        self.assertIsNone(found["https://a.example/missing"])
+        slug_calls = [c for c in self.session.calls if "slug" in c[1]]
+        self.assertEqual(len(slug_calls), 3)  # post, workshop, page; media is not viewable
+        self.assertEqual(sum(1 for c in self.session.calls if c[0].endswith("/types")), 1)
 
     def test_http_error_is_reported(self):
         self.session.get = lambda *a, **k: FakeResponse({}, 401)
