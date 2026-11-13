@@ -167,8 +167,11 @@ optional (`search_console` in `clients.json`, see deployment.md) and its failure
 reported in `keyword_proposal.notes`. `backend/app/keywords/step_02_service.py` makes one
 structured call and verifies the answer in code. The result is stored in
 `session.keyword_proposal`; `PUT /{session_id}/keywords/selection` stores
-`session.selected_keywords` (up to 12). Generation and link scoring do not use the
-selection yet. Plan: [seo_keyword_intelligence_plan.md](seo_keyword_intelligence_plan.md).
+`session.selected_keywords` (up to 12). Generation adds `selected_keywords`,
+`keyword_alternatives` and `keyword_conflicts` (site-wide focus keyphrase → URLs, the
+post's own URL excluded) to every generation payload once a proposal or selection
+exists; the client's workbook instructions (`client_010`, `client_015` for the pilot)
+decide how to use them. Link scoring does not use the selection yet. Plan: [seo_keyword_intelligence_plan.md](seo_keyword_intelligence_plan.md).
 Tests: `test_seo_sources.py`, `test_keyword_service.py`, `test_keyword_workflow.py`.
 
 ## Workbook versus application ownership

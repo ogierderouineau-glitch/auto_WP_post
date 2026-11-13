@@ -169,19 +169,20 @@ language-specific project, so the plan does not attempt one.
 Client rules live in the client's workbook, not in code. The app will give the
 generation context three new keys when a keyword proposal or selection exists:
 `selected_keywords` (ordered; the first one is the focus keyphrase),
-`keyword_alternatives` (keyword → variants) and `keyword_conflicts` (focus keyphrases
-already used on other URLs, own URL excluded). The condition must be `always`
+`keyword_alternatives` (keyword → variants) and `keyword_conflicts` (every focus
+keyphrase found on the site scan → the URLs using it, the post's own URL excluded;
+present whenever a proposal ran). The condition must be `always`
 (context only understands `always` or a content signal).
 
 **1. Replace the text of `client_010`.** It refers to `keyword_register`, which the
 app does not provide:
 
-> Wenn keyword_conflicts im Kontext verfügbar ist: eine Fokus-Keyphrase, die dort als
-> Fokus einer anderen URL belegt ist (status focus_elsewhere), nicht erneut als Fokus
-> wählen; stattdessen eine Alternative aus keyword_alternatives oder ein anderes
-> Keyword verwenden. Die Verwendung eines Begriffs nur als Textbegriff
-> (mentioned_elsewhere) sperrt keinen neuen Fokus. Kein Fokus-Zwang bei fehlender
-> Relevanz. Für Barkeeper-Profile gilt die profilspezifische Buchungsregel.
+> Wenn keyword_conflicts (Zuordnung Fokus-Keyphrase zu URLs) im Kontext verfügbar ist:
+> eine Fokus-Keyphrase, die dort bereits als Fokus einer anderen URL belegt ist, nicht
+> erneut als Fokus wählen; stattdessen eine Alternative aus keyword_alternatives oder
+> ein anderes Keyword verwenden. Die Verwendung eines Begriffs nur als Textbegriff sperrt
+> keinen neuen Fokus. Kein Fokus-Zwang bei fehlender Relevanz. Für Barkeeper-Profile
+> gilt die profilspezifische Buchungsregel.
 
 **2. New row `client_015`** (scope `global`, post_type_key `*`, workflow_stage
 `generation`, applies_to `focus_keyword`, owner `language_model`, priority `high`,
