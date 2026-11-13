@@ -9,6 +9,7 @@ import os
 import re
 from datetime import date, datetime, timezone
 from typing import Any, Callable, Literal
+from urllib.parse import urlparse
 from pathlib import Path
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -310,6 +311,7 @@ class ContentSessionService:
                     "scanned_pages": len(snapshot.entries),
                     "sources": snapshot.sources,
                     "notes": snapshot.notes,
+                    "focus_keyphrases": self._focus_keyphrase_urls(snapshot.entries),
                 },
                 # Proposed keywords may change; keep only selections that still exist.
                 "selected_keywords": [
@@ -319,6 +321,46 @@ class ContentSessionService:
             }
         )
         return self.repository.save(updated, expected_version=expected_version)
+
+    @staticmethod
+    def _focus_keyphrase_urls(entries: list[Any]) -> dict[str, list[str]]:
+        """Focus keyphrase -> URLs using it, as read from the site scan."""
+        taken: dict[str, list[str]] = {}
+        for entry in entries:
+            if entry.focus_keyphrase:
+                taken.setdefault(entry.focus_keyphrase, []).append(entry.url)
+        return taken
+
+    def _keyword_context(self, session: ContentSession, current_url: str | None = None) -> dict[str, Any]:
+        """Keyword inputs for generation; empty when no proposal or selection exists."""
+        proposal = session.keyword_proposal or {}
+        if not proposal and not session.selected_keywords:
+            return {}
+        context: dict[str, Any] = {}
+        if session.selected_keywords:
+            alternatives = {
+                normalize_phrase(row["keyword"]): row.get("alternatives") or []
+                for row in proposal.get("rows") or []
+            }
+            context["selected_keywords"] = list(session.selected_keywords)
+            context["keyword_alternatives"] = {
+                keyword: alternatives[normalize_phrase(keyword)]
+                for keyword in session.selected_keywords
+                if alternatives.get(normalize_phrase(keyword))
+            }
+        own = {
+            urlparse(url).path.rstrip("/")
+            for url in (current_url, session.wordpress_result.get("view_url"))
+            if url
+        }
+        conflicts = {
+            phrase: [url for url in urls if urlparse(url).path.rstrip("/") not in own]
+            for phrase, urls in (proposal.get("focus_keyphrases") or {}).items()
+        }
+        conflicts = {phrase: urls for phrase, urls in conflicts.items() if urls}
+        if conflicts:
+            context["keyword_conflicts"] = conflicts
+        return context
 
     def select_keywords(
         self, session_id: str, *, keywords: list[str], expected_version: int
@@ -1852,6 +1894,7 @@ class ContentSessionService:
                         field_keys=field_keys,
                     )
                     context_payload = context.model_dump(by_alias=True)
+                    context_payload.update(self._keyword_context(session, current_url))
                     if targeted_revision:
                         context_payload["examples"] = []
                     if not targeted_revision:

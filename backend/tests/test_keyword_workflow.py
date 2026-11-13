@@ -160,3 +160,70 @@ def test_selection_is_validated_stored_and_pruned_on_new_proposal(tmp_path):
     )
     refreshed = service.propose_keywords(selected.session_id, expected_version=selected.version)
     assert refreshed.selected_keywords == ["solar battery"]  # the free-text one is not in the new list
+
+
+def with_proposal(service, session, selected):
+    proposal = {
+        "rows": [{"keyword": "solar battery", "alternatives": ["home storage"], "status": "free",
+                  "related_urls": [], "rationale": ""}],
+        "focus_keyphrases": {
+            "Heat pump": ["https://energy.example/heat/"],
+            "Roof solar": ["https://energy.example/own/", "https://energy.example/other/"],
+        },
+    }
+    return service.repository.save(
+        session.model_copy(update={"keyword_proposal": proposal, "selected_keywords": selected}),
+        expected_version=session.version,
+    )
+
+
+def test_generation_context_carries_selection_alternatives_and_conflicts(tmp_path):
+    service, session = build(tmp_path, scanner=FakeScanner())
+    session = with_proposal(service, session, ["Solar  Battery", "my own phrase"])
+    context = service._keyword_context(session, current_url="https://www.energy.example/own")
+    assert context["selected_keywords"] == ["Solar  Battery", "my own phrase"]
+    assert context["keyword_alternatives"] == {"Solar  Battery": ["home storage"]}
+    # the post's own URL is not a conflict when it is being updated
+    assert context["keyword_conflicts"] == {
+        "Heat pump": ["https://energy.example/heat/"],
+        "Roof solar": ["https://energy.example/other/"],
+    }
+
+
+def test_generation_context_without_selection_still_lists_conflicts(tmp_path):
+    service, session = build(tmp_path, scanner=FakeScanner())
+    session = with_proposal(service, session, [])
+    context = service._keyword_context(session)
+    assert "selected_keywords" not in context and "keyword_conflicts" in context
+
+
+def test_generation_context_is_empty_without_any_keyword_work(tmp_path):
+    service, session = build(tmp_path, scanner=FakeScanner())
+    assert service._keyword_context(session) == {}
+
+
+class CapturingModel:
+    def __init__(self):
+        self.payloads = []
+
+    def structured(self, *, task, context, schema):
+        import json
+
+        self.payloads.append(json.loads(context["messages"][1]["content"])["context"])
+        return schema.model_validate({name: "draft" for name in schema.model_fields})
+
+
+def test_keywords_reach_the_generation_model_call(tmp_path):
+    service, session = build(tmp_path, scanner=FakeScanner())
+    model = CapturingModel()
+    service.language_model = service.revision_language_model = model
+    session = with_proposal(service, session, ["solar battery"])
+    service.generate(
+        session.session_id, shared_fields={}, acf_source_fields={}, selected_links=[],
+        current_url=None, expected_version=session.version,
+    )
+    assert model.payloads
+    for payload in model.payloads:
+        assert payload["selected_keywords"] == ["solar battery"]
+        assert payload["keyword_alternatives"] == {"solar battery": ["home storage"]}
+        assert "Heat pump" in payload["keyword_conflicts"]
