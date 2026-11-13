@@ -74,13 +74,20 @@ class InternalLinkService:
         source_text: str,
         context_tags: tuple[str, ...] = (),
         content_signals: tuple[str, ...] = (),
+        keywords: tuple[str, ...] = (),
         maximum: int | None = None,
     ) -> list[dict[str, str]]:
-        """Rank curated candidates without an extra language-model request."""
+        """Rank curated candidates without an extra language-model request.
+
+        `keywords` are the user's selected SEO keywords (and their alternatives); they
+        weigh more than the general source text because they state the post's focus.
+        """
 
         haystack = self._search_terms(
             " ".join((source_text, *context_tags, *content_signals))
         )
+        keyword_haystack = self._search_terms(" ".join(keywords))
+        keyword_text = " ".join(keywords).casefold()
         priority_score = {"high": 3, "medium": 2, "low": 1}
         scored: list[tuple[int, int, str, InternalLinkRecord]] = []
         for row in eligible.candidates:
@@ -108,7 +115,13 @@ class InternalLinkService:
                 )
                 if phrase and phrase.casefold() in source_text.casefold()
             )
-            score = overlap * 2 + phrase_bonus
+            keyword_overlap = len(keyword_haystack.intersection(keyword_terms))
+            keyword_bonus = sum(
+                6
+                for phrase in (row.keyword, row.anchor_text, *row.anchor_variants)
+                if phrase and keyword_text and phrase.casefold() in keyword_text
+            )
+            score = overlap * 2 + phrase_bonus + keyword_overlap * 3 + keyword_bonus
             scored.append((score, priority_score.get(row.priority, 0), row.link_id, row))
         scored.sort(key=lambda item: (-item[0], -item[1], item[2]))
         limit = maximum if maximum is not None else len(scored)

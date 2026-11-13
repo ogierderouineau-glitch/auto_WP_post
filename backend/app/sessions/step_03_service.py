@@ -311,8 +311,9 @@ class ContentSessionService:
                     "scanned_pages": len(snapshot.entries),
                     "sources": snapshot.sources,
                     "notes": snapshot.notes,
-                    "focus_keyphrases": self._focus_keyphrase_urls(snapshot.entries),
                 },
+                "site_focus_keyphrases": self._focus_keyphrase_urls(snapshot.entries),
+                "site_scanned_at": datetime.now(timezone.utc).isoformat(),
                 # Proposed keywords may change; keep only selections that still exist.
                 "selected_keywords": [
                     k for k in session.selected_keywords
@@ -331,10 +332,44 @@ class ContentSessionService:
                 taken.setdefault(entry.focus_keyphrase, []).append(entry.url)
         return taken
 
+    def _ensure_site_scan(self, session: ContentSession) -> ContentSession:
+        """Scan once per session when no keyword step ran, so generation still knows which
+        focus keyphrases are taken. Needs no model call; a failure never blocks generation."""
+        if self.seo_sources is None or session.site_scanned_at or session.site_focus_keyphrases:
+            return session
+        try:
+            kb = self.knowledge.current()
+            post_type = kb.post_type(session.post_type_key)
+            if post_type is None:
+                return session
+            snapshot = self.seo_sources.gather(
+                post_type=post_type, internal_links=kb.internal_links, with_search_console=False
+            )
+        except Exception as exc:  # optional help for generation
+            print(f"[site scan skipped] {exc}", flush=True)
+            return session
+        return session.model_copy(update={
+            "site_focus_keyphrases": self._focus_keyphrase_urls(snapshot.entries),
+            "site_scanned_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    @staticmethod
+    def _keyword_phrases(session: ContentSession) -> tuple[str, ...]:
+        """Selected keywords plus their proposed alternatives, for link ranking."""
+        alternatives = {
+            normalize_phrase(row["keyword"]): row.get("alternatives") or []
+            for row in (session.keyword_proposal or {}).get("rows") or []
+        }
+        return tuple(
+            phrase
+            for keyword in session.selected_keywords
+            for phrase in (keyword, *alternatives.get(normalize_phrase(keyword), []))
+        )
+
     def _keyword_context(self, session: ContentSession, current_url: str | None = None) -> dict[str, Any]:
         """Keyword inputs for generation; empty when no proposal or selection exists."""
         proposal = session.keyword_proposal or {}
-        if not proposal and not session.selected_keywords:
+        if not proposal and not session.selected_keywords and not session.site_focus_keyphrases:
             return {}
         context: dict[str, Any] = {}
         if session.selected_keywords:
@@ -355,7 +390,7 @@ class ContentSessionService:
         }
         conflicts = {
             phrase: [url for url in urls if urlparse(url).path.rstrip("/") not in own]
-            for phrase, urls in (proposal.get("focus_keyphrases") or {}).items()
+            for phrase, urls in session.site_focus_keyphrases.items()
         }
         conflicts = {phrase: urls for phrase, urls in conflicts.items() if urls}
         if conflicts:
@@ -1804,6 +1839,7 @@ class ContentSessionService:
                 source_text=" ".join((session.manual_text, session.transcript, fact_text)),
                 context_tags=session.context_tags,
                 content_signals=session.content_signals,
+                keywords=self._keyword_phrases(session),
                 maximum=maximum_links,
             )
             self._milestone(session, "deterministic internal link ranking finished")
@@ -1827,6 +1863,7 @@ class ContentSessionService:
             needs_required_generation = bool(missing_shared_keys or missing_acf_keys - derived_acf_fields.keys())
             should_generate = (not link_placement_only or needs_required_generation) if targeted_revision else (not shared_fields or not acf_source_fields)
             if should_generate:
+                session = self._ensure_site_scan(session)
                 shared_rows = [
                     row for row in snapshot.shared_fields
                     if row.enabled and row.include_in_ai_schema
@@ -3548,7 +3585,9 @@ class ContentSessionService:
             pool = EligibleLinks(candidates=tuple(row for row in eligible.candidates if row.link_id not in previous_ids | excluded))
             source = " ".join(str(value) for value in [session.manual_text, session.transcript, *acf.values(), *shared.values()])
             remaining = None if maximum is None else max(0, maximum - len(selections))
-            selections += self.internal_links.rank(pool, source_text=source, maximum=remaining)
+            selections += self.internal_links.rank(
+                pool, source_text=source, keywords=self._keyword_phrases(session), maximum=remaining
+            )
         else:
             raise InvalidInternalLinksError("Unknown candidate action.")
         updated = session.model_copy(update={

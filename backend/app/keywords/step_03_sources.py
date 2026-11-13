@@ -45,6 +45,7 @@ class SeoSources:
         post_type: PostTypeConfig,
         internal_links: Iterable[InternalLinkRecord],
         progress: Progress | None = None,
+        with_search_console: bool = True,
     ) -> SeoSnapshot:
         say = progress or (lambda _stage: None)
         snapshot = SeoSnapshot()
@@ -85,6 +86,8 @@ class SeoSources:
         else:
             snapshot.notes.append("No service page category is configured for this client.")
 
+        if not with_search_console:
+            return snapshot
         say("Reading Search Console")
         provider = self._search_console_factory()
         if provider is None:

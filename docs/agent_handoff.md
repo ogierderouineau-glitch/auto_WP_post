@@ -171,7 +171,12 @@ structured call and verifies the answer in code. The result is stored in
 `keyword_alternatives` and `keyword_conflicts` (site-wide focus keyphrase → URLs, the
 post's own URL excluded) to every generation payload once a proposal or selection
 exists; the client's workbook instructions (`client_010`, `client_015` for the pilot)
-decide how to use them. Link scoring does not use the selection yet. Plan: [seo_keyword_intelligence_plan.md](seo_keyword_intelligence_plan.md).
+decide how to use them. Without a keyword step, the first generation of a session runs the WordPress scan
+(no Search Console, no model call) to fill `site_focus_keyphrases`; a failed scan never
+blocks generation. The scan is stored with the session (`site_scanned_at`) and is not
+repeated. Internal-link ranking gives selected keywords and their alternatives extra
+weight (`InternalLinkService.rank(keywords=...)`, used for generation and candidate
+refresh). Plan: [seo_keyword_intelligence_plan.md](seo_keyword_intelligence_plan.md).
 Tests: `test_seo_sources.py`, `test_keyword_service.py`, `test_keyword_workflow.py`.
 
 ## Workbook versus application ownership

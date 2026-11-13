@@ -124,7 +124,7 @@ selection. With no selection, the AI chooses keywords itself and records them.
 8. **Tests:** arbitrary post-type keys, an unrelated industry, no-Yoast fallback,
    missing Search Console, and client isolation.
 
-### Milestone B: generation and links
+### Milestone B: generation and links (implemented, no UI yet)
 1. Pass `selected_keywords` (or the AI-chosen ones, recorded in the session) into
    the generation context for title, slug and introduction, filtered per the
    existing context rules.

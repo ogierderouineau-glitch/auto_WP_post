@@ -166,13 +166,14 @@ def with_proposal(service, session, selected):
     proposal = {
         "rows": [{"keyword": "solar battery", "alternatives": ["home storage"], "status": "free",
                   "related_urls": [], "rationale": ""}],
-        "focus_keyphrases": {
-            "Heat pump": ["https://energy.example/heat/"],
-            "Roof solar": ["https://energy.example/own/", "https://energy.example/other/"],
-        },
+    }
+    focus = {
+        "Heat pump": ["https://energy.example/heat/"],
+        "Roof solar": ["https://energy.example/own/", "https://energy.example/other/"],
     }
     return service.repository.save(
-        session.model_copy(update={"keyword_proposal": proposal, "selected_keywords": selected}),
+        session.model_copy(update={"keyword_proposal": proposal, "selected_keywords": selected,
+                                   "site_focus_keyphrases": focus}),
         expected_version=session.version,
     )
 
@@ -227,3 +228,78 @@ def test_keywords_reach_the_generation_model_call(tmp_path):
         assert payload["selected_keywords"] == ["solar battery"]
         assert payload["keyword_alternatives"] == {"solar battery": ["home storage"]}
         assert "Heat pump" in payload["keyword_conflicts"]
+
+
+class CountingScanner(FakeScanner):
+    def __init__(self, fail=False, **kwargs):
+        super().__init__(**kwargs)
+        self.scans, self.fail = 0, fail
+
+    def scan_collection(self, wp_post_type, category_ids=None):
+        self.scans += 1
+        if self.fail:
+            raise RuntimeError("site down")
+        return [page(1, "case-one", focus="Roof solar")]
+
+
+class ForbiddenSearchConsole:
+    def monthly_queries(self):
+        raise AssertionError("the automatic scan must not read Search Console")
+
+
+def generate(service, session):
+    return service.generate(
+        session.session_id, shared_fields={}, acf_source_fields={}, selected_links=[],
+        current_url=None, expected_version=session.version,
+    )
+
+
+def test_generation_scans_the_site_once_when_no_keyword_step_ran(tmp_path):
+    scanner = CountingScanner(categories=[4])
+    service, session = build(tmp_path, scanner=scanner, search_console=ForbiddenSearchConsole())
+    model = CapturingModel()
+    service.language_model = service.revision_language_model = model
+    done = generate(service, session)
+    assert scanner.scans == 1
+    assert done.site_focus_keyphrases == {"Roof solar": ["https://energy.example/case-one/"]}
+    assert done.site_scanned_at
+    assert model.payloads[0]["keyword_conflicts"] == done.site_focus_keyphrases
+    assert "selected_keywords" not in model.payloads[0]
+    generate(service, done)
+    assert scanner.scans == 1  # already scanned for this session
+
+
+def test_failed_automatic_scan_does_not_block_generation(tmp_path):
+    service, session = build(tmp_path, scanner=CountingScanner(fail=True))
+    model = CapturingModel()
+    service.language_model = service.revision_language_model = model
+    done = generate(service, session)
+    assert model.payloads and "keyword_conflicts" not in model.payloads[0]
+    assert done.site_scanned_at is None
+
+
+def test_proposal_records_site_scan_for_later_generation(tmp_path):
+    service, session = build(tmp_path, scanner=CountingScanner(categories=[4]))
+    saved = service.propose_keywords(session.session_id, expected_version=session.version)
+    assert saved.site_focus_keyphrases == {"Roof solar": ["https://energy.example/case-one/"]}
+    assert "focus_keyphrases" not in saved.keyword_proposal
+
+
+def test_selected_keywords_steer_link_ranking(tmp_path):
+    service, session = build(tmp_path, scanner=FakeScanner())
+    snapshot = service.knowledge.current()
+    eligible = service.internal_links.eligible(
+        snapshot, post_type_key=session.post_type_key, language="en", current_url=None
+    )
+    plain = service.internal_links.rank(eligible, source_text="solar battery installation", maximum=1)
+    steered = service.internal_links.rank(
+        eligible, source_text="solar battery installation", keywords=("solar delta",), maximum=1
+    )
+    assert plain[0]["link_id"] != "delta"
+    assert steered[0]["link_id"] == "delta"
+
+
+def test_keyword_phrases_include_alternatives_of_selected_keywords(tmp_path):
+    service, session = build(tmp_path, scanner=FakeScanner())
+    session = with_proposal(service, session, ["solar battery", "my own phrase"])
+    assert service._keyword_phrases(session) == ("solar battery", "home storage", "my own phrase")

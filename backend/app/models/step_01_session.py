@@ -85,6 +85,9 @@ class ContentSession(BaseModel):
     selected_links: list[dict[str, str]] = Field(default_factory=list)
     keyword_proposal: dict[str, Any] = Field(default_factory=dict)
     selected_keywords: list[str] = Field(default_factory=list)
+    # Focus keyphrase -> URLs from the last live site scan (None time = never scanned).
+    site_focus_keyphrases: dict[str, list[str]] = Field(default_factory=dict)
+    site_scanned_at: str | None = None
     eligible_link_ids: list[str] = Field(default_factory=list)
     excluded_link_ids: list[str] = Field(default_factory=list)
     processed_images: list[dict[str, Any]] = Field(default_factory=list)
