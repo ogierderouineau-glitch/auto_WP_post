@@ -283,6 +283,10 @@ record future proposals separately and clearly mark them as unimplemented.
 Google Sheets-hosted client workbooks (phase 1) and natural-language workbook
 edits (phase 2). Treat it as a proposal; current code still uses GCS/local files.
 
+[seo_keyword_intelligence_plan.md](seo_keyword_intelligence_plan.md) plans keyword
+proposals from live WordPress/Search Console scans and a deterministic SEO check.
+Not implemented.
+
 ## Historical phase plan
 
 `docs/speech2post_local_phases.md` was deleted in commit `340ff18` during the
