@@ -287,6 +287,9 @@ edits (phase 2). Treat it as a proposal; current code still uses GCS/local files
 proposals from live WordPress/Search Console scans and a deterministic SEO check.
 Not implemented.
 
+[seo_diagnostic_proposal.md](seo_diagnostic_proposal.md) proposes an optional site
+SEO diagnostic and a new Screen 3 (Keywords). Not implemented.
+
 ## Historical phase plan
 
 `docs/speech2post_local_phases.md` was deleted in commit `340ff18` during the

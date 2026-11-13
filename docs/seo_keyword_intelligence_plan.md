@@ -106,13 +106,19 @@ selection. With no selection, the AI chooses keywords itself and records them.
    (`free` / `focus_elsewhere` / `mentioned_elsewhere`), `conflicting_url`,
    `clicks`, `click_delta`, `rationale`. Prompt text lives in the app-owned
    instructions; client rules come from the workbook.
+   Built in `backend/app/keywords/`: the service gives the model numbered refs for
+   existing pages and checks the answer in code. An exact Yoast focus-keyphrase match
+   forces `focus_elsewhere`, unknown refs are dropped, and clicks/impressions/change
+   come from Search Console data, never from the model. Phrases are compared ignoring
+   case, spaces and hyphens. It reuses the session service's retrying structured call.
 5. **Session model:** persist `keyword_proposal` (candidates, scan time, sources
    used) and `selected_keywords`. Selection mutations use `expected_version`,
    ownership and active-job checks like existing routes.
 6. **Routes/job:** `POST /{session_id}/keywords/scan` as a job (existing executor
    and polling), `GET .../keywords`, `PUT .../keywords/selection`. Progress stages:
    "Scanning WordPress", "Reading Search Console", "Analysing keywords".
-7. **Frontend:** after facts extraction, a keyword step with a table (keyword,
+7. **Frontend:** the new Screen 3 (between Facts and Content, see
+   [seo_diagnostic_proposal.md](seo_diagnostic_proposal.md)) with a table (keyword,
    alternatives, status, clicks, change) and multi-select. Selecting nothing is
    allowed. Adapters in `frontend/lib/content-sessions.ts`.
 8. **Tests:** arbitrary post-type keys, an unrelated industry, no-Yoast fallback,
