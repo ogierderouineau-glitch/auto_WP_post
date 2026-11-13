@@ -164,6 +164,51 @@ language-specific project, so the plan does not attempt one.
 | Readability (sentence length, passive voice, transition words) | Several days per language, large word lists | Not built; the existing AI quality review covers readability |
 | Reading stored scores (`_yoast_wpseo_linkdex`, content score) | Small | Optional reference only; stale for API-created posts until opened in the editor |
 
+## Pilot workbook instructions (proposal for `agent_instructions`)
+
+Client rules live in the client's workbook, not in code. The app will give the
+generation context three new keys when a keyword proposal or selection exists:
+`selected_keywords` (ordered; the first one is the focus keyphrase),
+`keyword_alternatives` (keyword → variants) and `keyword_conflicts` (focus keyphrases
+already used on other URLs, own URL excluded). The condition must be `always`
+(context only understands `always` or a content signal).
+
+**1. Replace the text of `client_010`.** It refers to `keyword_register`, which the
+app does not provide:
+
+> Wenn keyword_conflicts im Kontext verfügbar ist: eine Fokus-Keyphrase, die dort als
+> Fokus einer anderen URL belegt ist (status focus_elsewhere), nicht erneut als Fokus
+> wählen; stattdessen eine Alternative aus keyword_alternatives oder ein anderes
+> Keyword verwenden. Die Verwendung eines Begriffs nur als Textbegriff
+> (mentioned_elsewhere) sperrt keinen neuen Fokus. Kein Fokus-Zwang bei fehlender
+> Relevanz. Für Barkeeper-Profile gilt die profilspezifische Buchungsregel.
+
+**2. New row `client_015`** (scope `global`, post_type_key `*`, workflow_stage
+`generation`, applies_to `focus_keyword`, owner `language_model`, priority `high`,
+condition `always`, conflict_policy `higher_priority_wins`):
+
+> Wenn selected_keywords im Kontext verfügbar ist: Das erste Keyword ist die
+> Fokus-Keyphrase und wird unverändert in focus_keyword gesetzt. Den slug zuerst aus
+> dieser Fokus-Keyphrase bilden (ohne Füllwörter); post_title, seo_title und die
+> Einleitung (hero_intro bzw. das Einleitungsfeld des Post-Typs) leiten sich daraus ab.
+> Die Fokus-Keyphrase kommt in slug, post_title, seo_title (möglichst weit vorn),
+> meta_description und in den ersten ein bis zwei Sätzen der Einleitung vor. Weitere
+> Keywords aus selected_keywords nimmt die Einleitung und der Titel auf, soweit es
+> natürlich klingt; mindestens einmal kommt jedes weitere Keyword im übrigen Text vor.
+> Varianten aus keyword_alternatives und grammatisch angepasste Wortformen sind
+> erlaubt. Kein Keyword-Stuffing: Lesbarkeit und belegte Fakten haben Vorrang. Die
+> Regel zu post_title und hero_h1 (keine gleiche Formulierung) bleibt bestehen.
+> Ohne selected_keywords wählt die KI die Keywords selbst nach client_010.
+
+Suggested `expected_behavior`: "Fokus-Keyphrase in Slug, Titel, SEO-Titel,
+Meta-Beschreibung und Einleitung; weitere Keywords natürlich im Text."
+`source_reference`: "SEO-Experten-Workflow".
+
+Decisions this wording makes: only the focus keyphrase is mandatory in title and
+introduction (several keywords cannot all fit a title), and the selection order marks
+the focus. The Screen 3 table therefore needs a way to mark or reorder the primary
+keyword. The context keys above are not built yet (next implementation step).
+
 ## Resolved and open questions
 
 Resolved:
