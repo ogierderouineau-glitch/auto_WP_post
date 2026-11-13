@@ -42,10 +42,23 @@ credentials, and client-relative storage paths. It must not be committed.
     "storage": {
       "session_prefix": "clients/flairlab/v2-sessions",
       "knowledge_workbook": "clients/flairlab/knowledge/current.xlsm"
+    },
+    "search_console": {
+      "property_url": "https://flairlab.de/",
+      "credentials_file": "/etc/secrets/flairlab-search-console.json"
+    },
+    "seo": {
+      "service_link_category": "service"
     }
   }
 }
 ```
+
+`search_console` and `seo` are optional. Without `search_console` the keyword
+proposal skips measured values. `credentials_file` points to a Google service
+account key (a secret file, never committed) that was added as a read-only user in
+the client's Search Console property. `service_link_category` is the internal-links
+`category` value that marks the client's service pages.
 
 Client IDs must contain only lowercase letters, digits, `_`, or `-`. Import
 keys must be unique. The backend fails at startup if the file is missing or

@@ -8,7 +8,7 @@ import json
 import os
 import re
 from datetime import date, datetime, timezone
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 from pathlib import Path
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -54,6 +54,9 @@ from backend.app.images.step_03_metadata_context import (
     ImageMetadataFieldContextBuilder,
     ImageMetadataRuleMatcher,
 )
+from backend.app.keywords.step_01_models import normalize_phrase
+from backend.app.keywords.step_02_service import KeywordService
+from backend.app.keywords.step_03_sources import SeoSources
 from backend.app.knowledge_base.step_04_service import KnowledgeBaseService
 from backend.app.models.step_01_session import Approval, ContentSession, FactValue, OperationRecord
 from backend.app.models.step_02_payload import WordPressPayload
@@ -98,7 +101,9 @@ class ContentSessionService:
         image_processor: PillowProcessor | None = None,
         video_processor: FfmpegVideoProcessor | None = None,
         wordpress_site_url: str = "",
+        seo_sources: SeoSources | None = None,
     ) -> None:
+        self.seo_sources = seo_sources
         self.knowledge = knowledge
         self.repository = repository
         self.wordpress = wordpress
@@ -258,6 +263,79 @@ class ContentSessionService:
         if updated == session:
             return session
         return self.repository.save(updated, expected_version=expected_version)
+
+    def propose_keywords(
+        self,
+        session_id: str,
+        *,
+        expected_version: int,
+        progress: Callable[[str], None] | None = None,
+    ) -> ContentSession:
+        """Scan the site and Search Console live, then save a keyword proposal."""
+        session = self.repository.get(session_id)
+        if session.version != expected_version:
+            raise SessionVersionConflictError("Session changed. Reload it before proposing keywords.")
+        if self.seo_sources is None:
+            raise DraftValidationError("Keyword scanning is not configured for this client.")
+        facts = {
+            key: fact.value
+            for key, fact in {**session.extracted_facts, **session.confirmed_facts}.items()
+        }
+        if not facts:
+            raise MissingRequiredFactsError("Extract facts before proposing keywords.")
+        snapshot_kb = self.knowledge.current()
+        post_type = snapshot_kb.post_type(session.post_type_key)
+        if post_type is None:
+            raise UnknownPostTypeError(f"Unknown post type {session.post_type_key!r}.")
+        snapshot = self.seo_sources.gather(
+            post_type=post_type, internal_links=snapshot_kb.internal_links, progress=progress
+        )
+        if progress:
+            progress("Analysing keywords")
+        provider = self.revision_language_model
+        rows = KeywordService(
+            lambda **kwargs: self._structured(provider=provider, **kwargs)
+        ).propose(
+            facts=facts,
+            language=session.language,
+            post_type_name=post_type.display_name_de,
+            entries=snapshot.entries,
+            stats=snapshot.stats,
+        )
+        updated = self._record_provider_usage(session, provider).model_copy(
+            update={
+                "keyword_proposal": {
+                    "rows": [row.model_dump() for row in rows],
+                    "scanned_at": datetime.now(timezone.utc).isoformat(),
+                    "scanned_pages": len(snapshot.entries),
+                    "sources": snapshot.sources,
+                    "notes": snapshot.notes,
+                },
+                # Proposed keywords may change; keep only selections that still exist.
+                "selected_keywords": [
+                    k for k in session.selected_keywords
+                    if normalize_phrase(k) in {normalize_phrase(r.keyword) for r in rows}
+                ],
+            }
+        )
+        return self.repository.save(updated, expected_version=expected_version)
+
+    def select_keywords(
+        self, session_id: str, *, keywords: list[str], expected_version: int
+    ) -> ContentSession:
+        """Store the user's chosen keywords. An empty list lets the AI decide later."""
+        session = self.repository.get(session_id)
+        if session.version != expected_version:
+            raise SessionVersionConflictError("Session changed. Reload it before selecting keywords.")
+        clean = list(dict.fromkeys(" ".join(k.split()) for k in keywords if k.strip()))
+        if len(clean) > 12 or any(len(k) > 80 for k in clean):
+            raise InvalidUploadError("Select at most 12 keywords of up to 80 characters each.")
+        if clean == session.selected_keywords:
+            return session
+        return self.repository.save(
+            session.model_copy(update={"selected_keywords": clean}),
+            expected_version=expected_version,
+        )
 
     @staticmethod
     def _user_id_candidates(user_id: str | None) -> set[str]:

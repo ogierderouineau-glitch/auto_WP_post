@@ -17,7 +17,9 @@ from backend.app.providers.step_02_openai import (
     OpenAISpeechToTextProvider,
     OpenAIVisionProvider,
 )
+from backend.app.keywords.step_03_sources import SeoSources
 from backend.app.providers.step_03_wordpress import ExistingWordPressProvider
+from backend.app.providers.step_04_seo_sources import SearchConsoleProvider, WordPressSiteScanner
 from backend.app.sessions.step_01_repository import FileSessionRepository
 from backend.app.sessions.step_04_gcs_repository import GCSSessionRepository
 from backend.app.sessions.step_03_service import ContentSessionService
@@ -135,6 +137,29 @@ def configured_workbook_path(client_id: str | None = None) -> Path:
     return _configured_workbook_path(client_id or get_active_client_id())
 
 
+def _seo_sources(client_id: str) -> SeoSources:
+    """Per-client factories: a missing credential only disables that source."""
+    client = get_client_config(client_id)
+
+    def scanner() -> WordPressSiteScanner | None:
+        if not (client.wp_base_url and client.wp_username and client.wp_app_password):
+            return None
+        return WordPressSiteScanner(client.wp_base_url, client.wp_username, client.wp_app_password)
+
+    def search_console() -> SearchConsoleProvider | None:
+        if not (client.search_console_property and client.search_console_credentials_file):
+            return None
+        return SearchConsoleProvider(
+            client.search_console_property, client.search_console_credentials_file
+        )
+
+    return SeoSources(
+        scanner_factory=scanner,
+        search_console_factory=search_console,
+        service_category=client.service_link_category,
+    )
+
+
 def get_v2_service(client_id: str | None = None) -> ContentSessionService:
     resolved_client_id = client_id or get_active_client_id()
     with _lock:
@@ -216,6 +241,7 @@ def get_v2_service(client_id: str | None = None) -> ContentSessionService:
             image_editor=image_editor,
             object_storage=object_storage,
             image_processor=PillowProcessor(),
+            seo_sources=_seo_sources(resolved_client_id),
         )
         _services[resolved_client_id] = service
         return service

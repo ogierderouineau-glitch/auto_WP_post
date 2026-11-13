@@ -33,6 +33,7 @@ from backend.app.api.step_01_models import (
     ImageMetadataUpdateRequest,
     InputsRequest,
     InsertLinkRequest,
+    KeywordSelectionRequest,
     LinkCandidatesRequest,
     PublishRequest,
     SessionResponse,
@@ -529,6 +530,30 @@ def create_router(
         )
         return job
 
+    @router.post("/{session_id}/keywords-job")
+    async def start_keywords_job(
+        session_id: str,
+        payload: VersionedRequest,
+    ) -> dict[str, Any]:
+        service_provider().require_owner(session_id, get_active_client_id())
+        job = _create_session_job(session_id, "keywords")
+        _SESSION_JOB_EXECUTOR.submit(
+            _run_session_job,
+            job["job_id"],
+            _fixed_service_provider(service_provider()),
+            session_id,
+            "keywords",
+            payload.model_dump(),
+        )
+        return job
+
+    @router.put("/{session_id}/keywords/selection", response_model=SessionResponse)
+    async def select_keywords(session_id: str, payload: KeywordSelectionRequest) -> SessionResponse:
+        service = service_provider()
+        service.require_owner(session_id, get_active_client_id())
+        _raise_if_session_job_active(session_id)
+        return SessionResponse(session=service.select_keywords(session_id, **payload.model_dump()))
+
     @router.post("/{session_id}/draft-chat", response_model=SessionResponse)
     async def draft_chat(
         session_id: str,
@@ -919,7 +944,7 @@ def _run_session_job(
     service = service_provider()
     starting_session = service.get(session_id)
     usage_before = dict(starting_session.ai_usage or {})
-    if operation in {"draft_chat", "quality_check"}:
+    if operation in {"draft_chat", "quality_check", "keywords"}:
         provider = service.revision_language_model
     elif operation == "optimize_image":
         provider = service.image_editor
@@ -951,6 +976,18 @@ def _run_session_job(
             session = service.recrop_image_with_vision(session_id, **payload)
         elif operation == "image_metadata":
             session = service.generate_image_metadata(session_id, **payload)
+        elif operation == "keywords":
+            def report_stage(stage: str) -> None:
+                job["stage"] = stage
+                job["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+            session = service.propose_keywords(session_id, progress=report_stage, **payload)
+            proposal = session.keyword_proposal
+            operation_details.update({
+                "scanned_pages": proposal.get("scanned_pages"),
+                "sources": proposal.get("sources"),
+                "keyword_count": len(proposal.get("rows") or []),
+            })
         elif operation == "quality_check":
             session = service.review_content_quality(session_id, **payload)
             review = dict(session.generation_trace.get("quality_check") or {})
@@ -978,6 +1015,7 @@ def _run_session_job(
                 "recrop_image": "vision_focal_recrop",
                 "image_metadata": "image_metadata_generation",
                 "quality_check": "content_quality_check",
+                "keywords": "keyword_proposal",
             }.get(operation, operation),
             status="success",
             started_at=started_at,

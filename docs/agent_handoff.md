@@ -155,6 +155,22 @@ functions drawer shows its "All client uage report" button (label as requested) 
 calls, so very large sessions undercount; calls without a timestamp are "undated".
 Tests: `backend/tests/test_usage_report.py`.
 
+## Keyword proposal (backend; no UI yet)
+
+`POST /{session_id}/keywords-job` runs `ContentSessionService.propose_keywords` as a
+session job; the job reports `stage` ("Scanning WordPress", "Reading Search Console",
+"Analysing keywords"). It scans live (no cache) through `backend/app/keywords/step_03_sources.py`:
+posts whose category name equals the post type's `display_name_de` or `wp_category_name`
+(for custom post types with no matching category, the whole collection), plus
+internal-links rows in the client's `seo.service_link_category`. Search Console is
+optional (`search_console` in `clients.json`, see deployment.md) and its failure is
+reported in `keyword_proposal.notes`. `backend/app/keywords/step_02_service.py` makes one
+structured call and verifies the answer in code. The result is stored in
+`session.keyword_proposal`; `PUT /{session_id}/keywords/selection` stores
+`session.selected_keywords` (up to 12). Generation and link scoring do not use the
+selection yet. Plan: [seo_keyword_intelligence_plan.md](seo_keyword_intelligence_plan.md).
+Tests: `test_seo_sources.py`, `test_keyword_service.py`, `test_keyword_workflow.py`.
+
 ## Workbook versus application ownership
 
 Client-owned sheets define post types, shared/ACF fields, SEO constraints,

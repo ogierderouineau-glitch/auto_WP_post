@@ -26,6 +26,10 @@ class VersionedRequest(BaseModel):
     expected_version: int
 
 
+class KeywordSelectionRequest(VersionedRequest):
+    keywords: list[str] = Field(default_factory=list, max_length=12)
+
+
 class SessionNameRequest(VersionedRequest):
     name: str | None = Field(default=None, max_length=80)
 
