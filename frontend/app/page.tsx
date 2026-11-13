@@ -11,11 +11,13 @@ import {
   Newspaper,
   Wrench,
   SlidersHorizontal,
+  Tags,
 } from "lucide-react"
 import { SessionName } from "@/components/session-name"
 import { MediaScreen } from "@/components/media-screen"
 import { FactsScreen } from "@/components/facts-screen"
 import { ContentScreen } from "@/components/content-screen"
+import { KeywordsScreen } from "@/components/keywords-screen"
 import { WordPressScreen } from "@/components/wordpress-screen"
 import { AuthModal, type AuthResult } from "@/components/auth-modal"
 import { SessionModal } from "@/components/session-modal"
@@ -39,7 +41,7 @@ import {
   type WorkbookStatus,
 } from "@/lib/content-sessions"
 
-type Screen = "media" | "facts" | "content" | "wordpress"
+type Screen = "media" | "facts" | "keywords" | "content" | "wordpress"
 
 const STORAGE_API_KEY = "speech2post_import_key"
 const STORAGE_SESSION_ID = "speech2post_session_id"
@@ -48,11 +50,12 @@ const STORAGE_SCREEN = "speech2post_active_screen"
 const STEPS = [
   { id: "media" as const, label: "Media", icon: ImageIcon },
   { id: "facts" as const, label: "Facts", icon: FileText },
+  { id: "keywords" as const, label: "Keywords", icon: Tags },
   { id: "content" as const, label: "Content", icon: Newspaper },
   { id: "wordpress" as const, label: "WordPress", icon: Wrench },
 ]
 
-const ORDER: Screen[] = ["media", "facts", "content", "wordpress"]
+const ORDER: Screen[] = ["media", "facts", "keywords", "content", "wordpress"]
 
 function isScreen(value: string | null): value is Screen {
   return !!value && ORDER.includes(value as Screen)
@@ -205,6 +208,7 @@ export default function Page() {
     () => ({
       media: (session?.image_refs?.length || 0) > 0,
       facts: !!session && ["ready_to_generate", "needs_review", "ready_to_publish", "published"].includes(session.state),
+      keywords: (session?.selected_keywords?.length || 0) > 0,
       content: !!session?.approval.approved,
       wordpress: false,
     }),
@@ -662,9 +666,18 @@ export default function Page() {
             workbook={workbook}
             onSessionChange={handleSessionChange}
             onBackToMedia={() => setScreen("media")}
-            onContinueToContent={() => setScreen("content")}
+            onContinueToContent={() => setScreen("keywords")}
             selectedFactKeys={factsSelectedForReview}
             onSelectedFactKeysChange={setSelectedFactKeys}
+          />
+        ) : screen === "keywords" ? (
+          <KeywordsScreen
+            key={session?.session_id}
+            auth={apiAuth}
+            session={session}
+            onSessionChange={handleSessionChange}
+            onBackToFacts={() => setScreen("facts")}
+            onContinueToContent={() => setScreen("content")}
           />
         ) : screen === "wordpress" ? (
           <WordPressScreen
@@ -683,12 +696,12 @@ export default function Page() {
             onOpenAgent={() => setAgentOpen(true)}
             onRevisionFieldIdsChange={setContentRevisionFieldIds}
             onSelectedLinksChange={setContentSelectedLinks}
-            onBackToFacts={() => setScreen("facts")}
+            onBackToKeywords={() => setScreen("keywords")}
             onContinueToWordPress={() => setScreen("wordpress")}
           />
         )}
       </main>
-      {auth && screen !== "wordpress" && (
+      {auth && screen !== "wordpress" && screen !== "keywords" && (
         <RecordingWidget
           auth={apiAuth}
           session={session}

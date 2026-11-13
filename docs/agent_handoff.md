@@ -26,7 +26,7 @@ The Next.js frontend is **`frontend/`**, not `speech-2-post-ui/`. The old FastAP
 `/app` UI is no longer served. Backend routes under `/app/knowledge/workbook`
 remain active API endpoints; their names do not imply a legacy UI to preserve.
 
-The implemented workflow has Media, Facts, Content and WordPress screens:
+The implemented workflow has Media, Facts, Keywords, Content and WordPress screens:
 sessions, uploads/recording, transcription/analysis, fact corrections, draft
 generation/revision, image metadata and processing, approval and publication.
 Long operations also have job endpoints with polling. Extend these existing
@@ -155,7 +155,7 @@ functions drawer shows its "All client uage report" button (label as requested) 
 calls, so very large sessions undercount; calls without a timestamp are "undated".
 Tests: `backend/tests/test_usage_report.py`.
 
-## Keyword proposal (backend; no UI yet)
+## Keyword proposal
 
 `POST /{session_id}/keywords-job` runs `ContentSessionService.propose_keywords` as a
 session job; the job reports `stage` ("Scanning WordPress", "Reading Search Console",
@@ -176,7 +176,11 @@ decide how to use them. Without a keyword step, the first generation of a sessio
 blocks generation. The scan is stored with the session (`site_scanned_at`) and is not
 repeated. Internal-link ranking gives selected keywords and their alternatives extra
 weight (`InternalLinkService.rank(keywords=...)`, used for generation and candidate
-refresh). Plan: [seo_keyword_intelligence_plan.md](seo_keyword_intelligence_plan.md).
+refresh). Screen 3 (`frontend/components/keywords-screen.tsx`, step between Facts and Content) starts the job, shows
+the stage progress and a table of proposed keywords with alternatives, status, Search Console numbers and
+related pages, and autosaves the multi-selection (first keyword = focus, changed with the star; custom keywords
+allowed; skipping lets the AI choose). The recording widget is hidden on this screen. Not checked in a real
+browser yet. Plan: [seo_keyword_intelligence_plan.md](seo_keyword_intelligence_plan.md).
 Tests: `test_seo_sources.py`, `test_keyword_service.py`, `test_keyword_workflow.py`.
 
 ## Workbook versus application ownership

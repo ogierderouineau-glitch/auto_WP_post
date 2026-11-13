@@ -1,6 +1,7 @@
 "use client"
 
 import { ActionHint } from "@/components/action-hint"
+import { GatherContextIcon, MediaUploadIcon } from "@/components/composite-icons"
 import { useActionWarning } from "@/components/action-warning"
 
 import { hasExtractedFacts, hasSavedTranscript } from "@/lib/content-sessions"
@@ -8,14 +9,12 @@ import { hasExtractedFacts, hasSavedTranscript } from "@/lib/content-sessions"
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
-  Bot,
   Check,
   ChevronLeft,
   ChevronRight,
   Crop,
   FileText,
   Image as ImageIcon,
-  ImagePlus,
   Loader2,
   RotateCcw,
   Sparkles,
@@ -1055,15 +1054,13 @@ export function MediaScreen({
         className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)_320px] lg:grid-rows-[auto_1fr]">
         <section aria-label="Media library" className="min-w-0 lg:row-span-2">
           <div className="overflow-hidden rounded-lg border border-dashed border-gold/50 bg-gold/10 text-foreground transition-colors hover:border-gold hover:bg-gold/15">
-            <label className="flex w-full cursor-pointer items-center gap-2 px-3 py-3 text-left text-sm">
+            <label
+              title="Add pictures and MP4 videos. You can also drop files anywhere in this workspace."
+              className="flex w-full cursor-pointer items-center gap-3 px-3 py-3.5 text-left"
+            >
               <input id="s2p-media-upload" type="file" multiple accept="image/*,video/mp4,.mp4" onChange={(event) => { const files = [...(event.target.files || [])]; event.target.value = ""; void uploadFiles(files) }} className="sr-only" />
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-gold text-gold-foreground">
-                <ImagePlus className="size-5" aria-hidden="true" />
-              </span>
-              <span>
-                <span className="block font-semibold text-gold">Add pictures &amp; videos</span>
-                <span className="block text-xs text-muted-foreground">Pictures and MP4 videos · drop files anywhere in this workspace</span>
-              </span>
+              <MediaUploadIcon />
+              <span className="text-base font-semibold leading-tight text-gold">Add pictures &amp; videos</span>
             </label>
             <div className="flex border-t border-gold/20 px-3 py-2.5 text-xs">
               <select
@@ -1084,18 +1081,12 @@ export function MediaScreen({
           <button
             id="s2p-media-open-agent"
             type="button"
+            title="Speak to the agent and/or write text in the Picture transcript directly. Everything you tell here is gathered as context for your facts and content."
             onClick={() => { setTranscriptHighlight({ mediaId: selectedMediaId, text: pictureTranscript }); onOpenAgent() }}
-            className="mt-2 flex cursor-pointer w-full items-center gap-2 rounded-lg border border-dashed border-ai/50 bg-ai/10 px-3 py-3 text-left text-sm transition-colors hover:border-ai hover:bg-ai/15"
+            className="mt-2 flex cursor-pointer w-full items-center gap-3 rounded-lg border border-dashed border-ai/50 bg-ai/10 px-3 py-3.5 text-left transition-colors hover:border-ai hover:bg-ai/15"
           >
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-ai text-ai-foreground">
-              <Bot className="size-5" aria-hidden="true" />
-            </span>
-            <span>
-              <span className="block font-medium text-ai">Tell your story</span>
-              <span className="block text-xs text-muted-foreground">
-                Speak to the agent and/or write some text in the Picture transcript directly
-              </span>
-            </span>
+            <GatherContextIcon />
+            <span className="text-base font-semibold leading-tight text-ai">Tell your story</span>
           </button>
           <ActionHint reason={extractDisabledReason} className="w-full">
           <button

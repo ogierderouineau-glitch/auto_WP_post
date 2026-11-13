@@ -151,6 +151,9 @@ export type ContentSession = {
   shared_fields: Record<string, unknown>
   acf_source_fields: Record<string, unknown>
   selected_links: Record<string, string>[]
+  keyword_proposal?: KeywordProposal
+  selected_keywords?: string[]
+  site_scanned_at?: string | null
   eligible_link_ids: string[]
   excluded_link_ids?: string[]
   processed_images: Record<string, unknown>[]
@@ -180,6 +183,28 @@ export type ContentSession = {
   created_at: string
   updated_at: string
   version: number
+}
+
+export type KeywordStatus = "free" | "focus_elsewhere" | "mentioned_elsewhere"
+
+export type KeywordRow = {
+  keyword: string
+  alternatives: string[]
+  status: KeywordStatus
+  related_urls: string[]
+  rationale: string
+  clicks: number | null
+  impressions: number | null
+  clicks_delta: number | null
+  month: string | null
+}
+
+export type KeywordProposal = {
+  rows?: KeywordRow[]
+  scanned_at?: string
+  scanned_pages?: number
+  sources?: string[]
+  notes?: string[]
 }
 
 export type SessionOperationRecord = {
@@ -226,6 +251,7 @@ export type SessionJob = {
   job_id: string
   session_id?: string
   operation?: string
+  stage?: string | null
   status: "queued" | "running" | "failed" | "complete" | "not_found"
   session?: ContentSession | null
   error?: string | null
@@ -628,6 +654,18 @@ export async function startContentQualityCheck(
   })
 }
 
+export function startKeywordProposal(auth: ApiClientOptions, session: ContentSession) {
+  return apiRequest<SessionJob>(`/api/content-sessions/${encodeURIComponent(session.session_id)}/keywords-job`, auth, {
+    method: "POST", body: { expected_version: session.version },
+  })
+}
+
+export function saveKeywordSelection(auth: ApiClientOptions, session: ContentSession, keywords: string[]) {
+  return apiRequest<SessionResponse>(`/api/content-sessions/${encodeURIComponent(session.session_id)}/keywords/selection`, auth, {
+    method: "PUT", body: { keywords, expected_version: session.version },
+  })
+}
+
 export async function loadSessionJob(auth: ApiClientOptions, jobId: string, signal?: AbortSignal) {
   return apiRequest<SessionJob>(`/api/content-sessions/jobs/${jobId}`, auth, {
     json: false,
@@ -656,7 +694,7 @@ function pollingDelay(milliseconds: number, signal?: AbortSignal) {
 export async function waitForSessionJob(
   auth: ApiClientOptions,
   jobId: string,
-  options: { signal?: AbortSignal; onConnectionIssue?: () => void; onConnectionRestored?: () => void } = {},
+  options: { signal?: AbortSignal; onConnectionIssue?: () => void; onConnectionRestored?: () => void; onStage?: (stage: string) => void } = {},
 ) {
   let connectionFailures = 0
   while (!options.signal?.aborted) {
@@ -674,6 +712,7 @@ export async function waitForSessionJob(
       await pollingDelay(Math.min(1000 * 2 ** Math.min(connectionFailures, 3), 10000), options.signal)
       continue
     }
+    if (job.stage) options.onStage?.(job.stage)
     if (job.status === "complete" && job.session) return job.session
     if (job.status === "failed") throw new Error(job.error || "Background job failed.")
     if (job.status === "not_found") throw new Error(job.error || "Background job was not found.")

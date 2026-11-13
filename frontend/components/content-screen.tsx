@@ -297,7 +297,7 @@ export function ContentScreen({
   onSessionChange,
   onRevisionFieldIdsChange,
   onSelectedLinksChange,
-  onBackToFacts,
+  onBackToKeywords,
   onContinueToWordPress,
   onOpenAgent,
 }: {
@@ -307,7 +307,7 @@ export function ContentScreen({
   onSessionChange: (session: ContentSession) => void
   onRevisionFieldIdsChange: (fieldIds: string[]) => void
   onSelectedLinksChange: (links: Record<string, string>[]) => void
-  onBackToFacts: () => void
+  onBackToKeywords: () => void
   onContinueToWordPress: () => void
   onOpenAgent: () => void
 }) {
@@ -1082,13 +1082,13 @@ export function ContentScreen({
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-3 py-3 sm:px-4">
           <button
-            id="s2p-content-back-to-facts"
+            id="s2p-content-back-to-keywords"
             type="button"
-            onClick={onBackToFacts}
+            onClick={onBackToKeywords}
             className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3.5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
           >
             <ChevronLeft className="size-4" />
-            Back to Facts
+            Back to Keywords
           </button>
           <div className="hidden flex-1 text-sm text-muted-foreground sm:block">
             {session.approval.approved ? "Content is approved." : draftReady ? "Edits save automatically before approval." : "Generate a draft to continue."}

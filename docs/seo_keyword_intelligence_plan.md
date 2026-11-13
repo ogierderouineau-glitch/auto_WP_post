@@ -76,7 +76,7 @@ selection. With no selection, the AI chooses keywords itself and records them.
 
 ## Implementation steps
 
-### Milestone A: scan and proposal table
+### Milestone A: scan and proposal table (implemented; UI not yet checked in a browser)
 1. **Config:** add the Search Console fields to the client JSON schema, the container
    ([step_03_container.py](../backend/app/api/step_03_container.py)) and docs.
 2. **Providers:** new `WordPressSiteScanner` (REST pagination) and
