@@ -2,6 +2,7 @@
 
 import { InternalLinksPanel } from "@/components/internal-links-panel"
 import { ActionHint } from "@/components/action-hint"
+import { CollapsibleSection } from "@/components/collapsible-section"
 import { SeoCheckSection } from "@/components/seo-check-section"
 
 import { useActionWarning } from "@/components/action-warning"
@@ -968,10 +969,10 @@ export function ContentScreen({
                     Quality check
                   </h2>
                   <div className="divide-y divide-border">
-                    <div className="p-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Content quality</h3>
-                        <div className="flex items-center gap-2">
+                    <CollapsibleSection
+                      title="Content quality"
+                      actions={
+                        <>
                           {review && (
                             <span className={[
                       "shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold",
@@ -995,8 +996,9 @@ export function ContentScreen({
                             {activeAction === "review" ? <Loader2 className="size-3.5 animate-spin" /> : <ScanText className="size-3.5 text-ai" />}
                             {review ? "Run again" : "Run check"}
                           </button>
-                        </div>
-                      </div>
+                        </>
+                      }
+                    >
                       {review ? (
                         <div>
                     <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
@@ -1075,7 +1077,7 @@ export function ContentScreen({
                           Not run yet. Reviews tone, repetition, specificity and sentence rhythm without changing the draft.
                         </p>
                       )}
-                    </div>
+                    </CollapsibleSection>
                     <SeoCheckSection auth={auth} session={session} onRevise={handleSeoRevise} />
                   </div>
                 </section>

@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { Check, Loader2, Search, X } from "lucide-react"
+import { CollapsibleSection } from "@/components/collapsible-section"
 import type { ApiClientOptions } from "@/lib/api"
 import { loadSeoCheck, type ContentSession, type SeoCheckReport, type SeoFinding } from "@/lib/content-sessions"
 
@@ -50,22 +51,29 @@ export function SeoCheckSection({
   const stale = report !== null && checkedVersion !== session.version
 
   return (
-    <div className="p-4">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">SEO check</h3>
-        <button
-          id="s2p-content-seo-check"
-          type="button"
-          onClick={() => void run()}
-          disabled={!auth || loading}
-          title="Checks the draft against the focus keyphrase and the SEO rules of your workbook. No AI is used."
-          className="inline-flex items-center gap-1.5 rounded-md border border-ai/40 bg-card px-2.5 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-ai/10 disabled:opacity-60"
-        >
-          {loading ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Search className="size-3.5 text-ai" aria-hidden="true" />}
-          {report ? "Check again" : "Check SEO"}
-        </button>
-      </div>
-
+    <CollapsibleSection
+      title="SEO check"
+      actions={
+        <>
+          {report && !stale && (
+            <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${failed.length ? "bg-destructive/10 text-destructive" : "bg-confirm/12 text-confirm"}`}>
+              {failed.length ? `${failed.length} to fix` : "all pass"}
+            </span>
+          )}
+          <button
+            id="s2p-content-seo-check"
+            type="button"
+            onClick={() => void run()}
+            disabled={!auth || loading}
+            title="Checks the draft against the focus keyphrase and the SEO rules of your workbook. No AI is used."
+            className="inline-flex items-center gap-1.5 rounded-md border border-ai/40 bg-card px-2.5 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-ai/10 disabled:opacity-60"
+          >
+            {loading ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Search className="size-3.5 text-ai" aria-hidden="true" />}
+            {report ? "Check again" : "Check SEO"}
+          </button>
+        </>
+      }
+    >
       {error && <p role="status" className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
       {!report && !error && (
         <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
@@ -134,6 +142,6 @@ export function SeoCheckSection({
           )}
         </div>
       )}
-    </div>
+    </CollapsibleSection>
   )
 }
