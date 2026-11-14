@@ -117,6 +117,9 @@ def test_a_workbook_without_check_rows_still_checks_the_standard_fields():
     findings = {f.check_id: f for f in SeoChecker().check(session(), bare)}
     assert findings["in_post_title"].status == "pass"
     assert not any(key.startswith(("in_introduction", "in_heading", "length")) for key in findings)
+    assert findings["role_missing:introduction"].status == "skipped"
+    assert findings["role_missing:heading"].status == "skipped"
+    assert "role_missing:introduction" not in run()  # configured post types get no such note
 
 
 def test_revision_instruction_lists_only_failed_fixable_checks():

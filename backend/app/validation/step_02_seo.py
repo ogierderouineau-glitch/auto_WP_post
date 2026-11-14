@@ -184,6 +184,12 @@ class SeoChecker:
             "The SEO title starts with the focus keyphrase." if early else "Place the focus keyphrase near the start of the SEO title.",
             [field_id(seo_key)] if seo_key else [], skipped=position < 0 or not seo_key)
 
+        for role in ("introduction", "heading"):
+            if not roles[role]:  # make the gap visible instead of silently skipping the check
+                add(f"role_missing:{role}", f"Focus keyphrase in the {role}", False, "low",
+                    f"No {role} field is configured for this post type in seo_rules (action_type check_role, value {role}).",
+                    skipped=True)
+
         for key in roles["introduction"]:
             sentences = re.split(r"(?<=[.!?])\s+", plain_text(fields[key]))
             ok = occurrences(" ".join(sentences[:2]), focus) > 0

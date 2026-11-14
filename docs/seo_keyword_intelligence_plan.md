@@ -243,7 +243,7 @@ instruction_de, value, value_type, condition, priority, source; `example` and `c
 | seo_check_05 | seo_title | check_length | 30;60 | SEO-Check: SEO-Titel 30 bis 60 Zeichen. |
 
 All rows: enabled TRUE, post_type_key `*`, target_type `field`, stage `quality_check`, value_type `string`, condition
-`always`, priority `medium`, source `SEO-Experten-Workflow`. Other post types with differently named fields get their own rows.
+`always`, priority `medium`, source `SEO-Experten-Workflow`. Other post types with differently named fields get their own rows (no need to rename ACF fields or templates; a row only applies where its field exists). A post type with no heading or introduction row shows a "not applicable" note in the SEO check.
 
 ## Resolved and open questions
 
