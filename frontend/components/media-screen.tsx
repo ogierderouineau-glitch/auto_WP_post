@@ -1053,41 +1053,44 @@ export function MediaScreen({
         onDrop={(event) => { if (!event.dataTransfer.types.includes("Files")) return; event.preventDefault(); void uploadFiles([...event.dataTransfer.files]) }}
         className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)_320px] lg:grid-rows-[auto_1fr]">
         <section aria-label="Media library" className="min-w-0 lg:row-span-2">
-          <div className="overflow-hidden rounded-lg border border-dashed border-gold/50 bg-gold/10 text-foreground transition-colors hover:border-gold hover:bg-gold/15">
-            <label
-              title="Add pictures and MP4 videos. You can also drop files anywhere in this workspace."
-              className="flex w-full cursor-pointer items-center gap-3 px-3 py-3.5 text-left"
-            >
-              <input id="s2p-media-upload" type="file" multiple accept="image/*,video/mp4,.mp4" onChange={(event) => { const files = [...(event.target.files || [])]; event.target.value = ""; void uploadFiles(files) }} className="sr-only" />
-              <MediaUploadIcon />
-              <span className="text-base font-semibold leading-tight text-gold">Add pictures &amp; videos</span>
-            </label>
-            <div className="flex border-t border-gold/20 px-3 py-2.5 text-xs">
-              <select
-                id="s2p-media-upload-aspect-ratio"
-                aria-label="Picture format"
-                value={uploadAspectRatio}
-                onChange={(event) => setUploadAspectRatio(event.target.value)}
-                disabled={operation === "loading"}
-                className="w-full rounded-md border border-gold/30 bg-background px-2.5 py-1.5 font-semibold text-foreground outline-none focus:ring-2 focus:ring-gold/40 disabled:opacity-60"
+          {/* side by side on small screens, stacked in the narrow desktop column */}
+          <div className="flex gap-2 lg:flex-col">
+            <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-dashed border-gold/50 bg-gold/10 text-foreground transition-colors hover:border-gold hover:bg-gold/15">
+              <label
+                title="Add pictures and MP4 videos. You can also drop files anywhere in this workspace."
+                className="flex w-full cursor-pointer flex-col items-center gap-2 px-3 py-3.5 text-center sm:flex-row sm:gap-3 sm:text-left"
               >
-                <option value="4:5">Portrait 4:5 (e.g. 768 × 960)</option>
-                <option value="4:3">Landscape 4:3</option>
-                <option value="1:1">Square 1:1</option>
-                <option value="16:9">Widescreen 16:9</option>
-              </select>
+                <input id="s2p-media-upload" type="file" multiple accept="image/*,video/mp4,.mp4" onChange={(event) => { const files = [...(event.target.files || [])]; event.target.value = ""; void uploadFiles(files) }} className="sr-only" />
+                <MediaUploadIcon />
+                <span className="text-base font-semibold leading-tight text-gold">Add pictures &amp; videos</span>
+              </label>
+              <div className="flex border-t border-gold/20 px-3 py-2.5 text-xs">
+                <select
+                  id="s2p-media-upload-aspect-ratio"
+                  aria-label="Picture format"
+                  value={uploadAspectRatio}
+                  onChange={(event) => setUploadAspectRatio(event.target.value)}
+                  disabled={operation === "loading"}
+                  className="w-full rounded-md border border-gold/30 bg-background px-2.5 py-1.5 font-semibold text-foreground outline-none focus:ring-2 focus:ring-gold/40 disabled:opacity-60"
+                >
+                  <option value="4:5">Portrait 4:5 (e.g. 768 × 960)</option>
+                  <option value="4:3">Landscape 4:3</option>
+                  <option value="1:1">Square 1:1</option>
+                  <option value="16:9">Widescreen 16:9</option>
+                </select>
+              </div>
             </div>
+            <button
+              id="s2p-media-open-agent"
+              type="button"
+              title="Speak to the agent and/or write text in the Picture transcript directly. Everything you tell here is gathered as context for your facts and content."
+              onClick={() => { setTranscriptHighlight({ mediaId: selectedMediaId, text: pictureTranscript }); onOpenAgent() }}
+              className="flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-ai/50 bg-ai/10 px-3 py-3.5 text-center transition-colors hover:border-ai hover:bg-ai/15 sm:flex-row sm:justify-start sm:gap-3 sm:text-left"
+            >
+              <GatherContextIcon />
+              <span className="text-base font-semibold leading-tight text-ai">Tell your story</span>
+            </button>
           </div>
-          <button
-            id="s2p-media-open-agent"
-            type="button"
-            title="Speak to the agent and/or write text in the Picture transcript directly. Everything you tell here is gathered as context for your facts and content."
-            onClick={() => { setTranscriptHighlight({ mediaId: selectedMediaId, text: pictureTranscript }); onOpenAgent() }}
-            className="mt-2 flex cursor-pointer w-full items-center gap-3 rounded-lg border border-dashed border-ai/50 bg-ai/10 px-3 py-3.5 text-left transition-colors hover:border-ai hover:bg-ai/15"
-          >
-            <GatherContextIcon />
-            <span className="text-base font-semibold leading-tight text-ai">Tell your story</span>
-          </button>
           <ActionHint reason={extractDisabledReason} className="w-full">
           <button
             id="s2p-media-extract-facts"
