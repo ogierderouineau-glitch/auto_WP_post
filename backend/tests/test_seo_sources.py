@@ -123,42 +123,53 @@ class WordPressSiteScannerTests(unittest.TestCase):
 
 
 class FakeSearchConsole:
+    """Answers by date window: the current 3 months, then the 3 months before."""
+
     def __init__(self):
         self.bodies = []
 
     def post(self, url, json=None, timeout=None):
         self.bodies.append(json)
-        month = json["startDate"][:7]
-        rows = {
-            "2026-08": [{"keys": ["pottery"], "clicks": 2, "impressions": 10}],
-            "2026-09": [{"keys": ["pottery"], "clicks": 5, "impressions": 30},
-                        {"keys": ["glaze"], "clicks": 1, "impressions": 4}],
-            "2026-10": [{"keys": ["pottery"], "clicks": 4, "impressions": 20}],
-        }[month]
+        if json["startDate"] >= "2026-08-14":  # current window
+            rows = [
+                {"keys": ["pottery"], "clicks": 5, "impressions": 70},
+                {"keys": ["glaze"], "clicks": 1, "impressions": 4},
+                {"keys": ["kiln"], "clicks": 0, "impressions": 9},
+            ]
+        else:
+            rows = [{"keys": ["pottery"], "clicks": 2, "impressions": 30},
+                    {"keys": ["kiln"], "clicks": 3, "impressions": 3}]
         return FakeResponse({"rows": rows})
 
 
 class SearchConsoleProviderTests(unittest.TestCase):
-    def test_complete_months_with_deltas(self):
+    def test_three_month_totals_with_change_versus_previous_three_months(self):
         session = FakeSearchConsole()
         provider = SearchConsoleProvider("https://example.com/", "key.json", session=session)
-        stats = provider.monthly_queries(today=date(2026, 11, 13))
+        stats = {s.query: s for s in provider.period_queries(today=date(2026, 11, 13))}
         self.assertEqual(
             [(b["startDate"], b["endDate"]) for b in session.bodies],
-            [("2026-08-01", "2026-08-31"), ("2026-09-01", "2026-09-30"), ("2026-10-01", "2026-10-31")],
+            [("2026-08-14", "2026-11-13"), ("2026-05-14", "2026-08-13")],
         )
-        by_key = {(s.query, s.month): s for s in stats}
-        self.assertIsNone(by_key[("pottery", "2026-08")].clicks_delta)
-        self.assertEqual(by_key[("pottery", "2026-09")].clicks_delta, 3)
-        self.assertEqual(by_key[("glaze", "2026-09")].clicks_delta, 1)
-        self.assertEqual(by_key[("pottery", "2026-10")].clicks_delta, -1)
+        self.assertEqual({b["rowLimit"] for b in session.bodies}, {25000})
+        self.assertEqual(stats["pottery"].period, "2026-08-14..2026-11-13")
+        self.assertEqual((stats["pottery"].clicks, stats["pottery"].impressions), (5, 70))
+        self.assertEqual(stats["pottery"].clicks_delta, 3)
+        self.assertEqual(stats["glaze"].clicks_delta, 1)  # absent before counts as 0
+        self.assertEqual(stats["kiln"].clicks_delta, -3)
+
+    def test_month_end_dates_do_not_overflow(self):
+        from backend.app.providers.step_04_seo_sources import _months_before
+
+        self.assertEqual(_months_before(date(2026, 5, 31), 3), date(2026, 2, 28))
+        self.assertEqual(_months_before(date(2026, 1, 15), 3), date(2025, 10, 15))
 
     def test_error_status_raises(self):
         session = FakeSearchConsole()
         session.post = lambda *a, **k: FakeResponse({}, 403)
         provider = SearchConsoleProvider("https://example.com/", "key.json", session=session)
         with self.assertRaises(RuntimeError):
-            provider.monthly_queries(today=date(2026, 11, 13))
+            provider.period_queries(today=date(2026, 11, 13))
 
 
 if __name__ == "__main__":

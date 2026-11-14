@@ -5,6 +5,7 @@ Both are built per client with that client's own credentials. Nothing is cached.
 from __future__ import annotations
 
 import base64
+import calendar
 import json
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -40,10 +41,10 @@ class SiteEntry:
 @dataclass(frozen=True)
 class QueryStat:
     query: str
-    month: str  # "YYYY-MM"
+    period: str  # "YYYY-MM-DD..YYYY-MM-DD", the window the totals cover
     clicks: int
     impressions: int
-    clicks_delta: int | None  # versus the previous month; None without that month
+    clicks_delta: int | None  # clicks minus the previous window's clicks
 
 
 def _text(value: Any) -> str:
@@ -184,13 +185,14 @@ class WordPressSiteScanner:
         return self.find_by_urls([url])[url]
 
 
-def _month_start(day: date, months_back: int) -> date:
-    index = day.year * 12 + day.month - 1 - months_back
-    return date(index // 12, index % 12 + 1, 1)
+def _months_before(day: date, months: int) -> date:
+    index = day.year * 12 + day.month - 1 - months
+    year, month = index // 12, index % 12 + 1
+    return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
 
 
 class SearchConsoleProvider:
-    """Monthly query clicks for one client's property (read-only service account)."""
+    """Query clicks for one client's property (read-only service account)."""
 
     def __init__(
         self,
@@ -217,7 +219,7 @@ class SearchConsoleProvider:
             session = AuthorizedSession(credentials)
         self._session = session
 
-    def _month_rows(self, first: date, last: date, row_limit: int) -> dict[str, tuple[int, int]]:
+    def _period_rows(self, first: date, last: date, row_limit: int) -> dict[str, tuple[int, int]]:
         response = self._session.post(
             self._endpoint,
             json={
@@ -235,28 +237,25 @@ class SearchConsoleProvider:
             for row in response.json().get("rows", [])
         }
 
-    def monthly_queries(
-        self, *, months: int = 3, row_limit: int = 500, today: date | None = None
+    def period_queries(
+        self, *, months: int = 3, row_limit: int = 25000, today: date | None = None
     ) -> list[QueryStat]:
-        """The last `months` complete months, oldest first, each with its change versus
-        the month before (None for the oldest fetched month)."""
-        today = today or date.today()
-        stats: list[QueryStat] = []
-        previous: dict[str, tuple[int, int]] | None = None
-        for back in range(months, 0, -1):
-            first = _month_start(today, back)
-            last = _month_start(today, back - 1) - timedelta(days=1)
-            rows = self._month_rows(first, last, row_limit)
-            label = first.strftime("%Y-%m")
-            stats.extend(
-                QueryStat(
-                    query=query,
-                    month=label,
-                    clicks=clicks,
-                    impressions=impressions,
-                    clicks_delta=None if previous is None else clicks - previous.get(query, (0, 0))[0],
-                )
-                for query, (clicks, impressions) in rows.items()
+        """Totals per query over the last `months` months up to today, like the console's
+        "3 months" view, each with its click change versus the `months` before that."""
+        end = today or date.today()
+        start = _months_before(end, months) + timedelta(days=1)
+        previous_end = start - timedelta(days=1)
+        previous_start = _months_before(previous_end, months) + timedelta(days=1)
+        current = self._period_rows(start, end, row_limit)
+        previous = self._period_rows(previous_start, previous_end, row_limit)
+        label = f"{start.isoformat()}..{end.isoformat()}"
+        return [
+            QueryStat(
+                query=query,
+                period=label,
+                clicks=clicks,
+                impressions=impressions,
+                clicks_delta=clicks - previous.get(query, (0, 0))[0],
             )
-            previous = rows
-        return stats
+            for query, (clicks, impressions) in current.items()
+        ]

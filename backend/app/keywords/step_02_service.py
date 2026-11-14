@@ -67,7 +67,7 @@ class KeywordService:
         client_instructions: Sequence[dict[str, str]] = (),
     ) -> list[KeywordProposalRow]:
         refs = {f"p{index}": entry for index, entry in enumerate(entries, start=1)}
-        latest = self._latest_by_query(stats)
+        strongest = self._strongest_first(stats)
         output = self._structured(
             task="keyword_proposal",
             messages=structured_task_input(
@@ -93,28 +93,38 @@ class KeywordService:
                     "search_console_queries": [
                         {
                             "query": stat.query,
-                            "month": stat.month,
+                            "period": stat.period,
                             "clicks": stat.clicks,
                             "impressions": stat.impressions,
                             "clicks_delta": stat.clicks_delta,
                         }
-                        for stat in latest[:MAX_QUERIES]
+                        for stat in strongest[:MAX_QUERIES]
                     ],
                 },
             ),
             schema=KeywordProposalOutput,
         )
-        return self._verify(output, refs, {normalize_phrase(s.query): s for s in latest})
+        return self._verify(output, refs, self._merge_by_phrase(strongest))
 
     @staticmethod
-    def _latest_by_query(stats: Sequence[QueryStat]) -> list[QueryStat]:
-        """Newest month per query, strongest first."""
-        newest: dict[str, QueryStat] = {}
+    def _strongest_first(stats: Sequence[QueryStat]) -> list[QueryStat]:
+        return sorted(stats, key=lambda s: (-s.clicks, -s.impressions, s.query))
+
+    @staticmethod
+    def _merge_by_phrase(stats: Sequence[QueryStat]) -> dict[str, QueryStat]:
+        """Queries that differ only in spacing/hyphens count as one; their numbers add up."""
+        merged: dict[str, QueryStat] = {}
         for stat in stats:
-            current = newest.get(stat.query)
-            if current is None or stat.month > current.month:
-                newest[stat.query] = stat
-        return sorted(newest.values(), key=lambda s: (-s.clicks, -s.impressions, s.query))
+            key = normalize_phrase(stat.query)
+            known = merged.get(key)
+            merged[key] = stat if known is None else QueryStat(
+                query=known.query,
+                period=known.period,
+                clicks=known.clicks + stat.clicks,
+                impressions=known.impressions + stat.impressions,
+                clicks_delta=(known.clicks_delta or 0) + (stat.clicks_delta or 0),
+            )
+        return merged
 
     @staticmethod
     def _verify(
@@ -153,7 +163,7 @@ class KeywordService:
                     clicks=stat.clicks if stat else None,
                     impressions=stat.impressions if stat else None,
                     clicks_delta=stat.clicks_delta if stat else None,
-                    month=stat.month if stat else None,
+                    period=stat.period if stat else None,
                 )
             )
         return rows[:MAX_CANDIDATES]

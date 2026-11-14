@@ -67,7 +67,8 @@ selection. With no selection, the AI chooses keywords itself and records them.
 
 ### 2. Google Search Console
 - API `searchanalytics.query` for the client's property: dimension `query`, last
-  3 complete months, per-month clicks and change versus the previous month.
+  the last 3 months up to today (the console's "3 months" view), one total per query, with
+  the click change versus the 3 months before. Up to 25,000 queries per window are read.
 - Credentials per client in `clients.json` (property URL plus service-account
   reference; the service account must be added as a user in Search Console).
   Documented in README/deployment guide when built.

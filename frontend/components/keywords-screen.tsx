@@ -78,11 +78,11 @@ function SearchNumbers({ row }: { row: KeywordRow }) {
   }
   const delta = row.clicks_delta
   return (
-    <span className="inline-flex flex-wrap items-center gap-x-2 text-xs" title={row.month ? `Month: ${row.month}` : undefined}>
+    <span className="inline-flex flex-wrap items-center gap-x-2 text-xs" title={row.period ? `Last 3 months (${row.period.replace("..", " to ")})` : undefined}>
       <span><strong className="text-sm">{row.clicks ?? 0}</strong> clicks</span>
       <span className="text-muted-foreground">{row.impressions ?? 0} views</span>
       {delta != null && delta !== 0 && (
-        <span className={`inline-flex items-center gap-0.5 font-medium ${delta > 0 ? "text-confirm" : "text-destructive"}`} title="Change in clicks versus the previous month">
+        <span className={`inline-flex items-center gap-0.5 font-medium ${delta > 0 ? "text-confirm" : "text-destructive"}`} title="Change in clicks versus the 3 months before">
           {delta > 0 ? <TrendingUp className="size-3" aria-hidden="true" /> : <TrendingDown className="size-3" aria-hidden="true" />}
           {delta > 0 ? `+${delta}` : delta}
         </span>
@@ -366,7 +366,7 @@ export function KeywordsScreen({
                       <th scope="col" className="px-3 py-2">Keyword</th>
                       <th scope="col" className="px-3 py-2">Alternatives</th>
                       <th scope="col" className="px-3 py-2">Status</th>
-                      <th scope="col" className="px-3 py-2">Google search</th>
+                      <th scope="col" className="px-3 py-2" title="Totals for the last 3 months, like the Search Console 3 months view">Google search · 3 months</th>
                       <th scope="col" className="px-3 py-2">Related pages</th>
                     </tr>
                   </thead>

@@ -196,7 +196,7 @@ export type KeywordRow = {
   clicks: number | null
   impressions: number | null
   clicks_delta: number | null
-  month: string | null
+  period?: string | null
 }
 
 export type KeywordProposal = {

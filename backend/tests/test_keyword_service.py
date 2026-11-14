@@ -66,14 +66,21 @@ class KeywordServiceTests(unittest.TestCase):
         self.assertEqual((rows[0].status, rows[0].related_urls), ("free", []))
 
     def test_search_console_numbers_come_from_data_not_model(self):
-        stats = [
-            QueryStat("root-canal", "2026-09", 2, 40, None),
-            QueryStat("root-canal", "2026-10", 5, 60, 3),
-        ]
+        stats = [QueryStat("root-canal", "2026-08-14..2026-11-13", 5, 60, 3)]
         rows, _ = run([candidate("Root canal"), candidate("invisible braces")], stats=stats)
-        self.assertEqual((rows[0].clicks, rows[0].impressions, rows[0].clicks_delta, rows[0].month),
-                         (5, 60, 3, "2026-10"))
+        self.assertEqual(
+            (rows[0].clicks, rows[0].impressions, rows[0].clicks_delta, rows[0].period),
+            (5, 60, 3, "2026-08-14..2026-11-13"),
+        )
         self.assertIsNone(rows[1].clicks)  # no measurement: still proposed
+
+    def test_queries_differing_only_in_spacing_are_added_up(self):
+        stats = [
+            QueryStat("root canal", "p", 2, 20, 1),
+            QueryStat("rootcanal", "p", 1, 5, 0),
+        ]
+        rows, _ = run([candidate("Root-Canal")], stats=stats)
+        self.assertEqual((rows[0].clicks, rows[0].impressions, rows[0].clicks_delta), (3, 25, 1))
 
     def test_blank_and_duplicate_keywords_removed_and_capped(self):
         many = [candidate(f"term {i}") for i in range(20)]

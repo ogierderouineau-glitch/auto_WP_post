@@ -42,10 +42,10 @@ class FakeSearchConsole:
     def __init__(self, fail=False):
         self.fail = fail
 
-    def monthly_queries(self):
+    def period_queries(self):
         if self.fail:
             raise RuntimeError("HTTP 403")
-        return [QueryStat("solar battery", "2026-10", 7, 90, 2)]
+        return [QueryStat("solar battery", "2026-08-14..2026-11-13", 7, 90, 2)]
 
 
 class FakeModel:
@@ -243,7 +243,7 @@ class CountingScanner(FakeScanner):
 
 
 class ForbiddenSearchConsole:
-    def monthly_queries(self):
+    def period_queries(self):
         raise AssertionError("the automatic scan must not read Search Console")
 
 

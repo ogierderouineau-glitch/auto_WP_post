@@ -94,7 +94,7 @@ class SeoSources:
             snapshot.notes.append("Search Console is not configured; no measured values.")
         else:
             try:
-                snapshot.stats = provider.monthly_queries()
+                snapshot.stats = provider.period_queries()
                 snapshot.sources.append("search_console")
             except Exception as exc:  # optional source: report and continue
                 snapshot.notes.append(f"Search Console could not be read: {exc}")

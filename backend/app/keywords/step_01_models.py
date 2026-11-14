@@ -43,4 +43,4 @@ class KeywordProposalRow(BaseModel):
     clicks: int | None = None
     impressions: int | None = None
     clicks_delta: int | None = None
-    month: str | None = None
+    period: str | None = None  # window the Search Console totals cover
