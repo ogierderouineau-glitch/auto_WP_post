@@ -258,6 +258,17 @@ def reload_v2_knowledge_if_initialized(client_id: str | None = None) -> bool:
         return True
 
 
+def keyword_source_status(client: object) -> dict[str, bool]:
+    """Which optional keyword sources this client's configuration enables (no secrets)."""
+    property_url = getattr(client, "search_console_property", "")
+    credentials_file = getattr(client, "search_console_credentials_file", "")
+    return {
+        "search_console_configured": bool(property_url and credentials_file),
+        "search_console_credentials_file_found": bool(credentials_file and os.path.isfile(credentials_file)),
+        "service_link_category_configured": bool(getattr(client, "service_link_category", "")),
+    }
+
+
 def v2_readiness() -> dict[str, object]:
     service = get_v2_service()
     snapshot = service.knowledge.current()
@@ -355,6 +366,7 @@ def v2_readiness() -> dict[str, object]:
             "transcription": V2_TRANSCRIPTION_MODEL,
         },
         "wordpress_contract": wordpress_contract,
+        "keyword_sources": keyword_source_status(get_client_config()),
     }
 
 

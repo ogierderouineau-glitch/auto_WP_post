@@ -60,6 +60,11 @@ account key (a secret file, never committed) that was added as a read-only user 
 the client's Search Console property. `service_link_category` is the internal-links
 `category` value that marks the client's service pages.
 
+To check what a deployment loaded, call `GET /api/content-sessions/_readiness` (with the client's
+`X-API-Key`) and read `keyword_sources`: `search_console_configured`,
+`search_console_credentials_file_found` and `service_link_category_configured`. Notes on the Keywords screen are
+saved with each proposal, so run "Search again" after changing configuration.
+
 Client IDs must contain only lowercase letters, digits, `_`, or `-`. Import
 keys must be unique. The backend fails at startup if the file is missing or
 invalid.
