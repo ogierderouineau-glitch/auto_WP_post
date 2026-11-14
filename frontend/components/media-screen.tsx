@@ -6,7 +6,7 @@ import { useActionWarning } from "@/components/action-warning"
 
 import { hasExtractedFacts, hasSavedTranscript } from "@/lib/content-sessions"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   AlertTriangle,
   Check,
@@ -984,6 +984,24 @@ export function MediaScreen({
     }, "Video removed.")
   }
 
+  // Transparent previous/next arrows over the preview frame (useful on mobile).
+  const navigable = pendingImages.length + images.length + videos.length > 1
+  function withArrows(preview: ReactNode, className = "") {
+    if (!navigable) return preview
+    const arrow = "absolute top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/25 text-white transition-colors hover:bg-black/50"
+    return (
+      <div className={`relative ${className}`}>
+        {preview}
+        <button type="button" onClick={() => selectOffset(-1)} aria-label="Previous media" className={`${arrow} left-2`}>
+          <ChevronLeft className="size-6" aria-hidden="true" />
+        </button>
+        <button type="button" onClick={() => selectOffset(1)} aria-label="Next media" className={`${arrow} right-2`}>
+          <ChevronRight className="size-6" aria-hidden="true" />
+        </button>
+      </div>
+    )
+  }
+
   const hasUploadedMedia = images.length + videos.length > 0
   const mediaBusy = operation === "loading" || transcriptSaving
   const statusItems = [
@@ -1295,7 +1313,7 @@ export function MediaScreen({
             </div>
 
             {selectedPendingImage ? (
-              selectedPendingImage.kind === "video" ? (
+              withArrows(selectedPendingImage.kind === "video" ? (
                 <video src={selectedPendingImage.url} controls className="aspect-video w-full rounded-lg border border-border bg-black object-contain" />
               ) : (
                 <img
@@ -1303,10 +1321,10 @@ export function MediaScreen({
                   alt={selectedPendingImage.filename}
                   className="aspect-[4/3] w-full rounded-lg border border-border bg-muted object-contain"
                 />
-              )
+              ))
             ) : selectedVideo && session ? (
               <>
-                <VideoPreview auth={auth} session={session} filename={selectedVideo.filename} />
+                {withArrows(<VideoPreview auth={auth} session={session} filename={selectedVideo.filename} />)}
                 <div className="mt-4 flex justify-end border-t border-destructive/20 pt-3">
                   <button
                     id="s2p-media-remove-video"
@@ -1322,7 +1340,7 @@ export function MediaScreen({
               </>
             ) : selectedImage && session ? (
               <>
-                <div className="hidden gap-3 lg:grid lg:grid-cols-2">
+                {withArrows(<div className="grid gap-3 lg:grid-cols-2">
                   <div>
                     <p className="mb-1.5 text-xs font-medium text-muted-foreground">Original</p>
                     <ImagePreview auth={auth} session={session} filename={selectedImage.filename} original label="Original" />
@@ -1337,7 +1355,7 @@ export function MediaScreen({
                       revision={`${selectedImage.processed_revision || ""}|${selectedImage.operations.join("|")}`}
                     />
                   </div>
-                </div>
+                </div>, "hidden lg:block")}
 
                 <div className="lg:hidden">
                   {selectedImage.processed_filename ? (
@@ -1366,14 +1384,14 @@ export function MediaScreen({
                   ) : (
                     <p className="mb-1.5 text-xs font-medium text-muted-foreground">Original · no processed version</p>
                   )}
-                  <ImagePreview
+                  {withArrows(<ImagePreview
                     auth={auth}
                     session={session}
                     filename={mobilePreviewOriginal ? selectedImage.filename : selectedFilename}
                     original={mobilePreviewOriginal}
                     label={mobilePreviewOriginal ? "Original" : selectedImage.processed_filename ? "Processed" : "Original"}
                     revision={mobilePreviewOriginal ? "" : `${selectedImage.processed_revision || ""}|${selectedImage.operations.join("|")}`}
-                  />
+                  />)}
                 </div>
 
                 {cropSkipWarning(selectedImage) && (
@@ -1400,9 +1418,12 @@ export function MediaScreen({
                   </div>
                 )}
 
-                <div className="mt-4 space-y-3">
-                  <div className="rounded-lg border border-border bg-muted/30 p-3">
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Edit picture</p>
+                <details className="group mt-4 rounded-lg border border-border bg-muted/30 p-3">
+                  <summary className="flex cursor-pointer select-none items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    <ChevronRight className="size-4 transition-transform group-open:rotate-90" aria-hidden="true" />
+                    Picture options
+                  </summary>
+                  <div className="mt-3 space-y-3">
                     <div className="flex flex-wrap gap-2">
                       <button
                         id="s2p-media-recrop-with-ai"
@@ -1426,8 +1447,7 @@ export function MediaScreen({
                         Edit with AI ($)
                       </button>
                     </div>
-                  </div>
-                  <div className="flex flex-wrap justify-end gap-2 border-t border-destructive/20 pt-3">
+                    <div className="flex flex-wrap justify-end gap-2 border-t border-destructive/20 pt-3">
                     <button
                       id="s2p-media-restore-original"
                       type="button"
@@ -1448,8 +1468,9 @@ export function MediaScreen({
                       <Trash2 className="size-4" aria-hidden="true" />
                       Remove picture
                     </button>
+                    </div>
                   </div>
-                </div>
+                </details>
               </>
             ) : (
               <div className="flex aspect-[4/3] w-full items-center justify-center rounded-lg border border-dashed border-border bg-muted">
