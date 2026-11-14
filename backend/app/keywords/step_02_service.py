@@ -8,6 +8,7 @@ from backend.app.keywords.step_01_models import (
     KeywordProposalRow,
     normalize_phrase,
 )
+from backend.app.keywords.step_04_measure import measure
 from backend.app.providers.step_04_seo_sources import QueryStat, SiteEntry
 
 MAX_CANDIDATES = 12
@@ -104,33 +105,17 @@ class KeywordService:
             ),
             schema=KeywordProposalOutput,
         )
-        return self._verify(output, refs, self._merge_by_phrase(strongest))
+        return self._verify(output, refs, strongest)
 
     @staticmethod
     def _strongest_first(stats: Sequence[QueryStat]) -> list[QueryStat]:
         return sorted(stats, key=lambda s: (-s.clicks, -s.impressions, s.query))
 
     @staticmethod
-    def _merge_by_phrase(stats: Sequence[QueryStat]) -> dict[str, QueryStat]:
-        """Queries that differ only in spacing/hyphens count as one; their numbers add up."""
-        merged: dict[str, QueryStat] = {}
-        for stat in stats:
-            key = normalize_phrase(stat.query)
-            known = merged.get(key)
-            merged[key] = stat if known is None else QueryStat(
-                query=known.query,
-                period=known.period,
-                clicks=known.clicks + stat.clicks,
-                impressions=known.impressions + stat.impressions,
-                clicks_delta=(known.clicks_delta or 0) + (stat.clicks_delta or 0),
-            )
-        return merged
-
-    @staticmethod
     def _verify(
         output: KeywordProposalOutput,
         refs: dict[str, SiteEntry],
-        measured: dict[str, QueryStat],
+        stats: Sequence[QueryStat],
     ) -> list[KeywordProposalRow]:
         """Application facts win over model claims: an exact focus keyphrase match is
         `focus_elsewhere`, unknown refs are dropped, numbers come from Search Console."""
@@ -152,7 +137,7 @@ class KeywordService:
                 urls = [*dict.fromkeys([*focus_urls[key], *urls])]
             elif status == "focus_elsewhere":
                 status = "mentioned_elsewhere" if urls else "free"  # no exact Yoast evidence
-            stat = measured.get(key)
+            numbers = measure(candidate.keyword, stats)
             rows.append(
                 KeywordProposalRow(
                     keyword=candidate.keyword.strip(),
@@ -160,10 +145,11 @@ class KeywordService:
                     status=status,
                     related_urls=urls,
                     rationale=candidate.rationale,
-                    clicks=stat.clicks if stat else None,
-                    impressions=stat.impressions if stat else None,
-                    clicks_delta=stat.clicks_delta if stat else None,
-                    period=stat.period if stat else None,
+                    clicks=numbers.clicks,
+                    impressions=numbers.impressions,
+                    clicks_delta=numbers.clicks_delta,
+                    period=numbers.period,
+                    related_searches=[r.model_dump() for r in numbers.related_searches],
                 )
             )
         return rows[:MAX_CANDIDATES]

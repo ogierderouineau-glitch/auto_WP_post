@@ -44,6 +44,35 @@ def candidate(keyword, status="free", refs=(), alternatives=()):
     )
 
 
+class MeasureTests(unittest.TestCase):
+    def setUp(self):
+        from backend.app.keywords.step_04_measure import measure
+
+        self.measure = measure
+
+    def stats(self):
+        rows = [("smoothie bikes", 1, 2), ("smoothie fahrrad mieten", 2, 50), ("fahrrad mieten berlin", 1, 90),
+                ("mobile bar berlin", 3, 80), ("cocktailbar berlin", 2, 70)]
+        # many unrelated "berlin" queries make that word too common to link phrases on its own
+        rows += [(f"filler berlin {i}", 0, 1) for i in range(60)]
+        return [QueryStat(q, "p", c, i, 0) for q, c, i in rows]
+
+    def test_related_queries_share_meaningful_words_ranked_by_views(self):
+        result = self.measure("Smoothie-Fahrrad", self.stats())
+        self.assertIsNone(result.clicks)  # no exact query
+        self.assertEqual([r.query for r in result.related_searches],
+                         ["fahrrad mieten berlin", "smoothie fahrrad mieten", "smoothie bikes"])
+
+    def test_a_very_common_word_alone_does_not_make_queries_related(self):
+        result = self.measure("Showbarkeeper Berlin", self.stats())
+        self.assertEqual(result.related_searches, [])
+
+    def test_exact_match_ignores_spacing_and_is_not_repeated_as_related(self):
+        result = self.measure("Mobile-Bar Berlin", [QueryStat("mobile bar berlin", "p", 3, 80, 1)])
+        self.assertEqual((result.clicks, result.impressions, result.clicks_delta), (3, 80, 1))
+        self.assertEqual(result.related_searches, [])
+
+
 class NormalizeTests(unittest.TestCase):
     def test_compounds_hyphens_and_case_match(self):
         self.assertEqual(normalize_phrase("Kaffee-Catering"), normalize_phrase("kaffeecatering"))

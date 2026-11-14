@@ -176,7 +176,13 @@ decide how to use them. Without a keyword step, the first generation of a sessio
 blocks generation. The scan is stored with the session (`site_scanned_at`) and is not
 repeated. Internal-link ranking gives selected keywords and their alternatives extra
 weight (`InternalLinkService.rank(keywords=...)`, used for generation and candidate
-refresh). Screen 3 (`frontend/components/keywords-screen.tsx`, step between Facts and Content) starts the job, shows
+refresh). Search Console numbers are the last-3-months totals per query (the console's "3 months" view) and the
+click change versus the 3 months before; the exact phrase match ignores case, spaces and hyphens, and
+`keywords/step_04_measure.py` adds up to 3 related searches (shared meaningful words; words found in more than
+5% of all queries do not count alone). The busiest 1,000 queries are stored in `keyword_proposal.queries`, so
+keywords typed in by hand get the same numbers in `keyword_proposal.custom`. Typed-in keywords survive a new
+search; earlier proposals that are no longer listed are dropped from the selection.
+Screen 3 (`frontend/components/keywords-screen.tsx`, step between Facts and Content) starts the job, shows
 the stage progress and a table of proposed keywords with alternatives, status, Search Console numbers and
 related pages, and autosaves the multi-selection (first keyword = focus, changed with the star; custom keywords
 allowed; skipping lets the AI choose). The recording widget is hidden on this screen. Not checked in a real

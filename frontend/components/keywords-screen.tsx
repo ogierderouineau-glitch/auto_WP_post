@@ -24,6 +24,7 @@ import {
   startKeywordProposal,
   waitForSessionJob,
   type ContentSession,
+  type KeywordMeasurement,
   type KeywordRow,
   type KeywordStatus,
 } from "@/lib/content-sessions"
@@ -65,26 +66,37 @@ function pagePath(url: string) {
   }
 }
 
-function SearchNumbers({ row }: { row: KeywordRow }) {
-  if (row.clicks == null && row.impressions == null) {
-    return (
-      <span
-        className="text-xs text-muted-foreground"
-        title="No Search Console measurement for this term. It can still be used."
-      >
-        No data
-      </span>
-    )
-  }
-  const delta = row.clicks_delta
+function SearchNumbers({ data }: { data: KeywordMeasurement }) {
+  const related = data.related_searches ?? []
+  const exact = data.clicks != null || data.impressions != null
+  const delta = data.clicks_delta
   return (
-    <span className="inline-flex flex-wrap items-center gap-x-2 text-xs" title={row.period ? `Last 3 months (${row.period.replace("..", " to ")})` : undefined}>
-      <span><strong className="text-sm">{row.clicks ?? 0}</strong> clicks</span>
-      <span className="text-muted-foreground">{row.impressions ?? 0} views</span>
-      {delta != null && delta !== 0 && (
-        <span className={`inline-flex items-center gap-0.5 font-medium ${delta > 0 ? "text-confirm" : "text-destructive"}`} title="Change in clicks versus the 3 months before">
-          {delta > 0 ? <TrendingUp className="size-3" aria-hidden="true" /> : <TrendingDown className="size-3" aria-hidden="true" />}
-          {delta > 0 ? `+${delta}` : delta}
+    <span className="block space-y-1">
+      {exact ? (
+        <span className="inline-flex flex-wrap items-center gap-x-2 text-xs" title={data.period ? `Last 3 months (${data.period.replace("..", " to ")})` : undefined}>
+          <span><strong className="text-sm">{data.clicks ?? 0}</strong> clicks</span>
+          <span className="text-muted-foreground">{data.impressions ?? 0} views</span>
+          {delta != null && delta !== 0 && (
+            <span className={`inline-flex items-center gap-0.5 font-medium ${delta > 0 ? "text-confirm" : "text-destructive"}`} title="Change in clicks versus the 3 months before">
+              {delta > 0 ? <TrendingUp className="size-3" aria-hidden="true" /> : <TrendingDown className="size-3" aria-hidden="true" />}
+              {delta > 0 ? `+${delta}` : delta}
+            </span>
+          )}
+        </span>
+      ) : (
+        <span className="block text-xs text-muted-foreground" title="No Google search matches this exact phrase. It can still be used.">
+          {related.length ? "No exact match" : "No data"}
+        </span>
+      )}
+      {related.length > 0 && (
+        <span className="block text-[11px] leading-snug text-muted-foreground" title="Related Google searches: they share the key words of this phrase">
+          Related:{" "}
+          {related.map((item, index) => (
+            <span key={item.query}>
+              {index > 0 && " · "}
+              {item.query} ({item.clicks} clicks, {item.impressions} views)
+            </span>
+          ))}
         </span>
       )}
     </span>
@@ -405,7 +417,7 @@ export function KeywordsScreen({
                             <td className="px-3 py-3">
                               <span title={status.hint} className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${status.className}`}>{status.label}</span>
                             </td>
-                            <td className="px-3 py-3"><SearchNumbers row={row} /></td>
+                            <td className="px-3 py-3"><SearchNumbers data={row} /></td>
                             <td className="px-3 py-3">
                               {row.related_urls.length ? (
                                 <button
@@ -472,7 +484,10 @@ export function KeywordsScreen({
                     >
                       <Star className={`size-4 ${index === 0 ? "fill-gold text-gold" : "text-muted-foreground hover:text-gold"}`} aria-hidden="true" />
                     </button>
-                    <span className="min-w-0 flex-1 break-words">{keyword}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="break-words">{keyword}</span>
+                      {proposal?.custom?.[keyword] && <SearchNumbers data={proposal.custom[keyword]} />}
+                    </span>
                     <button type="button" onClick={() => toggle(keyword)} aria-label={`Remove ${keyword}`} className="shrink-0 text-muted-foreground hover:text-destructive">
                       <X className="size-4" aria-hidden="true" />
                     </button>

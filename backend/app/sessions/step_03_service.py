@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+from dataclasses import asdict
 from datetime import date, datetime, timezone
 from typing import Any, Callable, Literal
 from urllib.parse import urlparse
@@ -58,6 +59,8 @@ from backend.app.images.step_03_metadata_context import (
 from backend.app.keywords.step_01_models import normalize_phrase
 from backend.app.keywords.step_02_service import KeywordService
 from backend.app.keywords.step_03_sources import SeoSources
+from backend.app.keywords.step_04_measure import measure
+from backend.app.providers.step_04_seo_sources import QueryStat
 from backend.app.knowledge_base.step_04_service import KnowledgeBaseService
 from backend.app.models.step_01_session import Approval, ContentSession, FactValue, OperationRecord
 from backend.app.models.step_02_payload import WordPressPayload
@@ -81,6 +84,9 @@ from backend.app.workflow.step_04_generation_conditions import (
 )
 from backend.app.workflow.step_02_clarification import ClarificationService
 from backend.app.validation.step_01_draft import DraftValidator
+
+
+STORED_QUERIES = 1000
 
 
 class ContentSessionService:
@@ -303,6 +309,14 @@ class ContentSessionService:
             entries=snapshot.entries,
             stats=snapshot.stats,
         )
+        # Keep keywords typed in by hand; drop earlier proposals that are no longer listed.
+        old_rows = {normalize_phrase(r["keyword"]) for r in (session.keyword_proposal or {}).get("rows") or []}
+        new_rows = {normalize_phrase(row.keyword) for row in rows}
+        kept = [
+            k for k in session.selected_keywords
+            if normalize_phrase(k) in new_rows or normalize_phrase(k) not in old_rows
+        ]
+        queries = sorted(snapshot.stats, key=lambda s: (-s.impressions, -s.clicks, s.query))[:STORED_QUERIES]
         updated = self._record_provider_usage(session, provider).model_copy(
             update={
                 "keyword_proposal": {
@@ -311,14 +325,16 @@ class ContentSessionService:
                     "scanned_pages": len(snapshot.entries),
                     "sources": snapshot.sources,
                     "notes": snapshot.notes,
+                    # Busiest queries kept so keywords added by hand can be measured later.
+                    "queries": [asdict(stat) for stat in queries],
+                    "custom": {
+                        k: measure(k, queries).model_dump()
+                        for k in kept if normalize_phrase(k) not in new_rows
+                    } if queries else {},
                 },
                 "site_focus_keyphrases": self._focus_keyphrase_urls(snapshot.entries),
                 "site_scanned_at": datetime.now(timezone.utc).isoformat(),
-                # Proposed keywords may change; keep only selections that still exist.
-                "selected_keywords": [
-                    k for k in session.selected_keywords
-                    if normalize_phrase(k) in {normalize_phrase(r.keyword) for r in rows}
-                ],
+                "selected_keywords": kept,
             }
         )
         return self.repository.save(updated, expected_version=expected_version)
@@ -407,10 +423,19 @@ class ContentSessionService:
         clean = list(dict.fromkeys(" ".join(k.split()) for k in keywords if k.strip()))
         if len(clean) > 12 or any(len(k) > 80 for k in clean):
             raise InvalidUploadError("Select at most 12 keywords of up to 80 characters each.")
-        if clean == session.selected_keywords:
+        proposal = dict(session.keyword_proposal or {})
+        stored = [QueryStat(**item) for item in proposal.get("queries") or []]
+        proposed = {normalize_phrase(row["keyword"]) for row in proposal.get("rows") or []}
+        if stored:  # numbers for keywords typed in by hand, from the saved search data
+            proposal["custom"] = {
+                keyword: measure(keyword, stored).model_dump()
+                for keyword in clean
+                if normalize_phrase(keyword) not in proposed
+            }
+        if clean == session.selected_keywords and proposal == (session.keyword_proposal or {}):
             return session
         return self.repository.save(
-            session.model_copy(update={"selected_keywords": clean}),
+            session.model_copy(update={"selected_keywords": clean, "keyword_proposal": proposal}),
             expected_version=expected_version,
         )
 

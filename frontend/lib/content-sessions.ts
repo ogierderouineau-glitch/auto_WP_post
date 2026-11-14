@@ -187,16 +187,22 @@ export type ContentSession = {
 
 export type KeywordStatus = "free" | "focus_elsewhere" | "mentioned_elsewhere"
 
-export type KeywordRow = {
+export type RelatedSearch = { query: string; clicks: number; impressions: number }
+
+export type KeywordMeasurement = {
+  clicks: number | null
+  impressions: number | null
+  clicks_delta: number | null
+  period?: string | null
+  related_searches?: RelatedSearch[]
+}
+
+export type KeywordRow = KeywordMeasurement & {
   keyword: string
   alternatives: string[]
   status: KeywordStatus
   related_urls: string[]
   rationale: string
-  clicks: number | null
-  impressions: number | null
-  clicks_delta: number | null
-  period?: string | null
 }
 
 export type KeywordProposal = {
@@ -205,6 +211,7 @@ export type KeywordProposal = {
   scanned_pages?: number
   sources?: string[]
   notes?: string[]
+  custom?: Record<string, KeywordMeasurement>
 }
 
 export type SessionOperationRecord = {

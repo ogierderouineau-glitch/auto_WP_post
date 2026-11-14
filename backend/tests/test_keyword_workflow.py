@@ -159,7 +159,11 @@ def test_selection_is_validated_stored_and_pruned_on_new_proposal(tmp_path):
         again.session_id, keywords=["solar battery", "my own phrase"], expected_version=again.version
     )
     refreshed = service.propose_keywords(selected.session_id, expected_version=selected.version)
-    assert refreshed.selected_keywords == ["solar battery"]  # the free-text one is not in the new list
+    assert refreshed.selected_keywords == ["solar battery", "my own phrase"]  # typed-in keywords stay
+    # A keyword that was proposed earlier but is no longer listed is dropped.
+    service.language_model = service.revision_language_model = FakeModel([candidate("heat pump")])
+    changed = service.propose_keywords(refreshed.session_id, expected_version=refreshed.version)
+    assert changed.selected_keywords == ["my own phrase"]
 
 
 def with_proposal(service, session, selected):
@@ -303,3 +307,24 @@ def test_keyword_phrases_include_alternatives_of_selected_keywords(tmp_path):
     service, session = build(tmp_path, scanner=FakeScanner())
     session = with_proposal(service, session, ["solar battery", "my own phrase"])
     assert service._keyword_phrases(session) == ("solar battery", "home storage", "my own phrase")
+
+
+def test_keywords_typed_in_by_hand_get_search_console_numbers(tmp_path):
+    stats = [
+        QueryStat("my own phrase", "2026-08-14..2026-11-13", 4, 80, 1),
+        QueryStat("my own phrase near me", "2026-08-14..2026-11-13", 0, 30, 0),
+    ]
+
+    class Console:
+        def period_queries(self):
+            return stats
+
+    service, session = build(tmp_path, scanner=FakeScanner(categories=[4]), search_console=Console())
+    proposed = service.propose_keywords(session.session_id, expected_version=session.version)
+    chosen = service.select_keywords(
+        proposed.session_id, keywords=["My  Own phrase", "solar battery"], expected_version=proposed.version
+    )
+    custom = chosen.keyword_proposal["custom"]
+    assert list(custom) == ["My Own phrase"]  # proposed rows are measured in the table already
+    assert (custom["My Own phrase"]["clicks"], custom["My Own phrase"]["impressions"]) == (4, 80)
+    assert custom["My Own phrase"]["related_searches"][0]["query"] == "my own phrase near me"

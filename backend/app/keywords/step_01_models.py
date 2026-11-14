@@ -44,3 +44,4 @@ class KeywordProposalRow(BaseModel):
     impressions: int | None = None
     clicks_delta: int | None = None
     period: str | None = None  # window the Search Console totals cover
+    related_searches: list[dict] = Field(default_factory=list)
