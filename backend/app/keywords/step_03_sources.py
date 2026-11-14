@@ -39,6 +39,10 @@ class SeoSources:
         self._search_console_factory = search_console_factory
         self._service_category = service_category.strip().lower()
 
+    def yoast_scores(self, wp_post_type: str, post_id: int) -> dict[str, Any] | None:
+        scanner = self._scanner_factory()
+        return scanner.yoast_scores(wp_post_type, post_id) if scanner else None
+
     def gather(
         self,
         *,

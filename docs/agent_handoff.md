@@ -189,6 +189,15 @@ allowed; skipping lets the AI choose). The recording widget is hidden on this sc
 browser yet. Plan: [seo_keyword_intelligence_plan.md](seo_keyword_intelligence_plan.md).
 Tests: `test_seo_sources.py`, `test_keyword_service.py`, `test_keyword_workflow.py`.
 
+## SEO check
+
+The Content screen's Quality check container (shown once a draft exists) has two subsections: the existing AI content
+review and the SEO check. The SEO check (`GET /{session_id}/seo-check`, `validation/step_02_seo.py`) is deterministic,
+workbook-driven (`seo_rules` rows with `action_type` `check_role` / `check_length`, `stage` `quality_check`) and
+unsaved. "Revise N fields" selects the failing fields and opens the existing content agent with the failed checks as
+the instruction; revisions use the normal job. Details and pilot rows: [seo_keyword_intelligence_plan.md](seo_keyword_intelligence_plan.md).
+Tests: `test_seo_check.py`. Not checked in a browser yet.
+
 ## Workbook versus application ownership
 
 Client-owned sheets define post types, shared/ACF fields, SEO constraints,

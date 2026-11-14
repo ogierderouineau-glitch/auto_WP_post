@@ -328,3 +328,25 @@ def test_keywords_typed_in_by_hand_get_search_console_numbers(tmp_path):
     assert list(custom) == ["My Own phrase"]  # proposed rows are measured in the table already
     assert (custom["My Own phrase"]["clicks"], custom["My Own phrase"]["impressions"]) == (4, 80)
     assert custom["My Own phrase"]["related_searches"][0]["query"] == "my own phrase near me"
+
+
+def test_service_seo_check_reports_counts_and_revision_fields(tmp_path):
+    service, session = build(tmp_path, scanner=FakeScanner())
+    report = service.seo_check(session.session_id)
+    assert set(report) >= {"findings", "counts", "revision_field_ids", "revision_instruction", "yoast_reference"}
+    assert report["yoast_reference"] is None  # not published
+    assert report["counts"]["fail"] == len([f for f in report["findings"] if f["status"] == "fail"])
+
+
+def test_yoast_scores_are_read_for_a_published_post(tmp_path):
+    class Scores:
+        def yoast_scores(self, wp_post_type, post_id):
+            return {"seo": 80, "readability": None, "wordpress_status": "draft", "focus_keyphrase": "x", "id": post_id}
+
+    scanner = FakeScanner()
+    service, session = build(tmp_path, scanner=scanner)
+    service.seo_sources.yoast_scores = Scores().yoast_scores
+    published = service.repository.save(
+        session.model_copy(update={"wordpress_result": {"post_id": 41}}), expected_version=session.version
+    )
+    assert service.seo_check(published.session_id)["yoast_reference"]["id"] == 41

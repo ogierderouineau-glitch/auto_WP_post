@@ -60,6 +60,7 @@ from backend.app.keywords.step_01_models import normalize_phrase
 from backend.app.keywords.step_02_service import KeywordService
 from backend.app.keywords.step_03_sources import SeoSources
 from backend.app.keywords.step_04_measure import measure
+from backend.app.validation.step_02_seo import SeoChecker
 from backend.app.providers.step_04_seo_sources import QueryStat
 from backend.app.knowledge_base.step_04_service import KnowledgeBaseService
 from backend.app.models.step_01_session import Approval, ContentSession, FactValue, OperationRecord
@@ -412,6 +413,32 @@ class ContentSessionService:
         if conflicts:
             context["keyword_conflicts"] = conflicts
         return context
+
+    def seo_check(self, session_id: str) -> dict[str, Any]:
+        """Deterministic SEO check of the current draft (no model call, nothing saved)."""
+        session = self.repository.get(session_id)
+        if not session.wordpress_payload:
+            raise DraftValidationError("Generate a draft before running the SEO check.")
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        checker = SeoChecker()
+        findings = checker.check(session, snapshot)
+        failed_ids = list(dict.fromkeys(
+            field_id for finding in findings if finding.status == "fail" for field_id in finding.field_ids
+        ))
+        yoast = None
+        post_id = session.wordpress_result.get("post_id")
+        if post_id and self.seo_sources is not None:
+            try:  # optional read-only reference
+                yoast = self.seo_sources.yoast_scores(session.wordpress_post_type, int(post_id))
+            except Exception as exc:
+                print(f"[yoast scores skipped] {exc}", flush=True)
+        return {
+            "findings": [asdict(finding) for finding in findings],
+            "counts": {status: sum(1 for f in findings if f.status == status) for status in ("pass", "fail", "skipped")},
+            "revision_field_ids": failed_ids,
+            "revision_instruction": checker.revision_instruction(session, findings),
+            "yoast_reference": yoast,
+        }
 
     def select_keywords(
         self, session_id: str, *, keywords: list[str], expected_version: int

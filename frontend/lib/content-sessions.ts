@@ -667,6 +667,32 @@ export function startKeywordProposal(auth: ApiClientOptions, session: ContentSes
   })
 }
 
+export type SeoFinding = {
+  check_id: string
+  label: string
+  status: "pass" | "fail" | "skipped"
+  severity: "high" | "medium" | "low"
+  message: string
+  field_ids: string[]
+}
+
+export type SeoCheckReport = {
+  findings: SeoFinding[]
+  counts: { pass: number; fail: number; skipped: number }
+  revision_field_ids: string[]
+  revision_instruction: string
+  yoast_reference: {
+    seo: number | null
+    readability: number | null
+    wordpress_status?: string | null
+    focus_keyphrase?: string
+  } | null
+}
+
+export function loadSeoCheck(auth: ApiClientOptions, session: ContentSession) {
+  return apiRequest<SeoCheckReport>(`/api/content-sessions/${encodeURIComponent(session.session_id)}/seo-check`, auth)
+}
+
 export function saveKeywordSelection(auth: ApiClientOptions, session: ContentSession, keywords: string[]) {
   return apiRequest<SessionResponse>(`/api/content-sessions/${encodeURIComponent(session.session_id)}/keywords/selection`, auth, {
     method: "PUT", body: { keywords, expected_version: session.version },

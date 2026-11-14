@@ -547,6 +547,12 @@ def create_router(
         )
         return job
 
+    @router.get("/{session_id}/seo-check")
+    async def seo_check(session_id: str) -> dict[str, Any]:
+        service = service_provider()
+        service.require_owner(session_id, get_active_client_id())
+        return service.seo_check(session_id)
+
     @router.put("/{session_id}/keywords/selection", response_model=SessionResponse)
     async def select_keywords(session_id: str, payload: KeywordSelectionRequest) -> SessionResponse:
         service = service_provider()

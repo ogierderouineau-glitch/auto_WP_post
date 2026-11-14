@@ -108,6 +108,7 @@ export default function Page() {
   const [pictureTranscriptSavingImmediately, setPictureTranscriptSavingImmediately] = useState(false)
   const [selectedFactKeys, setSelectedFactKeys] = useState<string[] | null>(null)
   const [contentRevisionFieldIds, setContentRevisionFieldIds] = useState<string[]>([])
+  const [seoRevisionInstruction, setSeoRevisionInstruction] = useState("")
   const [contentSelectedLinks, setContentSelectedLinks] = useState<Record<string, string>[]>([])
   const sessionRef = useRef<ContentSession | null>(null)
   const pictureTranscriptRef = useRef("")
@@ -157,6 +158,11 @@ export default function Page() {
   useEffect(() => {
     setSelectedFactKeys(null)
   }, [session?.session_id, workbook?.selected_post_type_key])
+
+  // The SEO revision text belongs to one draft version; clear it once the draft changes.
+  useEffect(() => {
+    setSeoRevisionInstruction("")
+  }, [session?.session_id, session?.version])
 
   useEffect(() => {
     if (!session) return
@@ -695,6 +701,7 @@ export default function Page() {
             onSessionChange={handleSessionChange}
             onOpenAgent={() => setAgentOpen(true)}
             onRevisionFieldIdsChange={setContentRevisionFieldIds}
+            onSeoRevisionInstructionChange={setSeoRevisionInstruction}
             onSelectedLinksChange={setContentSelectedLinks}
             onBackToKeywords={() => setScreen("keywords")}
             onContinueToWordPress={() => setScreen("wordpress")}
@@ -717,7 +724,7 @@ export default function Page() {
           onSelectedFactKeysChange={setSelectedFactKeys}
           selectedPictureId={selectedMedia?.mediaId}
           selectedContentFieldIds={contentRevisionFieldIds}
-          automaticContentRevisionInstruction={contentQualityRevisionInstruction}
+          automaticContentRevisionInstruction={[contentQualityRevisionInstruction, seoRevisionInstruction].filter(Boolean).join("\n\n")}
           selectedContentLinks={contentSelectedLinks}
           postTypeLabel={selectedPostTypeLabel}
           voiceInstructions={selectedPostTypeVoiceInstructions}

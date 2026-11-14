@@ -174,3 +174,19 @@ class SearchConsoleProviderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class YoastScoreTests(unittest.TestCase):
+    def test_stored_scores_are_numbers_or_none(self):
+        class Session:
+            def get(self, url, params=None, headers=None, timeout=None):
+                if url.endswith("/types"):
+                    return FakeResponse({"post": {"slug": "post", "rest_base": "posts"}})
+                return FakeResponse({"status": "draft", "meta": {
+                    "_yoast_wpseo_linkdex": "75", "_yoast_wpseo_content_score": "0",
+                    "_yoast_wpseo_focuskw": "pottery class"}})
+
+        scanner = WordPressSiteScanner("https://a.example", "u", "p", session=Session())
+        scores = scanner.yoast_scores("post", 5)
+        self.assertEqual((scores["seo"], scores["readability"]), (75, None))
+        self.assertEqual(scores["focus_keyphrase"], "pottery class")

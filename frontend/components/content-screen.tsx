@@ -2,6 +2,7 @@
 
 import { InternalLinksPanel } from "@/components/internal-links-panel"
 import { ActionHint } from "@/components/action-hint"
+import { SeoCheckSection } from "@/components/seo-check-section"
 
 import { useActionWarning } from "@/components/action-warning"
 
@@ -300,6 +301,7 @@ export function ContentScreen({
   onBackToKeywords,
   onContinueToWordPress,
   onOpenAgent,
+  onSeoRevisionInstructionChange,
 }: {
   auth: ApiClientOptions | null
   session: ContentSession | null
@@ -310,6 +312,7 @@ export function ContentScreen({
   onBackToKeywords: () => void
   onContinueToWordPress: () => void
   onOpenAgent: () => void
+  onSeoRevisionInstructionChange: (instruction: string) => void
 }) {
   const [draftFieldOptions, setDraftFieldOptions] = useState<DraftFieldOptions | null>(null)
   const fields = useMemo(() => buildFields(session, workbook, draftFieldOptions), [session, workbook, draftFieldOptions])
@@ -409,6 +412,12 @@ export function ContentScreen({
   useEffect(() => {
     onSelectedLinksChange(selectedLinksForAgent)
   }, [onSelectedLinksChange, selectedLinksForAgent])
+
+  function handleSeoRevise(fieldIds: string[], instruction: string) {
+    setManualRevisionFieldIds(fieldIds)
+    onSeoRevisionInstructionChange(instruction)
+    onOpenAgent()
+  }
 
   function toggleRevisionField(fieldId: string) {
     setManualRevisionFieldIds((current) => {
@@ -808,17 +817,6 @@ export function ContentScreen({
           <div className="flex flex-wrap items-center gap-2">
             {draftReady && (
               <>
-                <button
-                  id="s2p-content-quality-check"
-                  type="button"
-                  onClick={handleQualityCheck}
-                  title="Reviews the saved draft without changing it."
-                  disabled={operation === "loading" || !draftReady}
-                  className="inline-flex items-center gap-2 rounded-md border border-ai/40 bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-ai/10 disabled:opacity-60"
-                >
-                  {activeAction === "review" ? <Loader2 className="size-4 animate-spin" /> : <ScanText className="size-4 text-ai" />}
-                  Quality check
-                </button>
                 <ActionHint reason={revisionDisabledReason}>
                 <button type="button" id="s2p-content-revise-selected" onClick={onOpenAgent}
                   disabled={!!revisionDisabledReason}
@@ -963,16 +961,19 @@ export function ContentScreen({
             </section>
 
             <aside className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-24 lg:self-start">
-              {review && (
-                <details open className="group order-2 rounded-xl border border-ai/40 bg-card">
-                  <summary className="flex cursor-pointer list-none items-start justify-between gap-3 p-4">
-                    <div>
-                      <h2 className="flex items-center gap-2 text-sm font-semibold">
-                        Quality check
-                        <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
-                      </h2>
-                    </div>
-                    <span className={[
+              {draftReady && session && (
+                <section aria-label="Quality check" className="order-2 rounded-xl border border-ai/40 bg-card">
+                  <h2 className="flex items-center gap-2 border-b border-border px-4 py-3 text-sm font-semibold">
+                    <ScanText className="size-4 text-ai" aria-hidden="true" />
+                    Quality check
+                  </h2>
+                  <div className="divide-y divide-border">
+                    <div className="p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Content quality</h3>
+                        <div className="flex items-center gap-2">
+                          {review && (
+                            <span className={[
                       "shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold",
                       (review.applied_finding_count > 0 && !review.findings.length) || review.rating === "natural"
                         ? "bg-confirm/12 text-confirm"
@@ -982,8 +983,22 @@ export function ContentScreen({
                     ].join(" ")}>
                       {review.applied_finding_count ? `${review.findings.length} remaining` : review.rating.replace("_", " ")}
                     </span>
-                  </summary>
-                  <div className="border-t border-border px-4 pb-4">
+                          )}
+                          <button
+                            id="s2p-content-quality-check"
+                            type="button"
+                            onClick={handleQualityCheck}
+                            title="Reviews the saved draft without changing it."
+                            disabled={operation === "loading" || !draftReady}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-ai/40 bg-card px-2.5 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-ai/10 disabled:opacity-60"
+                          >
+                            {activeAction === "review" ? <Loader2 className="size-3.5 animate-spin" /> : <ScanText className="size-3.5 text-ai" />}
+                            {review ? "Run again" : "Run check"}
+                          </button>
+                        </div>
+                      </div>
+                      {review ? (
+                        <div>
                     <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
                       {review.applied_finding_count
                         ? `${review.applied_finding_count} recommendations applied; ${review.findings.length} remaining from the last quality check.`
@@ -1054,8 +1069,16 @@ export function ContentScreen({
                         </p>
                       )}
                     </div>
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                          Not run yet. Reviews tone, repetition, specificity and sentence rhythm without changing the draft.
+                        </p>
+                      )}
+                    </div>
+                    <SeoCheckSection auth={auth} session={session} onRevise={handleSeoRevise} />
                   </div>
-                </details>
+                </section>
               )}
               <InternalLinksPanel session={session} options={linkOptions} queued={queuedLinks} busy={operation === "loading" || backgroundMetadata}
                 onDestination={setLinkDestination}

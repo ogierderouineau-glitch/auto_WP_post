@@ -211,6 +211,40 @@ introduction (several keywords cannot all fit a title), and the selection order 
 the focus. The Screen 3 table therefore needs a way to mark or reorder the primary
 keyword. The context keys above are not built yet (next implementation step).
 
+## SEO check (milestone C, implemented)
+
+`GET /{session_id}/seo-check` runs `backend/app/validation/step_02_seo.py` on the current draft: no model call,
+nothing saved, so it is never stale. Yoast/WordPress fields are found through their destination keys
+(`yoast_wpseo_focuskw`, `yoast_wpseo_title`, `yoast_wpseo_metadesc`, WordPress `title` and `slug`), so no client field
+names are in code. Which ACF fields are the heading, introduction or body, and which length limits apply, come from
+`seo_rules` rows. Rows use `stage` = `quality_check` (generation prompts never load them), and these new `action_type`s:
+
+| action_type | value | meaning |
+|---|---|---|
+| `check_role` | `heading`, `introduction` or `body` | focus keyphrase (or an alternative) in the heading; in the first two sentences of the introduction; body text feeds the density check |
+| `check_length` | `min;max` (characters) | length limit for that field |
+
+Checks: focus keyphrase set; not used by another scanned page (own URL excluded); in post title, SEO title (and near
+its start), meta description, slug (umlaut spellings and dropped short words tolerated), heading, introduction; other
+selected keywords used somewhere; density 0.5-3% (only with 100+ words); internal links placed; configured lengths.
+Text is compared without HTML, shortcodes and `{{ }}` markers, with small word endings and compound spellings tolerated
+(false-positive handling for ACF content, which Yoast does not see). A published post's slug is never offered for revision.
+After publishing, the check also shows the scores Yoast stored on WordPress as a read-only reference.
+
+Pilot rows to add to `seo_rules` (columns: rule_id, enabled, post_type_key, target_type, target_key, stage, action_type,
+instruction_de, value, value_type, condition, priority, source; `example` and `context_tags` may stay empty):
+
+| rule_id | target_key | action_type | value | instruction_de |
+|---|---|---|---|---|
+| seo_check_01 | hero_h1 | check_role | heading | SEO-Check: Die Fokus-Keyphrase oder eine Alternative soll in der Hauptüberschrift vorkommen. |
+| seo_check_02 | hero_intro | check_role | introduction | SEO-Check: Die Fokus-Keyphrase steht in den ersten ein bis zwei Sätzen der Einleitung. |
+| seo_check_03 | event_story | check_role | body | SEO-Check: Haupttext für die Keyword-Dichte. |
+| seo_check_04 | meta_description | check_length | 120;156 | SEO-Check: Meta-Beschreibung 120 bis 156 Zeichen. |
+| seo_check_05 | seo_title | check_length | 30;60 | SEO-Check: SEO-Titel 30 bis 60 Zeichen. |
+
+All rows: enabled TRUE, post_type_key `*`, target_type `field`, stage `quality_check`, value_type `string`, condition
+`always`, priority `medium`, source `SEO-Experten-Workflow`. Other post types with differently named fields get their own rows.
+
 ## Resolved and open questions
 
 Resolved:

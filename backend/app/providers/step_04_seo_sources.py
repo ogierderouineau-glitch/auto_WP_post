@@ -158,6 +158,26 @@ class WordPressSiteScanner:
             page += 1
         return entries
 
+    def yoast_scores(self, wp_post_type: str, post_id: int) -> dict[str, Any]:
+        """Scores Yoast has stored for one post. They are only updated when the post is
+        opened in the WordPress editor, so API-created posts may show none."""
+        data = self._get(
+            f"/{self.rest_base_for(wp_post_type)}/{int(post_id)}",
+            {"context": "edit", "_fields": "status,meta"},
+        ).json()
+        meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+
+        def number(key: str) -> int | None:
+            value = _text(meta.get(key))
+            return int(value) if value.isdigit() and int(value) > 0 else None
+
+        return {
+            "wordpress_status": data.get("status"),
+            "seo": number("_yoast_wpseo_linkdex"),
+            "readability": number("_yoast_wpseo_content_score"),
+            "focus_keyphrase": _text(meta.get(FOCUS_KEY)),
+        }
+
     def find_by_urls(self, urls: list[str]) -> dict[str, SiteEntry | None]:
         """Resolve URLs by slug with one request per viewable REST type. Matching is on
         the URL path, since staging and live domains mirror each other."""
