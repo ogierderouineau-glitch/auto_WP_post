@@ -138,6 +138,13 @@ function buildFields(session: ContentSession | null, workbook: WorkbookStatus | 
   return [...shared, ...acf]
 }
 
+// A healthy report ({ valid: true, errors: [], warnings: [] }) is not worth the space.
+function validationNeedsAttention(report: Record<string, unknown> | undefined) {
+  if (!report || !Object.keys(report).length) return false
+  const count = (value: unknown) => (Array.isArray(value) ? value.length : 0)
+  return report.valid === false || count(report.errors) > 0 || count(report.warnings) > 0
+}
+
 function htmlPreviewValue(value: string) {
   return value
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
@@ -1087,7 +1094,7 @@ export function ContentScreen({
                 onToggle={(id) => Object.hasOwn(queuedLinks, id) ? removeQueuedLink(id) : setLinkDestination(id, "")}
                 onAction={(action, id) => { void handleCandidateAction(action, id) }} />
 
-              {!!Object.keys(session.validation_report || {}).length && (
+              {validationNeedsAttention(session.validation_report) && (
                 <details className="group order-3 rounded-xl border border-warn/40 bg-card p-4">
                   <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold">
                     <AlertTriangle className="size-4 text-warn-foreground" />
