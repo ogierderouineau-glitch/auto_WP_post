@@ -852,6 +852,81 @@ class WordPressProviderTests(unittest.TestCase):
     @patch("backend.app.providers.step_03_wordpress.update_media_metadata")
     @patch("backend.app.providers.step_03_wordpress.upload_media")
     @patch("backend.app.providers.step_03_wordpress.request_json")
+    def test_media_linked_from_the_library_is_never_deleted(
+        self,
+        request_json,
+        upload_media_mock,
+        _update_metadata,
+    ) -> None:
+        request_json.side_effect = [
+            {
+                "schema": {
+                    "properties": {
+                        "acf": {"properties": {"video_url": {}}},
+                        "meta": {"properties": {}},
+                    }
+                }
+            },
+            {
+                "id": 777,
+                "status": "draft",
+                "link": "https://staging.example/linked-post/",
+            },
+            {},
+        ]
+        upload_media_mock.return_value = (202, "https://staging.example/new-video.mp4")
+        session = ContentSession(
+            session_id="session-1",
+            user_id="user-1",
+            post_type_key="bartender",
+            wordpress_post_type="bartender",
+            state="publishing",
+            workbook_hash="hash",
+            language="de-DE",
+            approval=Approval(approved=True),
+            wordpress_result={
+                "post_id": 777,
+                "media": [{"media_id": 101, "wp_media_id": 101, "acf_field_name": "video_url"}],
+            },
+        )
+        payload = WordPressPayload(
+            wordpress=WordPressFields(title="Updated"),
+            media=[
+                {
+                    "path": "/tmp/new-video.mp4",
+                    "media_kind": "video",
+                    "acf_field_name": "video_url",
+                }
+            ],
+        )
+
+        result = ExistingWordPressProvider().publish(
+            session=session,
+            payload=payload,
+            idempotency_key="key-1",
+            target_post_id=777,
+            partial_update_fields={
+                "wordpress": {"media"},
+                "meta": set(),
+                "acf": set(),
+            },
+        )
+
+        self.assertEqual(
+            request_json.call_args_list[1].kwargs["json"],
+            {"acf": {"video_url": 202}},
+        )
+        self.assertEqual(
+            request_json.call_args_list[2].args[:2],
+            ("POST", "/wp-json/wp/v2/media/202"),
+        )
+        self.assertEqual(result["deleted_media_ids"], [])
+        self.assertNotIn("DELETE", [call.args[0] for call in request_json.call_args_list])
+        self.assertEqual(result["media"][0]["media_id"], 202)
+
+    @patch("backend.app.providers.step_03_wordpress.update_media_metadata")
+    @patch("backend.app.providers.step_03_wordpress.upload_media")
+    @patch("backend.app.providers.step_03_wordpress.request_json")
     def test_partial_linked_update_changes_media_metadata_without_reupload(
         self,
         request_json,
@@ -1003,3 +1078,20 @@ class WordPressProviderTests(unittest.TestCase):
             request_json.call_args_list[1].args[:2],
             ("POST", "/wp-json/wp/v2/posts"),
         )
+
+
+def test_library_video_is_reused_without_upload(monkeypatch) -> None:
+    from backend.app.providers import step_03_wordpress as module
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("A video already in the library must not be uploaded.")
+
+    updates = []
+    monkeypatch.setattr(module, "upload_media", forbidden)
+    monkeypatch.setattr(module, "update_media_metadata", lambda media_id, **kw: updates.append((media_id, kw["title"])))
+    item = {
+        "media_kind": "video", "path": "https://client.example/v.mp4", "wp_media_id": 77,
+        "source_url": "https://client.example/v.mp4", "video_title": "Tour",
+    }
+    result = module.ExistingWordPressProvider._upload_media([item])
+    assert result[0]["media_id"] == 77 and updates == [(77, "Tour")]

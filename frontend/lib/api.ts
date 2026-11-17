@@ -103,9 +103,13 @@ export async function apiRequest<T>(
 export async function apiDownload(
   path: string,
   auth: ApiClientOptions,
+  jsonBody?: Record<string, unknown>,
 ): Promise<{ blob: Blob; filename: string }> {
+  // With a jsonBody the download is requested with POST (e.g. a link to fetch).
   const response = await fetch(`${API_PREFIX}${path}`, {
-    headers: apiHeaders(auth, undefined, false),
+    method: jsonBody ? "POST" : "GET",
+    headers: apiHeaders(auth, undefined, !!jsonBody),
+    body: jsonBody ? JSON.stringify(jsonBody) : undefined,
   })
 
   if (!response.ok) {

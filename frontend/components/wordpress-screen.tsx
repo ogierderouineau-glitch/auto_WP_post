@@ -123,10 +123,20 @@ export function WordPressScreen({
   const editUrl = resultValue(wordpressResult, "edit_url")
   const sentPayload = session?.published_wordpress_payload || {}
   const currentPayload = session?.wordpress_payload || {}
-  const changedFields = useMemo(
-    () => payloadDiff(currentPayload, sentPayload),
-    [currentPayload, sentPayload],
-  )
+  // Pictures/videos added after the draft was built are not in the payload yet;
+  // publishing adds them, so they count as a pending change.
+  const unsyncedMedia = useMemo(() => {
+    const inPayload = new Set(
+      ((currentPayload.media as Record<string, unknown>[] | undefined) || [])
+        .map((item) => String(item.media_id || item.source_video_media_id || "")),
+    )
+    const refs = [...(session?.image_refs || []), ...(session?.video_refs.slice(0, 1) || [])]
+    return refs.some((ref) => !inPayload.has(ref.media_id))
+  }, [currentPayload, session?.image_refs, session?.video_refs])
+  const changedFields = useMemo(() => {
+    const fields = payloadDiff(currentPayload, sentPayload)
+    return unsyncedMedia && !fields.includes("media") ? [...fields, "media"] : fields
+  }, [currentPayload, sentPayload, unsyncedMedia])
   const approved = !!session?.approval.approved
   const canPublish = !!auth && !!session && approved && Object.keys(session.wordpress_payload || {}).length > 0
   const noChange = !!postId && changedFields.length === 0
@@ -442,7 +452,7 @@ export function WordPressScreen({
                 { label: "WordPress payload generated", ok: Object.keys(session.wordpress_payload || {}).length > 0 },
                 { label: "Featured image assigned", ok: session.image_refs.some((image) =>
                   session.image_metadata.some((row) => row.media_id === image.media_id && row.image_usage === "featured"),
-                ) },
+                ) || (session.processed_videos || []).some((video) => video.is_featured === true) },
               ].map((item) => (
                 <li key={item.label} className="flex items-center gap-2 text-muted-foreground">
                   <span

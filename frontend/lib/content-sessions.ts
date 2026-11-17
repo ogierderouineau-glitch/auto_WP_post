@@ -117,6 +117,8 @@ export type SessionImage = MediaReference & {
 
 export type SessionVideo = MediaReference & {
   poster_filename?: string
+  is_featured: boolean
+  external_url?: string // set when the video stays in the client's WordPress library
   processed_revision?: string
   operations: string[]
   metadata: Record<string, unknown>
@@ -388,6 +390,26 @@ export async function uploadSessionImage(
   })
 }
 
+/** Links a video from the client's WordPress library without copying it; returns null for any other link. */
+export async function registerWordPressVideo(auth: ApiClientOptions, session: ContentSession, url: string) {
+  const data = await apiRequest<{ session: ContentSession | null }>(
+    `/api/content-sessions/${session.session_id}/wordpress-video`,
+    auth,
+    { method: "POST", body: { url, expected_version: session.version } },
+  )
+  return data.session
+}
+
+/** Downloads a public picture/video link through the backend and returns it as a File. */
+export async function fetchMediaFromUrl(auth: ApiClientOptions, session: ContentSession, url: string) {
+  const { blob, filename } = await apiDownload(
+    `/api/content-sessions/${session.session_id}/fetch-media`,
+    auth,
+    { url },
+  )
+  return new File([blob], filename, { type: blob.type })
+}
+
 export async function uploadSessionVideo(
   auth: ApiClientOptions,
   session: ContentSession,
@@ -429,6 +451,23 @@ export async function removeSessionVideo(
   )
 }
 
+/** Replaces an uploaded video's automatic cover with a chosen picture. */
+export async function replaceSessionVideoCover(
+  auth: ApiClientOptions,
+  session: ContentSession,
+  filename: string,
+  file: File,
+) {
+  const form = new FormData()
+  form.append("expected_version", String(session.version))
+  form.append("upload", file)
+  return apiRequest<SessionResponse>(
+    `/api/content-sessions/${session.session_id}/media/videos/${encodeURIComponent(filename)}/cover`,
+    auth,
+    { method: "PUT", body: form },
+  )
+}
+
 export async function setSessionFeaturedImage(
   auth: ApiClientOptions,
   session: ContentSession,
@@ -440,6 +479,14 @@ export async function setSessionFeaturedImage(
       expected_version: session.version,
       filename,
     },
+  })
+}
+
+/** Makes a video the featured item (its cover picture becomes the WordPress featured image). */
+export async function setSessionFeaturedVideo(auth: ApiClientOptions, session: ContentSession, filename: string) {
+  return apiRequest<SessionResponse>(`/api/content-sessions/${session.session_id}/featured-video`, auth, {
+    method: "PUT",
+    body: { expected_version: session.version, filename },
   })
 }
 
@@ -888,7 +935,9 @@ export function sessionVideos(session: ContentSession): SessionVideo[] {
     const row = processed.get(reference.media_id) || {}
     return {
       ...reference,
-      poster_filename: typeof row.poster_filename === "string" ? row.poster_filename : undefined,
+      poster_filename: typeof row.poster_filename === "string" && row.poster_path ? row.poster_filename : undefined,
+      is_featured: row.is_featured === true,
+      external_url: row.wp_media_id && typeof row.source_url === "string" ? row.source_url : undefined,
       processed_revision: typeof row.updated_at === "string" ? row.updated_at : undefined,
       operations: Array.isArray(row.operations) ? row.operations.map(String) : [],
       metadata: metadata.get(reference.media_id) || {},

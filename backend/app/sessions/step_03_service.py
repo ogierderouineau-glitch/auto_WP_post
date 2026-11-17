@@ -126,6 +126,7 @@ class ContentSessionService:
         self.video_processor = video_processor or FfmpegVideoProcessor()
         self.clarification = ClarificationService()
         self.context_builder = GenerationContextBuilder()
+        self.wordpress_site_url = wordpress_site_url
         self.payload_builder = PayloadBuilder(wordpress_site_url)
         self.internal_links = InternalLinkService()
         self.draft_validator = DraftValidator()
@@ -883,6 +884,59 @@ class ContentSessionService:
             return self.repository.save(enriched, expected_version=persisted.version)
         return persisted
 
+    def attach_wordpress_video(
+        self, session_id: str, *, url: str, expected_version: int
+    ) -> ContentSession | None:
+        """Register a video that already sits in the client's WordPress library.
+
+        Nothing is downloaded, stored or processed. Returns None when `url` is not a
+        video of this client's site (the caller then treats it as an ordinary link).
+        """
+        site, link = urlparse(self.wordpress_site_url), urlparse(url)
+        if self.wordpress is None or not site.netloc or link.netloc != site.netloc:
+            return None
+        media = self.wordpress.find_media(url)
+        if media is None:
+            raise InvalidUploadError("This link was not found in the WordPress media library.")
+        if not str(media.get("mime_type", "")).startswith("video/"):
+            return None
+        session = self.repository.get(session_id)
+        from backend.app.models.step_01_session import MediaReference
+
+        def raw(field: str) -> str:
+            value = media.get(field) or {}
+            return str(value.get("raw", "") if isinstance(value, dict) else value)
+
+        source_url = str(media["source_url"])
+        filename = Path(urlparse(source_url).path).name
+        media_id = uuid.uuid4().hex
+        reference = MediaReference(
+            media_id=media_id, filename=filename, storage_uri=source_url,
+            content_type=str(media["mime_type"]), size_bytes=0,
+        )
+        updated = session.model_copy(update={
+            "video_refs": [*session.video_refs, reference],
+            "processed_videos": [*session.processed_videos, {
+                "media_id": media_id, "filename": filename, "path": source_url,
+                "source_url": source_url, "wp_media_id": media["id"],
+                "poster_filename": f"{Path(filename).stem}-poster.jpg",
+                "operations": [], "updated_at": datetime.now(timezone.utc).isoformat(),
+            }],
+            # The library's own title/caption/description are kept unless the user unticks the box.
+            "video_metadata": [*session.video_metadata, {
+                "media_id": media_id, "video_title": raw("title"),
+                "video_caption": re.sub(r"<[^>]+>", "", raw("caption")).strip(),
+                "video_description": re.sub(r"<[^>]+>", "", raw("description")).strip(),
+                "keep_existing_metadata": True,
+            }],
+            "updated_at": datetime.now(timezone.utc),
+        })
+        if updated.state == "created":
+            updated = SessionStateMachine(
+                self.knowledge.by_hash(updated.workbook_hash)
+            ).transition(updated, "uploading")
+        return self.repository.save(updated, expected_version=expected_version)
+
     def add_inputs(
         self,
         session_id: str,
@@ -1252,6 +1306,7 @@ class ContentSessionService:
                     image_metadata_by_media.values(),
                     key=lambda row: int(row.get("image_priority") or 999),
                 ),
+                "processed_videos": [{**v, "is_featured": False} for v in session.processed_videos],
                 "updated_at": datetime.now(timezone.utc),
             }
         )
@@ -1435,6 +1490,70 @@ class ContentSessionService:
             raise ValueError(f"Unsupported media kind: {kind}")
         return self.repository.save(session.model_copy(update=updates), expected_version=expected_version)
 
+    def replace_video_cover(
+        self,
+        session_id: str,
+        *,
+        filename: str,
+        cover: Path,
+        expected_version: int,
+    ) -> ContentSession:
+        """Overwrite an uploaded video's poster with a picture (same file name, so links stay valid)."""
+        from PIL import Image, ImageOps
+
+        session = self.repository.get(session_id)
+        item = next((v for v in session.processed_videos if v.get("filename") == filename), None)
+        if item is None:
+            raise ValueError(f"Video not found in this session: {filename}")
+        with tempfile.TemporaryDirectory(prefix="v2-cover-") as directory:
+            poster = Path(directory) / item["poster_filename"]
+            with Image.open(cover) as image:
+                image = ImageOps.exif_transpose(image).convert("RGB")
+                image.thumbnail((1280, 1280))
+                image.save(poster, "JPEG", quality=88)
+            poster_uri = self.object_storage.put(poster, f"{session_id}/video/{poster.name}")
+        now = datetime.now(timezone.utc)
+        rows = [
+            {**v, "poster_path": poster_uri, "cover_replaced_at": now.isoformat()} if v is item else v
+            for v in session.processed_videos
+        ]
+        updated = session.model_copy(update={"processed_videos": rows, "updated_at": now})
+        return self.repository.save(self._with_fresh_video_payload(updated), expected_version=expected_version)
+
+    def set_featured_video(self, session_id: str, *, filename: str, expected_version: int) -> ContentSession:
+        """Make a video the featured item: WordPress then uses its cover picture as featured image."""
+        session = self.repository.get(session_id)
+        item = next((v for v in session.processed_videos if v.get("filename") == filename), None)
+        if item is None:
+            raise ValueError(f"Video not found in this session: {filename}")
+        if not item.get("poster_path"):
+            raise InvalidUploadError("Add a cover to this video first: WordPress needs a picture as featured image.")
+        updated = session.model_copy(update={
+            "processed_videos": [{**v, "is_featured": v is item} for v in session.processed_videos],
+            # Only one featured item: demote a featured picture.
+            "image_metadata": [
+                {**r, "image_usage": "gallery", "image_priority": int(r.get("image_number") or 1) + 1}
+                if r.get("image_usage") == "featured" else r
+                for r in session.image_metadata
+            ],
+            "updated_at": datetime.now(timezone.utc),
+        })
+        return self.repository.save(self._with_fresh_video_payload(updated), expected_version=expected_version)
+
+    def _with_fresh_video_payload(self, session: ContentSession) -> ContentSession:
+        """Refresh the video entries of the draft payload so the WordPress screen sees a pending media change."""
+        if not session.wordpress_payload:
+            return session
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        media = [
+            m for m in session.wordpress_payload.get("media", [])
+            if m.get("media_kind") not in ("video", "video_poster")
+        ]
+        return session.model_copy(update={"wordpress_payload": {
+            **session.wordpress_payload,
+            "media": [*media, *self._video_publication_media(snapshot, session)],
+        }})
+
     def save_video_metadata(
         self,
         session_id: str,
@@ -1452,12 +1571,19 @@ class ContentSessionService:
             key: str(metadata.get(key) or "")
             for key in ("video_title", "video_caption", "video_description")
         }
+        current = next(
+            (item for item in session.video_metadata if item.get("media_id") == reference.media_id), {}
+        )
+        row = {"media_id": reference.media_id, **allowed}
+        keep = metadata.get("keep_existing_metadata", current.get("keep_existing_metadata"))
+        if keep is not None:
+            row["keep_existing_metadata"] = bool(keep)
         rows = [
             *(
                 item for item in session.video_metadata
                 if item.get("media_id") != reference.media_id
             ),
-            {"media_id": reference.media_id, **allowed},
+            row,
         ]
         transcripts = {
             **session.video_context_transcripts,
@@ -2444,23 +2570,27 @@ class ContentSessionService:
             str(item.get("media_id")): item for item in generated.image_metadata
         }
         video_ids = {reference.media_id for reference in session.video_refs}
+        previous = {str(item.get("media_id")): item for item in session.video_metadata}
         video_metadata = [
             item for item in session.video_metadata
             if item.get("media_id") not in video_ids
         ]
-        video_metadata.extend(
-            {
+        for reference in session.video_refs:
+            if reference.media_id not in generated_by_media:
+                continue
+            made = generated_by_media[reference.media_id]
+            row = {
                 "media_id": reference.media_id,
-                "video_title": generated_by_media.get(reference.media_id, {}).get("image_title", ""),
-                "video_caption": generated_by_media.get(reference.media_id, {}).get("image_caption", ""),
-                "video_description": generated_by_media.get(reference.media_id, {}).get(
-                    "image_description",
-                    generated_by_media.get(reference.media_id, {}).get("image_description_wp", ""),
-                ),
+                "video_title": made.get("image_title", ""),
+                "video_caption": made.get("image_caption", ""),
+                "video_description": made.get("image_description", made.get("image_description_wp", "")),
             }
-            for reference in session.video_refs
-            if reference.media_id in generated_by_media
-        )
+            old = previous.get(reference.media_id, {})
+            if "keep_existing_metadata" in old:
+                row["keep_existing_metadata"] = old["keep_existing_metadata"]
+                if old["keep_existing_metadata"]:  # only empty fields are filled
+                    row.update({k: old[k] for k in ("video_title", "video_caption", "video_description") if old.get(k)})
+            video_metadata.append(row)
         generated_trace = generated.generation_trace.get("image_metadata", {})
         return session.model_copy(update={
             "video_metadata": video_metadata,
@@ -4019,7 +4149,7 @@ class ContentSessionService:
         for item in media:
             next_item = dict(item)
             uri = str(next_item.get("path") or next_item.get("output") or "").strip()
-            if uri:
+            if uri and not next_item.get("wp_media_id"):
                 processed = processed_by_media.get(str(next_item.get("media_id") or ""))
                 filename = (
                     str((processed or {}).get("filename") or "").strip()
@@ -4083,6 +4213,8 @@ class ContentSessionService:
                 "updated_at",
             )
         }
+        if processed.get("cover_replaced_at"):  # only when set, so older hashes stay unchanged
+            payload["cover_replaced_at"] = processed["cover_replaced_at"]
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
         ).hexdigest()[:16]
@@ -4092,17 +4224,19 @@ class ContentSessionService:
         """Map the first remaining video to the shared WordPress video ACFs."""
         if not session.video_refs:
             return []
-        destinations = {
+        # The workbook names these fields freely (e.g. "video_url", "event_video_url");
+        # the convention is that the name ends with "video_url" / "video_poster".
+        destinations = [
             row.acf_field_name
             for row in snapshot.acf_fields
             if row.enabled
             and row.include_in_payload
             and row.post_type_key == session.post_type_key
             and row.field_role == "direct_acf"
-            and row.acf_field_name in {"video_url", "video_poster"}
-        }
-        video_field = "video_url" if "video_url" in destinations else None
-        poster_field = "video_poster" if "video_poster" in destinations else None
+            and row.acf_field_name
+        ]
+        video_field = next((n for n in destinations if n.endswith("video_url")), None)
+        poster_field = next((n for n in destinations if n.endswith("video_poster")), None)
         if not video_field and not poster_field:
             return []
         reference = session.video_refs[0]
@@ -4128,7 +4262,18 @@ class ContentSessionService:
             "video_description": metadata.get("video_description"),
         }
         media: list[dict[str, Any]] = []
-        if video_field:
+        if video_field and processed.get("wp_media_id"):
+            # Video already in the client's WordPress library: reference it, never upload it.
+            media.append({
+                **common,
+                "binary_revision": f"wp:{processed['wp_media_id']}",
+                "media_kind": "video",
+                "path": processed["source_url"],
+                "source_url": processed["source_url"],
+                "wp_media_id": processed["wp_media_id"],
+                "acf_field_name": video_field,
+            })
+        elif video_field:
             media.append({
                 **common,
                 "media_kind": "video",
@@ -4141,6 +4286,7 @@ class ContentSessionService:
                 "media_kind": "video_poster",
                 "path": processed["poster_path"],
                 "acf_field_name": poster_field,
+                **({"image_usage": "featured"} if processed.get("is_featured") else {}),
             })
         return media
 

@@ -20,6 +20,7 @@ import {
   Sparkles,
   Star,
   Trash2,
+  Link2,
   UploadCloud,
   Video,
   X,
@@ -40,6 +41,10 @@ import {
   sessionImages,
   sessionVideos,
   setSessionFeaturedImage,
+  setSessionFeaturedVideo,
+  fetchMediaFromUrl,
+  registerWordPressVideo,
+  replaceSessionVideoCover,
   uploadSessionImage,
   uploadSessionVideo,
   videoUrl,
@@ -319,31 +324,37 @@ function VideoPreview({
   filename: string
 }) {
   const [url, setUrl] = useState("")
+  const [posterUrl, setPosterUrl] = useState("")
   useEffect(() => {
     if (!auth || !session || !filename) return
     let active = true
-    let objectUrl = ""
-    fetch(videoUrl(session, filename), {
-      headers: { "X-API-Key": auth.apiKey },
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error(`Video request failed: ${response.status}`)
-        return response.blob()
-      })
-      .then((blob) => {
-        objectUrl = URL.createObjectURL(blob)
-        if (active) setUrl(objectUrl)
-      })
-      .catch(() => {
-        if (active) setUrl("")
-      })
+    const objectUrls: string[] = []
+    // Loads a media file with the API key and hands the browser a temporary URL for it.
+    const load = (name: string, set: (url: string) => void) =>
+      fetch(videoUrl(session, name), { headers: { "X-API-Key": auth.apiKey } })
+        .then((response) => {
+          if (!response.ok) throw new Error(`Video request failed: ${response.status}`)
+          return response.blob()
+        })
+        .then((blob) => {
+          const objectUrl = URL.createObjectURL(blob)
+          objectUrls.push(objectUrl)
+          if (active) set(objectUrl)
+        })
+        .catch(() => { if (active) set("") })
+    const row = (session.processed_videos || []).find((item) => item.filename === filename)
+    // Videos kept in WordPress play straight from the site; others come from our storage.
+    if (row?.wp_media_id) setUrl(String(row.source_url))
+    else void load(filename, setUrl)
+    const poster = row?.poster_filename
+    if (poster && row?.poster_path) void load(String(poster), setPosterUrl)
     return () => {
       active = false
-      if (objectUrl) window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+      window.setTimeout(() => objectUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl)), 1000)
     }
   }, [auth, filename, session?.session_id, session?.version])
   return url ? (
-    <video src={url} controls preload="metadata" className="aspect-video w-full rounded-lg border border-border bg-black object-contain" />
+    <video src={url} poster={posterUrl || undefined} controls preload="metadata" className="aspect-video w-full rounded-lg border border-border bg-black object-contain" />
   ) : (
     <div className="flex aspect-video items-center justify-center rounded-lg border border-border bg-muted">
       <Video className="size-9 text-muted-foreground" aria-hidden="true" />
@@ -442,8 +453,11 @@ export function MediaScreen({
     video_title: "",
     video_caption: "",
     video_description: "",
+    keep_existing_metadata: true,
   })
   const [uploadAspectRatio, setUploadAspectRatio] = useState("4:5")
+  const [mediaLink, setMediaLink] = useState("")
+  const [linkBusy, setLinkBusy] = useState(false)
   const [useMetadataVision, setUseMetadataVision] = useState(false)
   const [operation, setOperation] = useState<OperationState>("idle")
   const [transcriptSaving, setTranscriptSaving] = useState(false)
@@ -464,6 +478,7 @@ export function MediaScreen({
   const selectedIndex = images.findIndex((image) => image.media_id === selectedMediaId)
   const selectedImage = selectedIndex >= 0 ? images[selectedIndex] : null
   const selectedVideo = videos.find((video) => video.media_id === selectedMediaId) || null
+  const selectedFeatured = (selectedImage || selectedVideo)?.is_featured === true
   const selectedPendingImage = pendingImages.find((image) => image.id === selectedMediaId) || null
   const selectedFilename = selectedImage?.processed_filename || selectedImage?.filename || ""
   const selectedOriginalFilename = selectedImage?.filename || ""
@@ -511,6 +526,7 @@ export function MediaScreen({
       video_title: String(selectedVideo?.metadata.video_title || ""),
       video_caption: String(selectedVideo?.metadata.video_caption || ""),
       video_description: String(selectedVideo?.metadata.video_description || ""),
+      keep_existing_metadata: selectedVideo?.metadata.keep_existing_metadata !== false,
     })
   }, [selectedVideo?.media_id, selectedVideo?.metadata])
 
@@ -706,6 +722,32 @@ export function MediaScreen({
     }
   }, [])
 
+  // Downloads a pasted link through the backend, then uploads it like a chosen file.
+  async function uploadFromLink() {
+    if (!auth || !session || !mediaLink.trim()) return
+    setLinkBusy(true)
+    setMessage("Downloading the linked file...")
+    try {
+      // A video of the client's own WordPress library is linked, not copied.
+      const linked = await registerWordPressVideo(auth, session, mediaLink.trim())
+      if (linked) {
+        sessionRef.current = linked
+        onSessionChange(linked)
+        setSelectedMediaId(linked.video_refs[linked.video_refs.length - 1].media_id)
+        setMediaLink("")
+        setMessage("Video linked from WordPress. It is not copied or processed.")
+        return
+      }
+      const file = await fetchMediaFromUrl(auth, session, mediaLink.trim())
+      setMediaLink("")
+      await uploadFiles([file])
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The link could not be downloaded.")
+    } finally {
+      setLinkBusy(false)
+    }
+  }
+
   async function uploadFiles(files: File[]) {
     if (!auth || !session) { setMessage("Create or load a session before uploading media."); return }
     if (operation === "loading") return
@@ -790,7 +832,7 @@ export function MediaScreen({
         // Publish the backend image in the same React update as removing its
         // optimistic preview, so the gallery never renders both copies.
         onSessionChange(nextSession)
-        if (!isVideo && !currentImages.some((image) => image.is_featured) && currentImages[0]) {
+        if (!isVideo && !currentImages.some((image) => image.is_featured) && !sessionVideos(nextSession).some((video) => video.is_featured) && currentImages[0]) {
           const featuredData = await withConflictRetry(nextSession, (requestSession) =>
             setSessionFeaturedImage(
               requestAuth,
@@ -894,14 +936,17 @@ export function MediaScreen({
     }, "Picture taxonomy selection saved.")
   }
 
-  function saveVideoData() {
+  function saveVideoData(values = videoMetadata) {
     if (!auth || !session || !selectedVideo) return
+    // The keep-metadata flag only exists for videos linked from WordPress.
+    const { keep_existing_metadata, ...ordinary } = values
+    setVideoMetadata(values)
     void runAction(async (currentSession) => {
       const data = await saveSessionVideoMetadata(
         auth,
         currentSession,
         selectedVideo.filename,
-        videoMetadata,
+        selectedVideo.external_url ? { ...ordinary, keep_existing_metadata } : ordinary,
         pictureTranscript,
       )
       return data.session
@@ -924,7 +969,12 @@ export function MediaScreen({
   }
 
   function setFeatured() {
-    if (!auth || !session || !selectedImage) return
+    if (!auth || !session) return
+    if (selectedVideo) {
+      void runAction(async (currentSession) => (await setSessionFeaturedVideo(auth, currentSession, selectedVideo.filename)).session, "Featured video saved.")
+      return
+    }
+    if (!selectedImage) return
     void runAction(async (currentSession) => {
       const data = await setSessionFeaturedImage(auth, currentSession, selectedOriginalFilename)
       return data.session
@@ -982,6 +1032,14 @@ export function MediaScreen({
       const data = await removeSessionVideo(auth, currentSession, selectedVideo.filename)
       return data.session
     }, "Video removed.")
+  }
+
+  function changeVideoCover(file: File | undefined) {
+    if (!auth || !session || !selectedVideo || !file) return
+    void runAction(async (currentSession) => {
+      const data = await replaceSessionVideoCover(auth, currentSession, selectedVideo.filename, file)
+      return data.session
+    }, "Video cover replaced.")
   }
 
   // Transparent previous/next arrows over the preview frame (useful on mobile).
@@ -1097,6 +1155,29 @@ export function MediaScreen({
                   <option value="16:9">Widescreen 16:9</option>
                 </select>
               </div>
+              <form
+                className="flex gap-1.5 border-t border-gold/20 px-3 py-2.5"
+                onSubmit={(event) => { event.preventDefault(); void uploadFromLink() }}
+              >
+                <input
+                  type="url"
+                  aria-label="Link to a picture or MP4 video"
+                  placeholder="…or paste a link"
+                  value={mediaLink}
+                  onChange={(event) => setMediaLink(event.target.value)}
+                  disabled={linkBusy || operation === "loading"}
+                  className="min-w-0 flex-1 rounded-md border border-gold/30 bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-gold/40 disabled:opacity-60"
+                />
+                <button
+                  type="submit"
+                  aria-label="Add from link"
+                  title="Download the picture or MP4 video at this link and add it"
+                  disabled={linkBusy || operation === "loading" || !mediaLink.trim()}
+                  className="inline-flex cursor-pointer items-center rounded-md border border-gold/30 px-2 text-gold hover:bg-gold/15 disabled:opacity-50"
+                >
+                  {linkBusy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Link2 className="size-4" aria-hidden="true" />}
+                </button>
+              </form>
             </div>
             <button
               id="s2p-media-open-agent"
@@ -1239,6 +1320,11 @@ export function MediaScreen({
                         <span className="absolute left-1 top-1 rounded bg-topbar/80 px-1 text-[10px] font-medium text-topbar-foreground">
                           {pendingImages.length + images.length + index + 1}
                         </span>
+                        {video.is_featured && (
+                          <span className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-gold text-gold-foreground shadow" title="Featured item">
+                            <Star className="size-3 fill-current" aria-hidden="true" />
+                          </span>
+                        )}
                         <span className="absolute bottom-1 right-1 flex size-6 items-center justify-center rounded-full bg-ai text-ai-foreground shadow" title="Video">
                           <Video className="size-3.5" aria-hidden="true" />
                         </span>
@@ -1280,21 +1366,25 @@ export function MediaScreen({
                       ? `${selectedPendingImage.filename} - uploading`
                       : "No image selected"}
                 </h2>
-                {selectedImage && (
+                {(selectedImage || selectedVideo) && (
                   <button
                     id="s2p-media-set-featured"
                     type="button"
                     onClick={setFeatured}
-                    disabled={operation === "loading" || selectedImage.is_featured}
-                    aria-pressed={selectedImage.is_featured}
-                    title={selectedImage.is_featured ? "This is the featured image" : "Set as featured image"}
+                    disabled={operation === "loading" || selectedFeatured || (!!selectedVideo && !selectedVideo.poster_filename)}
+                    aria-pressed={selectedFeatured}
+                    title={selectedFeatured
+                      ? "This is the featured item"
+                      : selectedVideo && !selectedVideo.poster_filename
+                        ? "Add a cover first: the featured image of a post must be a picture"
+                        : selectedVideo ? "Set as featured item (its cover becomes the featured image)" : "Set as featured image"}
                     className={`mt-1 inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold transition-colors disabled:cursor-default ${
-                      selectedImage.is_featured
+                      selectedFeatured
                         ? "bg-gold/20 text-gold ring-1 ring-gold/40"
                         : "text-muted-foreground hover:bg-gold/10 hover:text-gold"
                     }`}
                   >
-                    <Star className={`size-3.5 ${selectedImage.is_featured ? "fill-current" : ""}`} aria-hidden="true" />
+                    <Star className={`size-3.5 ${selectedFeatured ? "fill-current" : ""}`} aria-hidden="true" />
                     Featured
                   </button>
                 )}
@@ -1325,7 +1415,17 @@ export function MediaScreen({
             ) : selectedVideo && session ? (
               <>
                 {withArrows(<VideoPreview auth={auth} session={session} filename={selectedVideo.filename} />)}
-                <div className="mt-4 flex justify-end border-t border-destructive/20 pt-3">
+                <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-destructive/20 pt-3">
+                  <label
+                    title={selectedVideo.external_url
+                      ? "Choose a picture as this video's cover (uploaded to WordPress as a new image). Without one, no cover is set. The video itself is not changed."
+                      : "Choose a picture as this video's cover. Without one, the cover is automatically taken from the video at 0.5 seconds (resized to max. 1280 px wide)."}
+                    className={`inline-flex cursor-pointer items-center gap-2 rounded-md border border-gold/40 bg-gold/5 px-3.5 py-2.5 text-sm font-semibold text-gold transition-colors hover:bg-gold/10 ${operation === "loading" ? "pointer-events-none opacity-60" : ""}`}
+                  >
+                    <input type="file" accept="image/*" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; changeVideoCover(file) }} />
+                    <ImageIcon className="size-4" aria-hidden="true" />
+                    Change cover
+                  </label>
                   <button
                     id="s2p-media-remove-video"
                     type="button"
@@ -1566,14 +1666,14 @@ export function MediaScreen({
                   label="Title"
                   value={videoMetadata.video_title}
                   onChange={(value) => setVideoMetadata((current) => ({ ...current, video_title: value }))}
-                  onBlur={saveVideoData}
+                  onBlur={() => saveVideoData()}
                 />
                 <MetadataInput
                   label="Caption"
                   value={videoMetadata.video_caption}
                   rows={2}
                   onChange={(value) => setVideoMetadata((current) => ({ ...current, video_caption: value }))}
-                  onBlur={saveVideoData}
+                  onBlur={() => saveVideoData()}
                 />
                 <div className="sm:col-span-2">
                   <MetadataInput
@@ -1581,9 +1681,26 @@ export function MediaScreen({
                     value={videoMetadata.video_description}
                     rows={2}
                     onChange={(value) => setVideoMetadata((current) => ({ ...current, video_description: value }))}
-                    onBlur={saveVideoData}
+                    onBlur={() => saveVideoData()}
                   />
                 </div>
+                {selectedVideo.external_url && (
+                  <label className="flex cursor-pointer items-start gap-2 sm:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={videoMetadata.keep_existing_metadata}
+                      onChange={(event) => saveVideoData({ ...videoMetadata, keep_existing_metadata: event.target.checked })}
+                      disabled={operation === "loading"}
+                      className="mt-0.5 size-4 accent-gold"
+                    />
+                    <span>
+                      <span className="block text-xs font-medium text-foreground">Don&apos;t overwrite metadata</span>
+                      <span className="block text-xs text-muted-foreground">
+                        Keeps the title, caption and description this video already has in WordPress. Only empty fields are generated. Untick it to replace them.
+                      </span>
+                    </span>
+                  </label>
+                )}
               </div>
             ) : selectedImage ? (
               <div className="grid gap-3 sm:grid-cols-2">

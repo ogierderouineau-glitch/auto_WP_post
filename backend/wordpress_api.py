@@ -431,6 +431,19 @@ def wordpress_media_base_stem(value: str) -> str:
     return stem
 
 
+def find_media_by_url(url: str) -> dict[str, Any] | None:
+    """Find the media-library item whose file URL is `url` (query string ignored)."""
+    wanted = url.split("?")[0]
+    for media in request_json(
+        "GET",
+        "/wp-json/wp/v2/media",
+        params={"search": Path(wanted).stem, "per_page": 100, "context": "edit"},
+    ):
+        if (media.get("source_url") or "").split("?")[0] == wanted:
+            return media
+    return None
+
+
 def find_reusable_media_in_wordpress(
     item: dict[str, Any],
     required_parent_post_id: int | None = None,

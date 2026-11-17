@@ -15,8 +15,9 @@ import traceback
 import uuid
 from time import perf_counter
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 
 from backend.app.api.step_01_models import (
     AnswersRequest,
@@ -52,7 +53,7 @@ from backend.app.errors import (
     V2Error,
 )
 from backend.app.sessions.step_03_service import ContentSessionService
-from backend.app.storage.step_02_uploads import safe_upload_name, validate_upload
+from backend.app.storage.step_02_uploads import download_media_url, safe_upload_name, validate_upload
 
 
 _SESSION_JOBS: dict[str, dict[str, Any]] = {}
@@ -365,6 +366,76 @@ def create_router(
             await upload.close()
             if os.path.exists(temporary_name):
                 os.unlink(temporary_name)
+
+    @router.put("/{session_id}/media/videos/{filename}/cover", response_model=SessionResponse)
+    async def replace_video_cover(
+        session_id: str,
+        filename: str,
+        expected_version: int = Form(...),
+        upload: UploadFile = File(...),
+    ) -> SessionResponse:
+        """Replace the automatic cover (poster) of an uploaded video with a picture."""
+        service = service_provider()
+        service.require_owner(session_id, get_active_client_id())
+        max_bytes = int(os.getenv("V2_MAX_IMAGE_BYTES", str(20 * 1024 * 1024)))
+        fd, temporary_name = tempfile.mkstemp(prefix="v2-cover-", suffix=Path(upload.filename or "").suffix)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(await upload.read(max_bytes + 1))
+            try:
+                validate_upload(
+                    Path(temporary_name),
+                    kind="image",
+                    declared_content_type=upload.content_type,
+                    max_bytes=max_bytes,
+                )
+            except ValueError as exc:
+                raise InvalidUploadError(f"Cover image: {exc}") from exc
+            return SessionResponse(
+                session=service.replace_video_cover(
+                    session_id,
+                    filename=filename,
+                    cover=Path(temporary_name),
+                    expected_version=expected_version,
+                )
+            )
+        finally:
+            await upload.close()
+            os.unlink(temporary_name)
+
+    @router.post("/{session_id}/wordpress-video")
+    def register_wordpress_video(
+        session_id: str,
+        url: str = Body(...),
+        expected_version: int = Body(...),
+    ) -> dict[str, Any]:
+        """Link a video of the client's own WordPress library; `session` is null for any other link."""
+        service = service_provider()
+        service.require_owner(session_id, get_active_client_id())
+        session = service.attach_wordpress_video(session_id, url=url, expected_version=expected_version)
+        return {"session": session.model_dump(mode="json") if session else None}
+
+    @router.post("/{session_id}/fetch-media")
+    def fetch_media(session_id: str, url: str = Body(..., embed=True)) -> FileResponse:
+        """Download a public picture/video link so the browser can upload it like a chosen file."""
+        service_provider().require_owner(session_id, get_active_client_id())
+        fd, temporary_name = tempfile.mkstemp(prefix="v2-fetch-")
+        os.close(fd)
+        try:
+            content_type, filename = download_media_url(
+                url,
+                Path(temporary_name),
+                int(os.getenv("V2_MAX_VIDEO_BYTES", str(250 * 1024 * 1024))),
+            )
+        except ValueError as exc:
+            os.unlink(temporary_name)
+            raise InvalidUploadError(str(exc)) from exc
+        return FileResponse(
+            temporary_name,
+            media_type=content_type,
+            filename=filename,
+            background=BackgroundTask(os.unlink, temporary_name),
+        )
 
     @router.post("/{session_id}/draft-chat/transcribe")
     async def transcribe_draft_chat_voice(
@@ -706,6 +777,16 @@ def create_router(
         service_provider().require_owner(session_id, get_active_client_id())
         return SessionResponse(
             session=service_provider().update_image_context_transcript(session_id, **payload.model_dump())
+        )
+
+    @router.put("/{session_id}/featured-video", response_model=SessionResponse)
+    async def update_featured_video(
+        session_id: str,
+        payload: FeaturedImageRequest,
+    ) -> SessionResponse:
+        service_provider().require_owner(session_id, get_active_client_id())
+        return SessionResponse(
+            session=service_provider().set_featured_video(session_id, **payload.model_dump())
         )
 
     @router.put("/{session_id}/featured-image", response_model=SessionResponse)

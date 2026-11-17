@@ -19,6 +19,7 @@ from backend.wordpress_api import (
     resolve_tag_ids,
     taxonomy_terms_endpoint,
     update_media_metadata,
+    find_media_by_url,
     upload_media,
 )
 
@@ -178,7 +179,7 @@ class ExistingWordPressProvider(WordPressProvider):
             (
                 item["media_id"]
             for item in media if media_changed
-                if item.get("media_kind", "image") == "image"
+                if item.get("media_kind", "image") in ("image", "video_poster")
                 and item.get("image_usage") == "featured"
             ),
             None,
@@ -277,10 +278,11 @@ class ExistingWordPressProvider(WordPressProvider):
                 for item in media
                 if item.get("media_id") is not None
             }
+            # Items linked from the client's library (wp_media_id) are never ours to delete.
             previous_ids = {
                 int(item["media_id"])
                 for item in (session.wordpress_result or {}).get("media", [])
-                if item.get("media_id") is not None
+                if item.get("media_id") is not None and not item.get("wp_media_id")
             }
             for media_id in sorted(previous_ids - replacement_ids):
                 try:
@@ -599,13 +601,20 @@ class ExistingWordPressProvider(WordPressProvider):
         return re.sub(r"[^a-z0-9]+", " ", without_marks).strip()
 
     @staticmethod
+    def find_media(url: str) -> dict[str, Any] | None:
+        return find_media_by_url(url)
+
+    @staticmethod
     def _upload_media(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         uploaded: list[dict[str, Any]] = []
         for item in items:
             path = item.get("path") or item.get("output")
             if not path:
                 continue
-            media_id, source_url = upload_media(path)
+            if item.get("wp_media_id"):  # already in the WordPress library: reuse, never upload
+                media_id, source_url = int(item["wp_media_id"]), str(item["source_url"])
+            else:
+                media_id, source_url = upload_media(path)
             update_media_metadata(
                 media_id,
                 alt_text=item.get("image_alt"),

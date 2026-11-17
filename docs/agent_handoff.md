@@ -55,6 +55,52 @@ transport/adapters and inspect route/request models instead of copying a static
 endpoint inventory into new code. The backend owns generation, validation,
 media processing and WordPress publication.
 
+## Media upload from a link
+
+The Media screen has a "paste a link" field under the picture format selector.
+`POST /{session_id}/fetch-media` (`download_media_url` in
+`backend/app/storage/step_02_uploads.py`) downloads a public image/MP4 link into a
+temp file and returns it; the frontend (`fetchMediaFromUrl`) wraps it in a `File` and
+calls the normal `uploadFiles`, so validation, vision and retries are unchanged.
+Guards: http(s) only, hosts resolving to non-public IPs refused, redirects followed
+manually (max 3) with the same check, size cap `V2_MAX_VIDEO_BYTES`, HTML pages
+refused (share-page links from Drive/Dropbox/WhatsApp are not direct file links).
+Residual risk: DNS rebinding between check and download is not covered.
+Tests: `test_media_link_download.py`. Not checked in a real browser yet.
+
+## Video cover
+
+New videos get an automatic poster (frame at 0.5 s). The "Change cover" button next
+to "Remove video" calls `PUT /{session_id}/media/videos/{filename}/cover` (picture
+validated like an upload); `replace_video_cover` converts it to a JPEG (max 1280 px)
+and overwrites the poster at the same storage key, so the `video_poster` ACF flow is
+unchanged. Choosing a cover before the upload is not implemented. Already
+published posts need the normal update flow to pick up a new poster.
+
+## Videos from the client's WordPress library
+
+A pasted link on the client's own `wp_base_url` host that resolves (REST search by
+file URL, `wordpress_api.find_media_by_url`) to a `video/*` media item is registered by
+`POST /{session_id}/wordpress-video` (`attach_wordpress_video`): no download, GCS copy
+or ffmpeg. `processed_videos` gets `wp_media_id`/`source_url`; publication media carries
+`wp_media_id`, so the provider reuses the attachment instead of uploading. Other links
+return `session: null` and fall back to the normal download. Title/caption/description
+are loaded into `video_metadata` with `keep_existing_metadata: true` (checkbox "Don't
+overwrite metadata", default on): generation then fills only empty fields; unticked, it
+regenerates everything. Publishing writes the metadata row back to the library item.
+"Change cover" uploads the picture as a new image and sets the poster field.
+Needs a live WordPress test; only mocked tests exist.
+
+Featured video: `PUT /{session_id}/featured-video` (`set_featured_video`) flags one
+`processed_videos` row `is_featured` (requires a cover) and demotes a featured picture;
+`set_featured_image` clears the flag. The video's poster payload item then carries
+`image_usage: "featured"`, so the provider sets it as `featured_media` (WordPress needs an
+image). The publishing checklist's "Featured image assigned" accepts a featured video.
+
+Video ACF destinations are the post type's enabled `direct_acf` rows whose name ends
+with `video_url` / `video_poster` (a hard-coded exact name used to drop videos silently
+for post types such as `event_video_url`).
+
 ## UX safeguards and session labels
 
 Session names are optional persisted labels; never replace or derive session IDs
