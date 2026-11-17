@@ -20,7 +20,12 @@ def wordpress_error_summary(response: requests.Response) -> str:
 
     if isinstance(payload, dict):
         message = str(payload.get("message") or payload.get("code") or "").strip()
-        status = payload.get("data", {}).get("status") if isinstance(payload.get("data"), dict) else None
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        status = data.get("status")
+        # WordPress hides the reason for "Invalid parameter(s)" errors (e.g. which ACF field failed) here.
+        reasons = data.get("details") or data.get("params")
+        if reasons:
+            message = f"{message} - {json.dumps(reasons, ensure_ascii=False)[:600]}"
         if message and status:
             return f"{message} (wp status {status})"
         if message:
