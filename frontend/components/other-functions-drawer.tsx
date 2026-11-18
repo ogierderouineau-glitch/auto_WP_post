@@ -457,7 +457,7 @@ export function OtherFunctionsDrawer({
               className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-muted"
             >
               <Bug className="size-4" aria-hidden="true" />
-              Report a bug
+              Bug tracker
             </a>
           )}
           <button

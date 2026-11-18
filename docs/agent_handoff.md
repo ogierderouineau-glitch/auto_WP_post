@@ -267,7 +267,7 @@ Rules are in AGENTS.md. Helpers: `backend/app/errors.py` (`explain`, `report_hin
 wording in `backend/wordpress_api.py`. `V2_SUPPORT_CONTACT` (set in `render.yaml` to the clients-only
 bug-tracker Google Sheet; an email also works) is what "report this" messages point to; without it they
 say "the person who runs this app". Raw errors stay in the message as "(Technical details: ...)"; the
-frontend `components/error-text.tsx` folds them behind a "Show technical details" toggle. The Other functions drawer has a "Report a bug" button using `NEXT_PUBLIC_BUG_TRACKER_URL` (frontend env, read at build time; hidden when unset).
+frontend `components/error-text.tsx` folds them behind a "Show technical details" toggle. The Other functions drawer has a "Bug tracker" button (top bar) using `NEXT_PUBLIC_BUG_TRACKER_URL` (frontend env, read at build time; hidden when unset).
 
 ## Dev-only client usage report
 
