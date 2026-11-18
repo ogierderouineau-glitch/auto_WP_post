@@ -1,5 +1,6 @@
 import json
 import base64
+import html
 from difflib import SequenceMatcher
 import mimetypes
 import re
@@ -130,7 +131,7 @@ def term_slug(name: str) -> str:
     )
 
 
-def taxonomy_terms_endpoint(taxonomy: str) -> str:
+def taxonomy_definition(taxonomy: str) -> dict[str, Any]:
     definitions = request_json("GET", "/wp-json/wp/v2/taxonomies")
     definition = definitions.get(taxonomy) if isinstance(definitions, dict) else None
     if definition is None and isinstance(definitions, dict):
@@ -150,6 +151,11 @@ def taxonomy_terms_endpoint(taxonomy: str) -> str:
         raise ValueError(
             f"WordPress REST does not expose taxonomy {taxonomy!r} in its taxonomy registry."
         )
+    return definition
+
+
+def taxonomy_terms_endpoint(taxonomy: str) -> str:
+    definition = taxonomy_definition(taxonomy)
     rest_base = str(definition.get("rest_base") or taxonomy).strip("/")
     rest_namespace = str(definition.get("rest_namespace") or "wp/v2").strip("/")
     return f"/wp-json/{rest_namespace}/{rest_base}"
@@ -434,6 +440,62 @@ def wordpress_media_base_stem(value: str) -> str:
     stem = re.sub(r"-scaled$", "", stem)
     stem = re.sub(r"-\d+$", "", stem)
     return stem
+
+
+def find_linked_posts(spec: dict[str, str], name: str) -> tuple[list[dict[str, Any]], str]:
+    """Published posts that a relationship field may link to for `name` (a person, place, ...).
+
+    Returns (posts, reason); `reason` says which step found nothing when posts is empty.
+    spec: taxonomy means the target post carries `name` as a term of that taxonomy, and the post
+    types searched are the ones WordPress lists for that taxonomy (attachments excluded) unless
+    rest_base is given; category (name) limits the posts and exclude_category leaves some out.
+    Without taxonomy the post title is matched (accents/case ignored; "Markus" also matches
+    "Markus Müller", an exact title wins).
+    """
+    filters: dict[str, Any] = {}
+    for key, param in (("category", "categories"), ("exclude_category", "categories_exclude")):
+        if spec.get(key):
+            category = find_term("categories", spec[key])
+            if category is not None:
+                filters[param] = category["id"]
+            elif key == "category":
+                return [], f"category '{spec[key]}' not found"
+    collections = [spec["rest_base"]] if spec.get("rest_base") else ["posts"]
+    if spec.get("taxonomy"):
+        definition = taxonomy_definition(spec["taxonomy"])
+        endpoint = taxonomy_terms_endpoint(spec["taxonomy"])
+        term = match_registered_term(registered_terms(endpoint), name)
+        if term is None:
+            return [], f"no term '{name}' in taxonomy '{spec['taxonomy']}'"
+        filters[endpoint.rsplit("/", 1)[-1]] = term["id"]
+        if not spec.get("rest_base"):
+            types = request_json("GET", "/wp-json/wp/v2/types")
+            collections = [
+                str(types[kind].get("rest_base") or kind)
+                for kind in definition.get("types") or []
+                if kind != "attachment" and kind in types
+            ] or collections
+    found: list[dict[str, Any]] = []
+    for collection in collections:
+        posts = request_json(
+            "GET",
+            f"/wp-json/wp/v2/{collection}",
+            params={"per_page": 100, "status": "publish", **({} if spec.get("taxonomy") else {"search": name}), **filters},
+        )
+        found += [
+            {"id": int(post["id"]), "title": html.unescape(str((post.get("title") or {}).get("rendered") or ""))}
+            for post in posts
+        ]
+    if not spec.get("taxonomy"):
+        wanted = normalized_term_key(name)
+        exact = [post for post in found if normalized_term_key(post["title"]) == wanted]
+        found = exact or [post for post in found if normalized_term_key(post["title"]).startswith(wanted + " ")]
+    if found:
+        return found, ""
+    where = ", ".join(collections)
+    if spec.get("taxonomy"):
+        return [], f"term found, but no published post in '{where}' carries it"
+    return [], f"no post titled '{name}' in '{where}'"
 
 
 def find_media_by_url(url: str) -> dict[str, Any] | None:

@@ -55,9 +55,14 @@ class PayloadBuilder:
             if row.enabled and row.post_type_key == post_type_key
         ]
         direct = {row.field_key: row for row in acf_rows if row.field_role == "direct_acf"}
+        acf_lookups: dict[str, dict[str, str]] = {}
         for field_key, schema in direct.items():
             if field_key in acf_source_values:
                 acf[schema.acf_field_name or field_key] = acf_source_values[field_key]
+            # Workbook rule "lookup:taxonomy=<slug>[,category=<name>][,type=<rest_base>]": names of this
+            # field are terms of that taxonomy; the posts carrying the term are what it links to.
+            if (schema.validation_rule or "").startswith("lookup:"):
+                acf_lookups[schema.acf_field_name or field_key] = self._lookup_spec(snapshot, post_type_key, schema.validation_rule)
 
         aggregation_rows: dict[str, list[Any]] = defaultdict(list)
         for row in acf_rows:
@@ -109,10 +114,25 @@ class PayloadBuilder:
             wordpress=WordPressFields.model_validate(content["wordpress"]),
             meta=meta,
             acf=content["acf"],
+            acf_lookups=acf_lookups,
             taxonomies=taxonomies,
             media_taxonomies=media_taxonomies,
             media=media or [],
         )
+
+    @staticmethod
+    def _lookup_spec(snapshot: WorkbookSnapshot, post_type_key: str, rule: str) -> dict[str, str]:
+        options = dict(
+            part.split("=", 1) for part in rule.removeprefix("lookup:").split(",") if "=" in part
+        )
+        current = snapshot.post_type(post_type_key)
+        return {
+            "rest_base": options.get("type", "posts"),
+            "taxonomy": options.get("taxonomy", ""),
+            "category": options.get("category", ""),
+            # Never link to posts of the kind being published (e.g. another video tagged with the same term).
+            "exclude_category": current.wp_category_name if current else "",
+        }
 
     def taxonomy_terms(
         self,

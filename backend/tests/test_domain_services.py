@@ -1255,6 +1255,28 @@ class DomainServiceTests(unittest.TestCase):
         self.assertIn("<strong>Event:</strong> Sommerfest", payload.acf["fakten"])
         self.assertNotIn("&lt;li&gt;", payload.acf["fakten"])
 
+    def test_payload_carries_the_lookup_rule_of_relationship_fields(self) -> None:
+        snapshot = self.snapshot.model_copy(update={"acf_fields": tuple(
+            row.model_copy(update={"validation_rule": "lookup:taxonomy=tags_x,category=Staff"}) if row.field_key == "hero_h1" else row
+            for row in self.snapshot.acf_fields
+        )})
+        payload = PayloadBuilder().build(
+            snapshot, post_type_key="event", shared_values={}, acf_source_values={"hero_h1": "Markus"}
+        )
+        spec = payload.acf_lookups["hero_h1"]
+        self.assertEqual((spec["rest_base"], spec["taxonomy"], spec["category"]), ("posts", "tags_x", "Staff"))
+        self.assertEqual(spec["exclude_category"], snapshot.post_type("event").wp_category_name)
+
+    def test_never_ai_written_fact_derived_fields_stay_listed_without_facts(self) -> None:
+        options = ContentSessionService._draft_field_options(self.snapshot, self.session())
+        listed = {row["field_key"] for row in options["acf_fields"]}
+        hidden_but_derived = {
+            row.field_key for row in self.snapshot.acf_fields
+            if row.enabled and row.post_type_key == "event" and row.source_mode == "derived_from_facts"
+            and not row.include_in_ai_schema
+        }
+        self.assertTrue(hidden_but_derived <= listed)
+
     def test_payload_maps_selected_confirmed_fact_to_generated_variables_meta(self) -> None:
         payload = PayloadBuilder().build(
             self.snapshot,

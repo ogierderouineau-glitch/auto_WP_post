@@ -121,6 +121,8 @@ export function WordPressScreen({
   const postId = resultValue(wordpressResult, "post_id", "id")
   const viewUrl = resultValue(wordpressResult, "view_url", "link")
   const editUrl = resultValue(wordpressResult, "edit_url")
+  // Fields the app could not fill (e.g. unmatched names for relationship fields), in plain language.
+  const publishWarnings = Array.isArray(wordpressResult.warnings) ? (wordpressResult.warnings as string[]) : []
   const sentPayload = session?.published_wordpress_payload || {}
   const currentPayload = session?.wordpress_payload || {}
   // Pictures/videos added after the draft was built are not in the payload yet;
@@ -364,6 +366,17 @@ export function WordPressScreen({
                   <div className="mb-3 flex items-center gap-2 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-sm font-medium text-warn-foreground">
                     <RefreshCw className="size-4 shrink-0" aria-hidden="true" />
                     {changedFields.length} changed WordPress payload field(s) detected.
+                  </div>
+                )}
+
+                {publishWarnings.length > 0 && (
+                  <div className="mb-3 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn-foreground">
+                    <p className="font-medium">Published, but some fields need your attention in WordPress:</p>
+                    <ul className="mt-1 list-disc pl-5">
+                      {publishWarnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
 

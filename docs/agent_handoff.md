@@ -101,6 +101,28 @@ Video ACF destinations are the post type's enabled `direct_acf` rows whose name 
 with `video_url` / `video_poster` (a hard-coded exact name used to drop videos silently
 for post types such as `event_video_url`).
 
+Relationship / post-object ACF fields (the WordPress schema lists `items: integer`) only
+accept lists of post IDs. At publish time `_prepare_acf_payload` turns the names in such a
+field (text split on `;` and `,`, or a list) into IDs with `find_linked_posts`
+(backend/wordpress_api.py). The only workbook input is the `validation_rule` of the
+`direct_acf` row: `lookup:taxonomy=<slug>[,category=<name>][,type=<rest_base>]` (flairlab:
+`lookup:taxonomy=barkeeper,category=auto bartender post` on `mitwirkende`;
+`lookup:taxonomy=highlight` on `video_highlights`). The name is matched to a term of that
+taxonomy (existing `match_registered_term`, so accents/case and close spellings work as for
+taxonomy assignment); the published posts carrying the term are the candidates, optionally
+limited to `category`. The post types searched are the ones WordPress lists for the taxonomy
+(`/wp/v2/taxonomies`, attachments excluded; `type=` in the rule overrides this), so taxonomies of
+custom post types work without configuration. A "not found" warning says which step failed
+(term missing, or term found but no published post carries it). Posts of the kind being published (the current post type's
+`wp_category_name`) are always excluded, so a video never links to another video. Without
+`taxonomy` the post title is matched instead. A name is used only when exactly one post
+matches. Unknown, ambiguous or unconfigured names are omitted
+and reported in `wordpress_result.warnings`, shown in a box on the WordPress screen; this
+avoids WordPress's HTTP 400 "Invalid parameter(s): acf". Limits: no interactive "pick one"
+step, no read-back check, the ACF field's own filters cannot be read (no ACF REST route),
+published posts only, at most 100 posts per lookup, a few WordPress requests per name on
+every publish. Needs a live WordPress test; only mocked tests exist.
+
 ## UX safeguards and session labels
 
 Session names are optional persisted labels; never replace or derive session IDs
@@ -190,6 +212,17 @@ workbook with ownership checks. The frontend merges blank display slots with
 saved values; reading metadata does not persist placeholders. Newly configured
 fields are valid explicit revision targets. Manual draft edits use the current
 workbook when rebuilding the payload, so newly added fields are routed correctly.
+
+`POST /{session_id}/update-workbook` (`ContentSessionService.update_workbook`, icon button on the
+facts screen and next to the search box on the content screen) moves a session to the newest
+workbook without an AI revision. Without a draft only the workbook version moves; the page then
+reloads its workbook status (`session.workbook_hash` is an effect dependency in page.tsx), which
+is what the facts screen builds its fact fields from. With a draft: new fields appear in `draft-fields`, empty fact-derived ACF fields are
+filled, and the WordPress payload is rebuilt (approval resets). AI-written new fields stay
+empty until revised. Regeneration still refreshes the workbook itself (`_on_latest_workbook`).
+Optional `derived_from_facts` ACF fields that the AI never writes (`include_in_ai_schema` FALSE, e.g.
+relationship fields) stay listed in `draft-fields` even when their source facts are not confirmed, so
+the user can type the value (names for a `lookup:` rule) instead of the field being hidden.
 
 ## Dev-only client usage report
 

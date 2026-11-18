@@ -779,6 +779,13 @@ def create_router(
             session=service_provider().update_image_context_transcript(session_id, **payload.model_dump())
         )
 
+    @router.post("/{session_id}/update-workbook", response_model=SessionResponse)
+    async def update_workbook(session_id: str, payload: VersionedRequest) -> SessionResponse:
+        service_provider().require_owner(session_id, get_active_client_id())
+        return SessionResponse(
+            session=service_provider().update_workbook(session_id, **payload.model_dump())
+        )
+
     @router.put("/{session_id}/featured-video", response_model=SessionResponse)
     async def update_featured_video(
         session_id: str,

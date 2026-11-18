@@ -11,11 +11,13 @@ import {
   CircleAlert,
   CircleHelp,
   Loader2,
+  RefreshCw,
   Sparkles,
 } from "lucide-react"
 import type { ApiClientOptions } from "@/lib/api"
 import {
   saveSessionFactCorrections,
+  updateSessionWorkbook,
   type ContentSession,
   type FactSchemaField,
   type FactValue,
@@ -374,6 +376,25 @@ export function FactsScreen({
     }
   }
 
+  // Pulls new fact definitions from the latest workbook into this session (unsaved edits are saved first).
+  async function handleUpdateWorkbook() {
+    if (!auth || !session || operation === "loading") return
+    setOperation("loading")
+    setMessage("Importing the latest workbook...")
+    try {
+      const saved = (await saveCorrections(false)) ?? session
+      const data = await updateSessionWorkbook(auth, saved)
+      onSessionChange(data.session)
+      setOperation("success")
+      setMessage(data.session.version === saved.version
+        ? "This session already uses the latest workbook."
+        : "Workbook imported. New fact fields are listed below.")
+    } catch (error) {
+      setOperation("error")
+      setMessage(error instanceof Error ? error.message : "Could not import the latest workbook.")
+    }
+  }
+
   async function handleConfirm() {
     if (!auth || !session || !allRequiredDone) return
     setOperation("loading")
@@ -435,9 +456,22 @@ export function FactsScreen({
         </div>
 
         <div className="mt-4 rounded-xl border border-border bg-card p-4">
-          <p hidden={!reviewAvailable} className="text-xs text-muted-foreground">
-            {selectedFactKeys.length} of {rows.length} facts selected for AI review.
-          </p>
+          <div className="flex items-start justify-between gap-3">
+            <p hidden={!reviewAvailable} className="text-xs text-muted-foreground">
+              {selectedFactKeys.length} of {rows.length} facts selected for AI review.
+            </p>
+            <button
+              id="s2p-facts-update-workbook"
+              type="button"
+              onClick={handleUpdateWorkbook}
+              disabled={operation === "loading"}
+              title="Import new fact fields from the latest workbook (no revision)"
+              aria-label="Import new fact fields from the latest workbook without revision"
+              className="ml-auto inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              <RefreshCw className="size-4" aria-hidden="true" />
+            </button>
+          </div>
           {reviewAvailable && <button
             id="s2p-facts-toggle-all"
             type="button"

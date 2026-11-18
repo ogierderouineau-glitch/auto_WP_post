@@ -485,6 +485,87 @@ class StructuredPipelineTests(unittest.TestCase):
             self.assertEqual(regeneration_context["current_acf_source_fields"], {})
             self.assertTrue(regeneration_context["examples"])
 
+    def test_update_workbook_before_a_draft_only_moves_the_workbook_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            knowledge = KnowledgeBaseService(WORKBOOK)
+            snapshot = knowledge.current()
+            model = WorkbookFakeLanguageModel(snapshot)
+            service = ContentSessionService(
+                knowledge=knowledge,
+                repository=FileSessionRepository(temporary),
+                language_model=model,
+            )
+            session = service.create(user_id="user-1", post_type_key="event")
+            latest = snapshot.model_copy(
+                update={"version": snapshot.version.model_copy(update={"sha256": "latest-workbook-hash"})}
+            )
+            knowledge._snapshots[latest.version.sha256] = latest
+            knowledge._current_hash = latest.version.sha256
+            updated = service.update_workbook(session.session_id, expected_version=session.version)
+            self.assertEqual(updated.workbook_hash, "latest-workbook-hash")
+            self.assertEqual(updated.version, session.version + 1)
+            self.assertFalse(updated.wordpress_payload)
+            self.assertEqual(len(model.calls), 0)
+
+    def test_update_workbook_moves_a_draft_to_the_latest_workbook_without_ai_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            knowledge = KnowledgeBaseService(WORKBOOK)
+            snapshot = knowledge.current()
+            model = WorkbookFakeLanguageModel(snapshot)
+            service = ContentSessionService(
+                knowledge=knowledge,
+                repository=FileSessionRepository(temporary),
+                language_model=model,
+            )
+            session = service.create(user_id="user-1", post_type_key="event")
+            session = service.add_inputs(
+                session.session_id,
+                manual_text="Ausdrücklich bestätigte Eventdaten.",
+                confirmed_facts={
+                    row.field_key: WorkbookFakeLanguageModel._value(
+                        row.value_type,
+                        row.min_words,
+                        row.max_words,
+                    )
+                    for row in snapshot.acf_fields
+                    if row.enabled
+                    and row.post_type_key == "event"
+                    and row.field_role == "input_fact"
+                    and row.required_for_analysis
+                },
+                expected_version=session.version,
+            )
+            session = service.analyze(
+                session.session_id,
+                expected_version=session.version,
+            )
+            generated = service.generate(
+                session.session_id,
+                shared_fields={},
+                acf_source_fields={},
+                selected_links=[],
+                current_url=None,
+                expected_version=session.version,
+            )
+            latest_snapshot = snapshot.model_copy(
+                update={
+                    "version": snapshot.version.model_copy(
+                        update={"sha256": "latest-workbook-hash"}
+                    )
+                }
+            )
+            knowledge._snapshots[latest_snapshot.version.sha256] = latest_snapshot
+            knowledge._current_hash = latest_snapshot.version.sha256
+            calls_before = len(model.calls)
+            updated = service.update_workbook(generated.session_id, expected_version=generated.version)
+            self.assertEqual(updated.workbook_hash, "latest-workbook-hash")
+            self.assertEqual(updated.state, "needs_review")
+            self.assertEqual(updated.version, generated.version + 1)
+            self.assertEqual(len(model.calls), calls_before)
+            self.assertEqual(updated.shared_fields, generated.shared_fields)
+            unchanged = service.update_workbook(updated.session_id, expected_version=updated.version)
+            self.assertEqual(unchanged.version, updated.version)
+
     def test_draft_revision_instruction_is_passed_to_structured_generation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             knowledge = KnowledgeBaseService(WORKBOOK)

@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   FileText,
   Loader2,
+  RefreshCw,
   Search,
   Send,
   ScanText,
@@ -23,6 +24,7 @@ import {
 import type { ApiClientOptions } from "@/lib/api"
 import {
   editSessionLinkCandidates,
+  updateSessionWorkbook,
   insertSessionLink,
   loadSessionLinkOptions,
   loadDraftFieldOptions,
@@ -608,6 +610,26 @@ export function ContentScreen({
     }
   }
 
+  // Pulls newly added workbook fields into this draft without asking the AI to revise anything.
+  async function handleUpdateWorkbook() {
+    if (!auth || !session || operation === "loading") return
+    setOperation("loading")
+    try {
+      const latest = await latestSessionAfterAutosave()
+      if (!latest) return
+      const data = await updateSessionWorkbook(auth, latest)
+      sessionRef.current = data.session
+      onSessionChange(data.session)
+      setOperation("success")
+      setMessage(data.session.version === latest.version
+        ? "This draft already uses the latest workbook."
+        : "Workbook imported. New fields are listed below; AI-written ones stay empty until you revise them.")
+    } catch (error) {
+      setOperation("error")
+      setMessage(error instanceof Error ? error.message : "Could not import the latest workbook.")
+    }
+  }
+
   async function handleInsertLink() {
     if (!auth || !session || !linkSelection || operation === "loading") return
     const field = fields.find((field) => field.id === linkSelection.fieldId)
@@ -867,10 +889,23 @@ export function ContentScreen({
           <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
             <section className="min-w-0 space-y-3">
               <div className="rounded-xl border border-border bg-card p-3">
-                <label className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
-                  <Search className="size-4 text-muted-foreground" aria-hidden="true" />
-                  <input id="s2p-content-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search fields, keys or content" className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
-                </label>
+                <div className="flex items-center gap-2">
+                  <label className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
+                    <Search className="size-4 text-muted-foreground" aria-hidden="true" />
+                    <input id="s2p-content-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search fields, keys or content" className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
+                  </label>
+                  <button
+                    id="s2p-content-update-workbook"
+                    type="button"
+                    onClick={handleUpdateWorkbook}
+                    disabled={operation === "loading"}
+                    title="Import new fields from the latest workbook (no revision)"
+                    aria-label="Import new fields from the latest workbook without revision"
+                    className="inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                  >
+                    <RefreshCw className="size-4" aria-hidden="true" />
+                  </button>
+                </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {(Object.keys(CONTENT_SECTIONS) as ContentSectionId[]).map((id) => (
                     <button key={id} id={`s2p-content-filter-${id}`} type="button" onClick={() => toggleContentSection(id)} aria-pressed={openSection === id} className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-opacity ${CONTENT_SECTIONS[id].tone} ${openSection === id ? "ring-2 ring-current/20" : "opacity-70 hover:opacity-100"}`}>

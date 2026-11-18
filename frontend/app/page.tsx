@@ -355,7 +355,7 @@ export default function Page() {
     return () => {
       active = false
     }
-  }, [apiAuth, session?.post_type_key])
+  }, [apiAuth, session?.post_type_key, session?.workbook_hash])
 
   useEffect(() => {
     setSelectedMedia(null)

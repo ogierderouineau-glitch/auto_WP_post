@@ -139,6 +139,7 @@ export type ContentSession = {
   session_id: string
   user_id: string
   post_type_key: string
+  workbook_hash: string
   wordpress_post_type: string
   state: string
   language: string
@@ -983,6 +984,13 @@ export type SessionLinkOptions = {
 
 export function loadSessionLinkOptions(auth: ApiClientOptions, session: ContentSession) {
   return apiRequest<SessionLinkOptions>(`/api/content-sessions/${session.session_id}/links`, auth, { json: false })
+}
+
+/** Imports the newest workbook (new fields, lookup rules) into a drafted session without an AI revision. */
+export function updateSessionWorkbook(auth: ApiClientOptions, session: ContentSession) {
+  return apiRequest<SessionResponse>(`/api/content-sessions/${session.session_id}/update-workbook`, auth, {
+    method: "POST", body: { expected_version: session.version },
+  })
 }
 
 export function editSessionLinkCandidates(auth: ApiClientOptions, session: ContentSession, action: "add" | "remove" | "refresh", linkId?: string) {

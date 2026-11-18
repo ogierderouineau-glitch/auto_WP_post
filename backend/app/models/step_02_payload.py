@@ -18,6 +18,8 @@ class WordPressPayload(BaseModel):
     wordpress: WordPressFields
     meta: dict[str, Any] = Field(default_factory=dict)
     acf: dict[str, Any] = Field(default_factory=dict)
+    # ACF field name -> where to find the posts it links to (built from the workbook rule `lookup:<post_type_key>`).
+    acf_lookups: dict[str, dict[str, str]] = Field(default_factory=dict)
     taxonomies: dict[str, list[str | int]] = Field(default_factory=dict)
     media_taxonomies: list[str] = Field(default_factory=list)
     media: list[dict[str, Any]] = Field(default_factory=list)

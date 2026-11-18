@@ -594,6 +594,35 @@ class WordPressProviderTests(unittest.TestCase):
             "Social description",
         )
 
+    SCHEMA = {"acf": {"crew", "title_text"}, "acf_id_lists": {"crew"}}
+
+    def test_names_for_a_post_id_list_field_are_resolved_to_ids(self) -> None:
+        profiles = {"Markus": [{"id": 12, "title": "Markus Müller", "type": "team"}], "João": [{"id": 57, "title": "João", "type": "team"}]}
+        with patch("backend.app.providers.step_03_wordpress.find_linked_posts", side_effect=lambda spec, name: (profiles.get(name, []), "")) as find:
+            acf, warnings = ExistingWordPressProvider()._prepare_acf_payload(
+                {"crew": "Markus; João", "title_text": "Hello"}, self.SCHEMA, {"crew": {"rest_base": "team"}}
+            )
+        self.assertEqual(acf, {"crew": [12, 57], "title_text": "Hello"})
+        self.assertEqual(warnings, [])
+        self.assertEqual(find.call_args_list[0].args, ({"rest_base": "team"}, "Markus"))
+
+    def test_unknown_or_ambiguous_names_are_omitted_with_plain_warnings(self) -> None:
+        two = [{"id": 1, "title": "Ana A", "type": "team"}, {"id": 2, "title": "Ana B", "type": "team"}]
+        with patch("backend.app.providers.step_03_wordpress.find_linked_posts", side_effect=lambda spec, name: (two, "") if name == "Ana" else ([], "no term")):
+            acf, warnings = ExistingWordPressProvider()._prepare_acf_payload(
+                {"crew": ["Ana", "Zed"]}, self.SCHEMA, {"crew": {"rest_base": "team"}}
+            )
+        self.assertEqual(acf, {})
+        self.assertIn("matches several posts", warnings[0])
+        self.assertIn("no WordPress post found for 'Zed' (no term)", warnings[1])
+
+    def test_post_id_list_field_without_a_lookup_rule_is_omitted_with_a_warning(self) -> None:
+        acf, warnings = ExistingWordPressProvider()._prepare_acf_payload({"crew": "Markus"}, self.SCHEMA)
+        self.assertEqual(acf, {})
+        self.assertIn("no lookup is configured", warnings[0])
+        acf, _ = ExistingWordPressProvider()._prepare_acf_payload({"crew": [12, 57]}, self.SCHEMA)
+        self.assertEqual(acf, {"crew": [12, 57]})
+
     @patch("backend.app.providers.step_03_wordpress.resolve_tag_ids", return_value=[])
     @patch("backend.app.providers.step_03_wordpress.find_term", return_value={"id": 10})
     @patch("backend.app.providers.step_03_wordpress.request_json")

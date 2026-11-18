@@ -12,6 +12,7 @@ from backend.app.models.step_02_payload import WordPressPayload
 from backend.app.providers.step_01_interfaces import WordPressProvider
 from backend.config import CLIENTS, DEFAULT_CLIENT_ID, get_active_client_config, set_active_client
 from backend.wordpress_api import (
+    find_linked_posts,
     find_term,
     match_registered_term,
     registered_terms,
@@ -108,7 +109,7 @@ class ExistingWordPressProvider(WordPressProvider):
                 for key, value in payload.meta.items()
                 if key in partial_update_fields.get("meta", set())
             }
-        acf_payload, warnings = self._prepare_acf_payload(acf_source, schema)
+        acf_payload, warnings = self._prepare_acf_payload(acf_source, schema, payload.acf_lookups)
         warnings.extend(
             "Optional generated-variable shortcode plugin is unavailable; "
             f"{key} was omitted from the WordPress payload."
@@ -418,8 +419,15 @@ class ExistingWordPressProvider(WordPressProvider):
         )
         response = request_json("OPTIONS", f"/wp-json/wp/v2/{rest_base}")
         properties = (response.get("schema") or {}).get("properties") or {}
+        acf_properties = (properties.get("acf") or {}).get("properties") or {}
         return {
-            "acf": set(((properties.get("acf") or {}).get("properties") or {}).keys()),
+            "acf": set(acf_properties.keys()),
+            # Relationship / post-object fields: WordPress only accepts lists of post IDs.
+            "acf_id_lists": {
+                name
+                for name, definition in acf_properties.items()
+                if ((definition or {}).get("items") or {}).get("type") == "integer"
+            },
             "meta": set(((properties.get("meta") or {}).get("properties") or {}).keys()),
             "properties": set(properties),
         }
@@ -428,6 +436,7 @@ class ExistingWordPressProvider(WordPressProvider):
         self,
         payload: dict[str, Any],
         schema: dict[str, set[str]],
+        lookups: dict[str, dict[str, str]] | None = None,
     ) -> tuple[dict[str, Any], list[str]]:
         missing = sorted(set(payload).difference(schema["acf"]))
         blocking = [
@@ -445,11 +454,59 @@ class ExistingWordPressProvider(WordPressProvider):
             f"{field}; omitted from publication payload."
             for field in missing
         ]
+        # Relationship fields accept only post IDs: turn names into IDs, or omit the field
+        # with a plain-language warning (a bad value would fail the whole post with HTTP 400).
+        resolved: dict[str, list[int]] = {}
+        not_ids: set[str] = set()
+        for key, value in payload.items():
+            if key not in schema.get("acf_id_lists", set()):
+                continue
+            if isinstance(value, list) and all(isinstance(v, int) for v in value):
+                continue
+            ids, problems = self._resolve_post_ids(key, value, (lookups or {}).get(key))
+            warnings.extend(problems)
+            if ids:
+                resolved[key] = ids
+            else:
+                not_ids.add(key)
         return {
-            key: value
+            key: resolved.get(key, value)
             for key, value in payload.items()
-            if key in schema["acf"]
+            if key in schema["acf"] and key not in not_ids
         }, warnings
+
+    @staticmethod
+    def _resolve_post_ids(
+        field: str, value: Any, spec: dict[str, str] | None
+    ) -> tuple[list[int], list[str]]:
+        """Match names (list, or text split on ; and ,) to post IDs. Unique matches only: no guessing."""
+        names = [
+            part.strip()
+            for item in (value if isinstance(value, list) else [value])
+            for part in re.split(r"[;,]", str(item))
+            if part.strip()
+        ]
+        if not spec:
+            return [], [
+                f"Field {field} links to other WordPress posts, but no lookup is configured "
+                "(workbook rule `lookup:taxonomy=<slug>`). Please set it in WordPress."
+            ]
+        ids: list[int] = []
+        problems: list[str] = []
+        for name in names:
+            try:
+                matches, reason = find_linked_posts(spec, name)
+            except RuntimeError as exc:
+                return ids, problems + [f"Field {field}: lookup in WordPress failed ({exc})."]
+            if len(matches) == 1:
+                if matches[0]["id"] not in ids:
+                    ids.append(matches[0]["id"])
+            elif matches:
+                titles = ", ".join(f"{m['title']} (#{m['id']})" for m in matches[:5])
+                problems.append(f"Field {field}: '{name}' matches several posts ({titles}). Please choose in WordPress.")
+            else:
+                problems.append(f"Field {field}: no WordPress post found for '{name}' ({reason}). Please set it in WordPress.")
+        return ids, problems
 
     @classmethod
     def _resolve_meta_key(

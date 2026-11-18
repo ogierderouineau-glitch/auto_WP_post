@@ -1906,37 +1906,7 @@ class ContentSessionService:
         snapshot = self.knowledge.by_hash(session.workbook_hash)
         is_regeneration = session.state in {"needs_review", "ready_to_publish", "published"}
         if is_regeneration:
-            latest_snapshot = self.knowledge.current()
-            if latest_snapshot.version.sha256 != session.workbook_hash:
-                post_type = latest_snapshot.post_type(session.post_type_key)
-                if (
-                    post_type is None
-                    or not post_type.enabled
-                    or not post_type.generation_enabled
-                    or not post_type.template_ready
-                ):
-                    raise UnknownPostTypeError(
-                        f"Post type {session.post_type_key!r} is unavailable in the latest workbook."
-                    )
-                previous_hash = session.workbook_hash
-                snapshot = latest_snapshot
-                session = session.model_copy(
-                    update={
-                        "workbook_hash": snapshot.version.sha256,
-                        "wordpress_post_type": post_type.wp_post_type,
-                        "workflow_steps": {
-                            row.step_key: session.workflow_steps.get(row.step_key, "pending")
-                            for row in snapshot.workflow_steps
-                        },
-                        "generation_trace": {
-                            **session.generation_trace,
-                            "workbook_refresh": {
-                                "previous_hash": previous_hash,
-                                "current_hash": snapshot.version.sha256,
-                            },
-                        },
-                    }
-                )
+            session, snapshot = self._on_latest_workbook(session, snapshot)
         targeted_revision = revision_instruction is not None and revision_field_ids is not None
         fresh_generation = not targeted_revision and not shared_fields and not acf_source_fields
         selected_shared_keys = {
@@ -3714,6 +3684,67 @@ class ContentSessionService:
             } for row in eligible.candidates],
         }
 
+    def _on_latest_workbook(self, session: ContentSession, snapshot: Any) -> tuple[ContentSession, Any]:
+        """Move a session to the newest workbook version (its post type must still be usable)."""
+        latest_snapshot = self.knowledge.current()
+        if latest_snapshot.version.sha256 == session.workbook_hash:
+            return session, snapshot
+        post_type = latest_snapshot.post_type(session.post_type_key)
+        if (
+            post_type is None
+            or not post_type.enabled
+            or not post_type.generation_enabled
+            or not post_type.template_ready
+        ):
+            raise UnknownPostTypeError(
+                f"Post type {session.post_type_key!r} is unavailable in the latest workbook."
+            )
+        previous_hash = session.workbook_hash
+        return session.model_copy(
+            update={
+                "workbook_hash": latest_snapshot.version.sha256,
+                "wordpress_post_type": post_type.wp_post_type,
+                "workflow_steps": {
+                    row.step_key: session.workflow_steps.get(row.step_key, "pending")
+                    for row in latest_snapshot.workflow_steps
+                },
+                "generation_trace": {
+                    **session.generation_trace,
+                    "workbook_refresh": {
+                        "previous_hash": previous_hash,
+                        "current_hash": latest_snapshot.version.sha256,
+                    },
+                },
+            }
+        ), latest_snapshot
+
+    def update_workbook(self, session_id: str, *, expected_version: int) -> ContentSession:
+        """Import the newest workbook into a session without any AI revision.
+
+        Before a draft exists only the workbook version moves (new fact definitions apply).
+        With a draft, new fields show up in the field list, fields derived from confirmed facts
+        are filled and the WordPress payload is rebuilt (e.g. new lookup rules). AI-written
+        fields stay empty until the user revises them.
+        """
+        current = self.repository.get(session_id)
+        if current.version != expected_version:
+            raise SessionVersionConflictError("Session changed. Reload before updating the workbook.")
+        session, snapshot = self._on_latest_workbook(current, self.knowledge.by_hash(current.workbook_hash))
+        if session.workbook_hash == current.workbook_hash:
+            return current
+        if not session.wordpress_payload:
+            # No draft yet (facts screen): only the workbook version moves; nothing is rebuilt.
+            return self.repository.save(
+                session.model_copy(update={"updated_at": datetime.now(timezone.utc)}),
+                expected_version=expected_version,
+            )
+        acf = dict(session.acf_source_fields)
+        for key, value in self._derive_acf_fields_from_facts(snapshot, session).items():
+            if self.draft_validator._empty(acf.get(key)):
+                acf[key] = value
+        session = session.model_copy(update={"acf_source_fields": acf})
+        return self._save_link_edit(session, expected_version=expected_version, content_changed=True)
+
     def _save_link_edit(self, session: ContentSession, *, expected_version: int, content_changed: bool) -> ContentSession:
         snapshot = self.knowledge.by_hash(session.workbook_hash)
         updates: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
@@ -3859,7 +3890,9 @@ class ContentSessionService:
             "acf_fields": [describe(row) for row in snapshot.acf_fields
                            if row.enabled and row.post_type_key == session.post_type_key and row.field_role != "input_fact"
                            and not (row.generation_stage == "payload_construction" and row.source_mode == "derived")
-                           and cls._acf_field_is_eligible(row, session)],
+                           # Never AI-written: stay listed without source facts so the user can type the value.
+                           and (cls._acf_field_is_eligible(row, session)
+                                or (row.source_mode == "derived_from_facts" and not row.include_in_ai_schema))],
         }
 
     def update_draft_fields(
