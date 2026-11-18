@@ -19,6 +19,7 @@ import { FactsScreen } from "@/components/facts-screen"
 import { ContentScreen } from "@/components/content-screen"
 import { KeywordsScreen } from "@/components/keywords-screen"
 import { WordPressScreen } from "@/components/wordpress-screen"
+import { ApiError } from "@/lib/api"
 import { AuthModal, type AuthResult } from "@/components/auth-modal"
 import { SessionModal } from "@/components/session-modal"
 import { RecordingWidget } from "@/components/recording-widget"
@@ -321,12 +322,16 @@ export default function Page() {
         setAuth(result)
         setAuthReady(true)
         await bootstrap(result)
-      } catch {
-        sessionStorage.removeItem(STORAGE_API_KEY)
-        sessionStorage.removeItem(STORAGE_SESSION_ID)
+      } catch (error) {
+        // Only a rejected key means "log in again"; a server hiccup must not throw the key away.
+        const keyRejected = error instanceof ApiError && error.status === 401
+        if (keyRejected) {
+          sessionStorage.removeItem(STORAGE_API_KEY)
+          sessionStorage.removeItem(STORAGE_SESSION_ID)
+        }
         if (active) {
           setAuthReady(true)
-          setStatusText("Login required")
+          setStatusText(keyRejected ? "Login required" : "Server unavailable, reload in a minute")
         }
       }
     }

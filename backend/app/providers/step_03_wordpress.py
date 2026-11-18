@@ -16,7 +16,9 @@ from backend.wordpress_api import (
     wordpress_media_exists,
     find_term,
     match_registered_term,
+    SITE_SETUP_HINT,
     registered_terms,
+    unknown_term_message,
     request_json,
     resolve_tag_ids,
     taxonomy_terms_endpoint,
@@ -142,7 +144,7 @@ class ExistingWordPressProvider(WordPressProvider):
         missing_taxonomies = sorted(set(taxonomy_ids).difference(schema["properties"]))
         if missing_taxonomies:
             raise ValueError(
-                "WordPress REST does not expose configured taxonomies: "
+                f"{SITE_SETUP_HINT}WordPress REST does not expose configured taxonomies: "
                 + ", ".join(missing_taxonomies)
             )
         current_media_acf_fields = {
@@ -449,7 +451,7 @@ class ExistingWordPressProvider(WordPressProvider):
         ]
         if blocking:
             raise ValueError(
-                "WordPress REST does not expose required ACF fields: "
+                f"{SITE_SETUP_HINT}WordPress REST does not expose required ACF fields: "
                 + ", ".join(blocking)
             )
         warnings = [
@@ -541,7 +543,7 @@ class ExistingWordPressProvider(WordPressProvider):
                 resolved[resolved_key] = value
         if missing:
             raise ValueError(
-                "WordPress REST does not expose required meta fields: "
+                f"{SITE_SETUP_HINT}WordPress REST does not expose required meta fields: "
                 + ", ".join(sorted(missing))
             )
         return resolved
@@ -555,7 +557,7 @@ class ExistingWordPressProvider(WordPressProvider):
                 continue
             term = find_term("categories", value)
             if term is None:
-                raise ValueError(f"Required WordPress category not found: {value}")
+                raise ValueError(unknown_term_message("Category", value, "categories"))
             identifiers.append(int(term["id"]))
         return identifiers
 
@@ -576,14 +578,8 @@ class ExistingWordPressProvider(WordPressProvider):
             term = match_registered_term(available_terms, value)
             if term is None:
                 # List the existing terms so the user can fix the value on the facts/content screen.
-                names = sorted(str(item.get("name", "")) for item in available_terms)
                 raise ValueError(
-                    f"No safe registered WordPress term match for {value!r} "
-                    f"in taxonomy {taxonomy!r}; automatic term creation is disabled. "
-                    f"Existing terms: {', '.join(names[:50]) or 'none'}"
-                    f"{' …' if len(names) > 50 else ''}. "
-                    "Correct the value on the facts or content screen to one of these, "
-                    "or add the term in WordPress."
+                    unknown_term_message(f"Value for {taxonomy!r}:", value, endpoint, available_terms)
                 )
             identifiers.append(int(term["id"]))
         return identifiers

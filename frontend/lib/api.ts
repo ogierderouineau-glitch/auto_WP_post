@@ -60,6 +60,18 @@ function errorMessage(payload: unknown, fallback: string) {
   return detail ? String(detail) : fallback
 }
 
+// A 5xx without a message from our own backend means the server is down or restarting
+// (the Next proxy answers a bare "Internal Server Error"); say so instead of "HTTP 500".
+function failureMessage(response: Response, payload: unknown) {
+  const fallback = `HTTP ${response.status}`
+  const message = errorMessage(payload, fallback)
+  const isBareServerError =
+    response.status >= 500 && (message === fallback || typeof payload === "string")
+  return isBareServerError
+    ? "The server is temporarily unavailable (it may be restarting). Please wait a minute and try again."
+    : message
+}
+
 async function parseResponse(response: Response) {
   const text = await response.text()
   if (!text) return null
@@ -90,11 +102,7 @@ export async function apiRequest<T>(
   const payload = await parseResponse(response)
 
   if (!response.ok) {
-    throw new ApiError(
-      errorMessage(payload, `HTTP ${response.status}`),
-      response.status,
-      payload,
-    )
+    throw new ApiError(failureMessage(response, payload), response.status, payload)
   }
 
   return payload as T
@@ -114,7 +122,7 @@ export async function apiDownload(
 
   if (!response.ok) {
     const payload = await parseResponse(response)
-    throw new ApiError(errorMessage(payload, `HTTP ${response.status}`), response.status, payload)
+    throw new ApiError(failureMessage(response, payload), response.status, payload)
   }
 
   const disposition = response.headers.get("Content-Disposition") || ""

@@ -8,6 +8,8 @@ from backend.app.models.step_02_payload import WordPressFields, WordPressPayload
 from backend.app.providers.step_03_wordpress import ExistingWordPressProvider
 from backend.wordpress_api import (
     find_term,
+    http_error_hint,
+    registered_terms,
     match_registered_term,
     taxonomy_terms_endpoint,
 )
@@ -167,12 +169,37 @@ class WordPressProviderTests(unittest.TestCase):
     ) -> None:
         with self.assertRaisesRegex(
             ValueError,
-            "automatic term creation is disabled",
+            "Existing entries: Mojito",
         ):
             ExistingWordPressProvider._taxonomy_term_ids(
                 "cocktails",
                 ["Unknown cocktail"],
             )
+
+    @patch(
+        "backend.app.providers.step_03_wordpress.taxonomy_terms_endpoint",
+        return_value="/wp-json/wp/v2/cocktails",
+    )
+    @patch(
+        "backend.app.providers.step_03_wordpress.registered_terms",
+        return_value=[{"id": 5, "name": "Black & White", "slug": "black-white"}],
+    )
+    def test_ampersand_term_matches_plain_text(self, _terms, _endpoint) -> None:
+        self.assertEqual(
+            ExistingWordPressProvider._taxonomy_term_ids("cocktails", ["Black & White"]),
+            [5],
+        )
+
+    def test_registered_terms_decodes_html_entities(self) -> None:
+        with patch(
+            "backend.wordpress_api.request_json",
+            return_value=[{"id": 5, "name": "Black &amp; White", "slug": "black-white"}],
+        ):
+            self.assertEqual(registered_terms("cocktails")[0]["name"], "Black & White")
+
+    def test_http_error_hint_is_plain_language(self) -> None:
+        self.assertIn("application password", http_error_hint(401))
+        self.assertIn("try again", http_error_hint(503))
 
     @patch(
         "backend.app.providers.step_03_wordpress.taxonomy_terms_endpoint",

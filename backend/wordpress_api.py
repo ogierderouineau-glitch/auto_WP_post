@@ -65,6 +65,17 @@ def wp_headers() -> dict[str, str]:
     return headers
 
 
+def http_error_hint(status: int) -> str:
+    """Plain-language meaning of a WordPress HTTP error status."""
+    if status in (401, 403):
+        return "WordPress refused access: check the WordPress login (application password) and that the user's role may publish."
+    if status == 404:
+        return "WordPress could not find what was requested: a plugin or endpoint may be missing, or the content was deleted."
+    if status == 429 or status >= 500:
+        return "WordPress had a temporary problem: wait a minute and try again."
+    return "WordPress rejected the request."
+
+
 def request_json(method: str, path: str, **kwargs: Any) -> Any:
     client = require_wordpress_credentials()
     url = f"{client.wp_base_url.rstrip('/')}{path}"
@@ -73,8 +84,8 @@ def request_json(method: str, path: str, **kwargs: Any) -> Any:
         print(f"WordPress request failed: {method} {path}")
         print(response.text)
         raise RuntimeError(
-            f"WordPress request failed for client '{client.client_id}' "
-            f"({method} {path}, HTTP {response.status_code}, base_url={client.wp_base_url}): "
+            f"{http_error_hint(response.status_code)} "
+            f"(Details: client '{client.client_id}', {method} {path}, HTTP {response.status_code}): "
             f"{wordpress_error_summary(response)}"
         )
     return response.json()
@@ -149,7 +160,7 @@ def taxonomy_definition(taxonomy: str) -> dict[str, Any]:
         )
     if not isinstance(definition, dict):
         raise ValueError(
-            f"WordPress REST does not expose taxonomy {taxonomy!r} in its taxonomy registry."
+            f"{SITE_SETUP_HINT}WordPress REST does not expose taxonomy {taxonomy!r} in its taxonomy registry."
         )
     return definition
 
@@ -165,6 +176,23 @@ def _term_collection_path(endpoint: str) -> str:
     return endpoint if endpoint.startswith("/") else f"/wp-json/wp/v2/{endpoint}"
 
 
+SITE_SETUP_HINT = "Site setup issue, please send this message to your WordPress administrator: "
+
+
+def unknown_term_message(what: str, value: Any, endpoint: str, terms: list[dict[str, Any]] | None = None) -> str:
+    """Error text for a value with no matching WordPress term: lists the existing terms and what to do."""
+    try:
+        names = sorted(str(t.get("name", "")) for t in (terms if terms is not None else registered_terms(endpoint)))
+    except Exception:  # the list is only a hint; never hide the real problem behind a second error
+        names = []
+    shown = ", ".join(names[:50]) + (" …" if len(names) > 50 else "") if names else "(list unavailable)"
+    return (
+        f"{what} {value!r} does not match any existing WordPress entry. "
+        f"Existing entries: {shown}. "
+        "Correct the value on the facts or content screen to one of these, or add it in WordPress."
+    )
+
+
 def find_term(endpoint: str, name: str) -> dict[str, Any] | None:
     terms = request_json(
         "GET",
@@ -173,7 +201,7 @@ def find_term(endpoint: str, name: str) -> dict[str, Any] | None:
     )
     normalized = name.strip().lower()
     for term in terms:
-        if term.get("name", "").strip().lower() == normalized:
+        if html.unescape(term.get("name", "")).strip().lower() == normalized:
             return term
         if term.get("slug", "").strip().lower() == term_slug(name):
             return term
@@ -195,7 +223,12 @@ def registered_terms(endpoint: str) -> list[dict[str, Any]]:
         )
         if not isinstance(batch, list):
             raise ValueError(f"WordPress returned invalid terms for {endpoint!r}.")
-        terms.extend(item for item in batch if isinstance(item, dict))
+        # WordPress returns names HTML-escaped ("Black &amp; White"); decode so matching and messages use plain text.
+        terms.extend(
+            {**item, "name": html.unescape(str(item.get("name") or ""))}
+            for item in batch
+            if isinstance(item, dict)
+        )
         if len(batch) < 100:
             return terms
         page += 1
@@ -267,7 +300,7 @@ def resolve_category_ids(names: list[str]) -> list[int]:
     for name in names:
         term = find_term("categories", name)
         if not term:
-            raise ValueError(f"WordPress category not found: {name}")
+            raise ValueError(unknown_term_message("Category", name, "categories"))
         ids.append(term["id"])
     return ids
 
@@ -283,7 +316,7 @@ def resolve_category_ids_with_required_category(
 
     required_term = find_term("categories", required_name)
     if not required_term:
-        raise ValueError(f"Required WordPress category not found: {required_name}")
+        raise ValueError(unknown_term_message("Required category", required_name, "categories"))
     ids.append(required_term["id"])
     resolved_names.append(required_name)
 
@@ -295,7 +328,7 @@ def resolve_category_ids_with_required_category(
             if skip_missing_optional:
                 missing_optional.append(name)
                 continue
-            raise ValueError(f"WordPress category not found: {name}")
+            raise ValueError(unknown_term_message("Category", name, "categories"))
         ids.append(term["id"])
         resolved_names.append(name)
 
@@ -315,7 +348,7 @@ def resolve_tag_ids(names: list[str], create_missing: bool) -> list[int]:
         if not term and create_missing:
             term = create_term("tags", name)
         if not term:
-            raise ValueError(f"WordPress tag not found: {name}")
+            raise ValueError(unknown_term_message("Tag", name, "tags"))
         ids.append(term["id"])
     return ids
 

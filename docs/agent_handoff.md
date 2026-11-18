@@ -231,6 +231,34 @@ Optional `derived_from_facts` ACF fields that the AI never writes (`include_in_a
 relationship fields) stay listed in `draft-fields` even when their source facts are not confirmed, so
 the user can type the value (names for a `lookup:` rule) instead of the field being hidden.
 
+## Memory and capacity (Render)
+
+The backend runs on a Render **Starter** instance with **512 MB RAM** in one uvicorn process; the
+frontend (free plan) only proxies `/backend/...` to it. When the backend runs out of memory Render
+restarts it, and the frontend proxy answers 500 (often seen on the login screen) until it is back.
+
+Incident 2026-11-17: the instance failed 11 s after a video upload. Cause: the ffmpeg re-encode
+in `backend/app/videos/step_01_processor.py` (default: all CPU cores, preset medium) peaked at
+~810 MB on a 20 s 1080p test clip. Now one thread + preset veryfast: ~280 MB (about 1.6x slower
+on that clip). Memory was measured locally with `/usr/bin/time -v ffmpeg ...`; not re-checked on Render.
+
+The frontend (`lib/api.ts`, `failureMessage`) turns a bare 5xx into "The server is temporarily
+unavailable (it may be restarting)...", and `app/page.tsx` keeps the saved access key unless the
+backend answered 401 (before, any error on page load logged the user out).
+
+Settings to revisit when the Render plan gets more memory (environment variables, set in Render):
+
+| Variable | Default | What it controls | Memory effect |
+|---|---|---|---|
+| `V2_FFMPEG_THREADS` | 1 | Threads ffmpeg uses to re-encode an uploaded video | Biggest lever: ~280 MB at 1, ~390 MB at 2, ~590 MB at all cores (1080p test clip) |
+| `V2_VISION_CONCURRENCY` | 3 | How many uploaded pictures the AI "vision" step analyses at the same time. Each one holds its decoded picture in memory | Each extra one adds one decoded picture (a 48 MP photo is ~150 MB) |
+| `V2_ACF_GENERATION_WORKERS` | 6 | Parallel AI calls when generating content fields | Small per call (text only); mainly an API rate-limit setting |
+| `V2_SESSION_JOB_WORKERS` | 2 | Background jobs (e.g. keyword proposal) running at once | Small |
+| `V2_MAX_IMAGE_BYTES` / `V2_MAX_AUDIO_BYTES` / `V2_MAX_VIDEO_BYTES` | 20 / 50 / 250 MB | Upload size limits (uploads stream to disk, not memory) | None directly |
+
+Not yet protected: pictures are decoded at full resolution (see `images/step_02_processor.py`,
+`step_02_uploads.py`). If Metrics → Memory shows spikes on picture uploads, downscale on load.
+
 ## Dev-only client usage report
 
 `GET /api/content-sessions/_usage-report` aggregates the stored per-call
