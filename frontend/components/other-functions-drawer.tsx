@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   Database,
+  Bug,
   Download,
   FileClock,
   FolderOpen,
@@ -29,6 +30,10 @@ import {
   type WorkbookStatus,
 } from "@/lib/content-sessions"
 import { formatTimestamp } from "@/lib/utils"
+import { ErrorText } from "@/components/error-text"
+
+// Link of the bug tracker (set NEXT_PUBLIC_BUG_TRACKER_URL on the frontend service); the button is hidden without it.
+const BUG_TRACKER_URL = process.env.NEXT_PUBLIC_BUG_TRACKER_URL || ""
 
 export type OperationLogEntry = {
   id: string
@@ -548,7 +553,7 @@ export function OtherFunctionsDrawer({
                       {typeof entry.details?.finding_count === "number" ? ` · ${entry.details.finding_count} finding(s)` : ""}
                     </p>
                     <OperationModelCalls operationId={entry.operation_id} details={entry.details || {}} />
-                    {entry.error ? <p className="mt-1 text-xs text-destructive">{entry.error}</p> : null}
+                    {entry.error ? <p className="mt-1 text-xs text-destructive"><ErrorText text={entry.error} /></p> : null}
                   </li>
                 ))}
               </ol>
@@ -711,6 +716,18 @@ export function OtherFunctionsDrawer({
                 <FolderOpen className="size-4" />
                 Session menu
               </button>
+              {BUG_TRACKER_URL && (
+                <a
+                  id="s2p-other-bug-tracker"
+                  href={BUG_TRACKER_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground hover:bg-muted"
+                >
+                  <Bug className="size-4" />
+                  Report a bug
+                </a>
+              )}
             </div>
           </Section>
 
@@ -751,7 +768,7 @@ export function OtherFunctionsDrawer({
                 </div>
                 {jobRecoveryMessage && (
                   <p className={`mt-2 text-xs ${jobRecovery === "error" ? "text-destructive" : "text-muted-foreground"}`}>
-                    {jobRecoveryMessage}
+                    <ErrorText text={jobRecoveryMessage} />
                   </p>
                 )}
               </div>

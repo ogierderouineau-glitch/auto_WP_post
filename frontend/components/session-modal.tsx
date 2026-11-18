@@ -4,6 +4,7 @@ import { FormEvent, useMemo, useState } from "react"
 import { FilePlus2, FolderOpen, Loader2, RefreshCw, Trash2, X } from "lucide-react"
 import type { PostTypeOption, RecentSession } from "@/lib/content-sessions"
 import { formatTimestamp } from "@/lib/utils"
+import { ErrorText } from "@/components/error-text"
 
 export function SessionModal({
   postTypes,
@@ -161,7 +162,7 @@ export function SessionModal({
           </section>
         </div>
 
-        {error && <p className="mx-4 mb-4 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+        {error && <p className="mx-4 mb-4 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"><ErrorText text={error} /></p>}
       </div>
     </div>
   )

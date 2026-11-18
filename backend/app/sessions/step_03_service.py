@@ -48,6 +48,9 @@ from backend.app.errors import (
     VisionProviderError,
     VideoProcessingError,
     WordPressRequestError,
+    ai_failure_message,
+    explain,
+    report_hint,
 )
 from backend.app.internal_links.step_01_service import EligibleLinks, InternalLinkInjectionResult, InternalLinkService
 from backend.app.internal_links.step_02_editor import LinkMarkup, insert_link, link_urls, protect_links, restore_links, unlink_url
@@ -261,7 +264,7 @@ class ContentSessionService:
     def rename(self, session_id: str, *, name: str | None, expected_version: int) -> ContentSession:
         session = self.repository.get(session_id)
         if session.version != expected_version:
-            raise SessionVersionConflictError("Session changed. Reload it before renaming.")
+            raise SessionVersionConflictError("The session was changed elsewhere, so it was not renamed.")
         if name is None:
             updated = self._suggest_name(session)
         else:
@@ -283,7 +286,7 @@ class ContentSessionService:
         """Scan the site and Search Console live, then save a keyword proposal."""
         session = self.repository.get(session_id)
         if session.version != expected_version:
-            raise SessionVersionConflictError("Session changed. Reload it before proposing keywords.")
+            raise SessionVersionConflictError("The session was changed elsewhere, so keywords were not proposed.")
         if self.seo_sources is None:
             raise DraftValidationError("Keyword scanning is not configured for this client.")
         facts = {
@@ -447,7 +450,7 @@ class ContentSessionService:
         """Store the user's chosen keywords. An empty list lets the AI decide later."""
         session = self.repository.get(session_id)
         if session.version != expected_version:
-            raise SessionVersionConflictError("Session changed. Reload it before selecting keywords.")
+            raise SessionVersionConflictError("The session was changed elsewhere, so the keyword selection was not saved.")
         clean = list(dict.fromkeys(" ".join(k.split()) for k in keywords if k.strip()))
         if len(clean) > 12 or any(len(k) > 80 for k in clean):
             raise InvalidUploadError("Select at most 12 keywords of up to 80 characters each.")
@@ -657,8 +660,9 @@ class ContentSessionService:
     ) -> ContentSession:
         session = self.repository.get(session_id)
         if session.version != expected_version:
-            raise ValueError(
-                f"Session version conflict: expected {expected_version}, found {session.version}."
+            raise SessionVersionConflictError(
+                "The session was changed elsewhere, so this action was not started.",
+                technical=f"expected version {expected_version}, found {session.version}",
             )
         if not session.wordpress_payload:
             raise DraftValidationError("Generate a draft before running a quality check.")
@@ -795,7 +799,11 @@ class ContentSessionService:
                     )
                 except Exception as exc:
                     raise VideoProcessingError(
-                        f"Video processing failed: {exc}"
+                        explain(
+                            "The video could not be processed. Check that it is a normal MP4 "
+                            f"file and try again; if it keeps failing, {report_hint()}",
+                            str(exc)[-500:],
+                        )
                     ) from exc
                 storage_uri = self.object_storage.put(
                     result.video,
@@ -1019,7 +1027,7 @@ class ContentSessionService:
                         transcripts.append(self.speech_to_text.transcribe(local))
                     except Exception as exc:
                         raise TranscriptionProviderError(
-                            f"Transcription failed for {reference.filename}: {exc}"
+                            ai_failure_message(f"Transcribing {reference.filename}", exc)
                         ) from exc
                     session = self._record_provider_usage(session, self.speech_to_text)
                 self._milestone(session, f"transcription finished filename={reference.filename}")
@@ -1171,7 +1179,7 @@ class ContentSessionService:
                     None,
                 )
         if reference is None:
-            raise ValueError(f"Image not found in this session: {filename}")
+            raise SessionVersionConflictError(f"Image '{filename}' is no longer in this session (the screen is out of date).")
 
         image_metadata = [
             row
@@ -1399,7 +1407,7 @@ class ContentSessionService:
                     session_id=session_id,
                     filename=reference.filename,
                 )
-        raise ValueError(f"Media not found in this session: {kind}/{filename}")
+        raise SessionVersionConflictError(f"The {kind} file '{filename}' is no longer in this session (the screen is out of date).")
 
     def _materialize_media_uri(
         self,
@@ -1444,7 +1452,7 @@ class ContentSessionService:
                 None,
             )
             if reference is None:
-                raise ValueError(f"Image not found in this session: {filename}")
+                raise SessionVersionConflictError(f"Image '{filename}' is no longer in this session (the screen is out of date).")
             media_id = reference.media_id
             updates["image_refs"] = [ref for ref in session.image_refs if ref.media_id != media_id]
             updates["processed_images"] = [
@@ -1465,7 +1473,7 @@ class ContentSessionService:
         elif kind == "voices":
             reference = next((ref for ref in session.audio_refs if ref.filename == filename), None)
             if reference is None:
-                raise ValueError(f"Voice not found in this session: {filename}")
+                raise SessionVersionConflictError(f"Voice '{filename}' is no longer in this session (the screen is out of date).")
             updates["audio_refs"] = [
                 ref for ref in session.audio_refs if ref.media_id != reference.media_id
             ]
@@ -1474,7 +1482,7 @@ class ContentSessionService:
         elif kind == "videos":
             reference = next((ref for ref in session.video_refs if ref.filename == filename), None)
             if reference is None:
-                raise ValueError(f"Video not found in this session: {filename}")
+                raise SessionVersionConflictError(f"Video '{filename}' is no longer in this session (the screen is out of date).")
             media_id = reference.media_id
             updates["video_refs"] = [ref for ref in session.video_refs if ref.media_id != media_id]
             updates["processed_videos"] = [
@@ -1504,7 +1512,7 @@ class ContentSessionService:
         session = self.repository.get(session_id)
         item = next((v for v in session.processed_videos if v.get("filename") == filename), None)
         if item is None:
-            raise ValueError(f"Video not found in this session: {filename}")
+            raise SessionVersionConflictError(f"Video '{filename}' is no longer in this session (the screen is out of date).")
         with tempfile.TemporaryDirectory(prefix="v2-cover-") as directory:
             poster = Path(directory) / item["poster_filename"]
             with Image.open(cover) as image:
@@ -1525,7 +1533,7 @@ class ContentSessionService:
         session = self.repository.get(session_id)
         item = next((v for v in session.processed_videos if v.get("filename") == filename), None)
         if item is None:
-            raise ValueError(f"Video not found in this session: {filename}")
+            raise SessionVersionConflictError(f"Video '{filename}' is no longer in this session (the screen is out of date).")
         if not item.get("poster_path"):
             raise InvalidUploadError("Add a cover to this video first: WordPress needs a picture as featured image.")
         updated = session.model_copy(update={
@@ -1566,7 +1574,7 @@ class ContentSessionService:
         session = self.repository.get(session_id)
         reference = next((ref for ref in session.video_refs if ref.filename == filename), None)
         if reference is None:
-            raise ValueError(f"Video not found in this session: {filename}")
+            raise SessionVersionConflictError(f"Video '{filename}' is no longer in this session (the screen is out of date).")
         allowed = {
             key: str(metadata.get(key) or "")
             for key in ("video_title", "video_caption", "video_description")
@@ -1648,7 +1656,7 @@ class ContentSessionService:
             )
         reference, processed = self._find_image_reference_and_processed(session, filename)
         if processed is None:
-            raise ValueError(f"Processed image not found in this session: {filename}")
+            raise SessionVersionConflictError(f"Processed image '{filename}' is no longer in this session (the screen is out of date).")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = self.object_storage.get(
@@ -1664,7 +1672,7 @@ class ContentSessionService:
             try:
                 edited = self.image_editor.edit(source, edited, {"prompt": effective_prompt})
             except Exception as exc:
-                raise ImageProcessingError(f"Image edit failed: {exc}") from exc
+                raise ImageProcessingError(ai_failure_message("Improving the picture with AI", exc)) from exc
             normalization: dict[str, Any] = {}
             if self.image_processor is not None:
                 normalized = root / output_name
@@ -1677,7 +1685,9 @@ class ContentSessionService:
                         stages={"prepare", "crop", "resize", "export"},
                     )
                 except Exception as exc:
-                    raise ImageProcessingError(f"Edited image normalization failed: {exc}") from exc
+                    raise ImageProcessingError(
+                        explain("The AI-edited picture could not be finished. Try again or use another picture.", exc)
+                    ) from exc
                 edited = normalized
             storage_uri = self.object_storage.put(
                 edited,
@@ -1752,7 +1762,7 @@ class ContentSessionService:
         snapshot = self.knowledge.by_hash(session.workbook_hash)
         reference, processed = self._find_image_reference_and_processed(session, filename)
         if processed is None:
-            raise ValueError(f"Processed image not found in this session: {filename}")
+            raise SessionVersionConflictError(f"Processed image '{filename}' is no longer in this session (the screen is out of date).")
 
         image_analysis = dict(session.image_analysis)
         image_analysis.pop(reference.media_id, None)
@@ -1815,7 +1825,7 @@ class ContentSessionService:
         session = self.repository.get(session_id)
         reference, processed = self._find_image_reference_and_processed(session, filename)
         if processed is None:
-            raise ValueError(f"Processed image not found in this session: {filename}")
+            raise SessionVersionConflictError(f"Processed image '{filename}' is no longer in this session (the screen is out of date).")
         output_name = str(processed.get("filename") or reference.filename)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2426,8 +2436,9 @@ class ContentSessionService:
 
         session = self.repository.get(session_id)
         if session.version != expected_version:
-            raise ValueError(
-                f"Session version conflict: expected {expected_version}, found {session.version}."
+            raise SessionVersionConflictError(
+                "The session was changed elsewhere, so this action was not started.",
+                technical=f"expected version {expected_version}, found {session.version}",
             )
         snapshot = self.knowledge.by_hash(session.workbook_hash)
         vision_media_ids = {
@@ -2684,8 +2695,12 @@ class ContentSessionService:
                 )
                 if attempt == max_attempts:
                     raise ModelOutputValidationError(
-                        f"Structured output failed validation for {task} after "
-                        f"{attempt} attempts: {feedback}"
+                        explain(
+                            f"The AI could not produce a valid result for '{task}' after {attempt} "
+                            f"tries (it did not respect the workbook's rules). Try again; if it "
+                            f"keeps failing, {report_hint()}",
+                            feedback,
+                        )
                     ) from validation_error
                 current_messages = [
                     *messages,
@@ -2708,8 +2723,7 @@ class ContentSessionService:
                     remaining_wait_budget = max_retry_wait_budget_seconds - waited_seconds
                     if remaining_wait_budget <= 0:
                         raise ModelProviderError(
-                            f"Model provider retry budget exhausted for {task} after "
-                            f"{attempt} attempts: {provider_error}"
+                            ai_failure_message(f"The AI step '{task}' (gave up after {attempt} tries)", provider_error)
                         ) from provider_error
                     wait_seconds = min(wait_seconds, remaining_wait_budget)
                     print(
@@ -2722,11 +2736,13 @@ class ContentSessionService:
                     waited_seconds += wait_seconds
                     continue
                 raise ModelProviderError(
-                    f"Model provider failed for {task} on attempt {attempt}: "
-                    f"{provider_error}"
+                    ai_failure_message(f"The AI step '{task}'", provider_error)
                 ) from provider_error
         raise ModelOutputValidationError(
-            f"Structured output failed validation for {task}: {validation_errors}"
+            explain(
+                f"The AI could not produce a valid result for '{task}'. {report_hint()}",
+                validation_errors,
+            )
         )
 
     @staticmethod
@@ -2890,7 +2906,7 @@ class ContentSessionService:
                     )
                 except Exception as exc:
                     raise VisionProviderError(
-                        f"Vision analysis failed for {reference.filename}: {exc}"
+                        ai_failure_message(f"Analysing picture {reference.filename}", exc)
                     ) from exc
                 usage = getattr(self.vision, "last_usage", None)
                 return reference.media_id, parsed, dict(usage) if isinstance(usage, dict) else None
@@ -2954,7 +2970,11 @@ class ContentSessionService:
                     )
                 except Exception as exc:
                     raise ImageProcessingError(
-                        f"Failed to process image {reference.filename}: {exc}"
+                        explain(
+                            f"The picture {reference.filename} could not be processed. "
+                            "Try exporting it again as JPG or PNG and upload that file.",
+                            exc,
+                        )
                     ) from exc
                 storage_uri = self.object_storage.put(
                     output,
@@ -3438,7 +3458,7 @@ class ContentSessionService:
                 None,
             )
         if reference is None:
-            raise ValueError(f"Image not found in this session: {filename}")
+            raise SessionVersionConflictError(f"Image '{filename}' is no longer in this session (the screen is out of date).")
         if processed is None:
             processed = next(
                 (
@@ -3728,7 +3748,7 @@ class ContentSessionService:
         """
         current = self.repository.get(session_id)
         if current.version != expected_version:
-            raise SessionVersionConflictError("Session changed. Reload before updating the workbook.")
+            raise SessionVersionConflictError("The session was changed elsewhere, so the workbook was not updated.")
         session, snapshot = self._on_latest_workbook(current, self.knowledge.by_hash(current.workbook_hash))
         if session.workbook_hash == current.workbook_hash:
             return current
@@ -3764,7 +3784,7 @@ class ContentSessionService:
     def edit_link_candidates(self, session_id: str, *, action: str, link_id: str | None, expected_version: int) -> ContentSession:
         session = self.repository.get(session_id)
         if session.version != expected_version:
-            raise SessionVersionConflictError("Session changed. Reload before changing link candidates.")
+            raise SessionVersionConflictError("The session was changed elsewhere, so the link candidates were not changed.")
         if not session.wordpress_payload:
             raise InvalidInternalLinksError("Generate a draft before editing candidates.")
         snapshot = self.knowledge.by_hash(session.workbook_hash)
@@ -3814,7 +3834,7 @@ class ContentSessionService:
                            selected_text: str, expected_version: int) -> ContentSession:
         session = self.repository.get(session_id)
         if session.version != expected_version:
-            raise SessionVersionConflictError("Session changed. Select the text again before adding a link.")
+            raise SessionVersionConflictError("The session was changed elsewhere, so the link was not added. You will need to select the text again.")
         snapshot = self.knowledge.by_hash(session.workbook_hash)
         fields = self._linkable_acf_fields(snapshot, session)
         if not session.wordpress_payload or field_key not in fields:

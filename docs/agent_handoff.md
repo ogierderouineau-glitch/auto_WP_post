@@ -259,6 +259,16 @@ Settings to revisit when the Render plan gets more memory (environment variables
 Not yet protected: pictures are decoded at full resolution (see `images/step_02_processor.py`,
 `step_02_uploads.py`). If Metrics → Memory shows spikes on picture uploads, downscale on load.
 
+## User-facing error messages
+
+Rules are in AGENTS.md. Helpers: `backend/app/errors.py` (`explain`, `report_hint`, `ai_failure_message`,
+`size_label`, `SessionVersionConflictError`), `unexpected_error_handler` in `api/step_02_routes.py`
+(registered in `main.py`; logs the traceback under a reference id shown to the user), WordPress
+wording in `backend/wordpress_api.py`. `V2_SUPPORT_CONTACT` (set in `render.yaml` to the clients-only
+bug-tracker Google Sheet; an email also works) is what "report this" messages point to; without it they
+say "the person who runs this app". Raw errors stay in the message as "(Technical details: ...)"; the
+frontend `components/error-text.tsx` folds them behind a "Show technical details" toggle. The Other functions drawer has a "Report a bug" button using `NEXT_PUBLIC_BUG_TRACKER_URL` (frontend env, read at build time; hidden when unset).
+
 ## Dev-only client usage report
 
 `GET /api/content-sessions/_usage-report` aggregates the stored per-call

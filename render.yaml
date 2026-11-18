@@ -30,6 +30,9 @@ services:
         value: "20971520"
       - key: V2_MAX_AUDIO_BYTES
         value: "26214400"
+      # Where error messages tell users to report bugs (clients-only Google Sheet).
+      - key: V2_SUPPORT_CONTACT
+        value: https://docs.google.com/spreadsheets/d/1dCOs0J_EMqTiLKkvK8cOJzJNCKpnbCDnqHouuSTQAo4/edit?usp=sharing
 
   - type: web
     name: speech2post-frontend
@@ -47,6 +50,9 @@ services:
         value: production
       - key: CI
         value: "true"
+      # Same bug-tracker link as the backend's V2_SUPPORT_CONTACT; used by the "Report a bug" button.
+      - key: NEXT_PUBLIC_BUG_TRACKER_URL
+        value: https://docs.google.com/spreadsheets/d/1dCOs0J_EMqTiLKkvK8cOJzJNCKpnbCDnqHouuSTQAo4/edit?usp=sharing
       - key: SPEECH2POST_BACKEND_URL
         fromService:
           type: web

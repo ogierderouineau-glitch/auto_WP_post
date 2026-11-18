@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react"
 import { Check, KeyRound, Loader2, X } from "lucide-react"
 import { ApiError } from "@/lib/api"
 import { validateImportKey, type AuthClient } from "@/lib/content-sessions"
+import { ErrorText } from "@/components/error-text"
 
 export type AuthResult = {
   apiKey: string
@@ -78,7 +79,7 @@ export function AuthModal({
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-gold/40"
         />
 
-        {error && <p className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+        {error && <p className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"><ErrorText text={error} /></p>}
         {success && (
           <p className="mt-3 flex items-center gap-1.5 rounded-md bg-confirm/10 px-3 py-2 text-sm text-confirm">
             <Check className="size-4" aria-hidden="true" />

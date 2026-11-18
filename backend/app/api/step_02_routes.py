@@ -51,6 +51,9 @@ from backend.app.errors import (
     SessionBusyError,
     SessionOwnershipError,
     V2Error,
+    explain,
+    report_hint,
+    size_label,
 )
 from backend.app.sessions.step_03_service import ContentSessionService
 from backend.app.storage.step_02_uploads import download_media_url, safe_upload_name, validate_upload
@@ -324,7 +327,8 @@ def create_router(
                     size += len(chunk)
                     if size > max_bytes:
                         raise InvalidUploadError(
-                            f"Upload exceeds the {max_bytes}-byte limit."
+                            f"This file is larger than the {size_label(max_bytes)} limit. "
+                            "Use a smaller or compressed file."
                         )
                     handle.write(chunk)
             temporary = Path(temporary_name)
@@ -457,7 +461,8 @@ def create_router(
                     size += len(chunk)
                     if size > max_bytes:
                         raise InvalidUploadError(
-                            f"Upload exceeds the {max_bytes}-byte limit."
+                            f"This file is larger than the {size_label(max_bytes)} limit. "
+                            "Use a smaller or compressed file."
                         )
                     handle.write(chunk)
             temporary = Path(temporary_name)
@@ -1020,7 +1025,9 @@ def _session_job_error_message(exc: Exception, operation: str) -> str:
     if isinstance(exc, V2Error) and exc.details:
         details = "; ".join(f"{detail.column or detail.error_code}: {detail.message}" for detail in exc.details)
         return f"{exc} {details}"
-    return str(exc)
+    if isinstance(exc, V2Error):
+        return str(exc)
+    return _unexpected_message(exc)
 
 
 def _run_session_job(
@@ -1180,6 +1187,25 @@ def _regenerate_draft_chat(
     return service.repository.save(
         session.model_copy(update={"draft_chat": chat}),
         expected_version=session.version,
+    )
+
+
+def _unexpected_message(exc: Exception, reference: str = "") -> str:
+    """Text for an error nobody planned for: says so, how to report it, keeps the raw error."""
+    ref = f" (reference {reference})" if reference else ""
+    return explain(
+        f"Something unexpected went wrong{ref}. {report_hint()}",
+        f"{type(exc).__name__}: {exc}",
+    )
+
+
+async def unexpected_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all for errors that are not V2Error, so the user sees a reportable message, not a bare 500."""
+    reference = uuid.uuid4().hex[:8]
+    _LOGGER.error("Unexpected error reference=%s path=%s", reference, request.url.path, exc_info=exc)
+    return JSONResponse(
+        status_code=500,
+        content={"error_code": "unexpected_error", "message": _unexpected_message(exc, reference)},
     )
 
 

@@ -45,6 +45,7 @@ import {
 } from "@/lib/content-sessions"
 import { ApiError } from "@/lib/api"
 import { statusMessageClass } from "@/lib/status-style"
+import { ErrorText } from "@/components/error-text"
 
 type FieldScope = "shared" | "acf"
 type ContentSectionId = "wordpress" | "acf"
@@ -882,7 +883,7 @@ export function ContentScreen({
           <p
             className={`mt-4 rounded-md px-3 py-2 text-sm ${statusMessageClass(operation, message)}`}
           >
-            {message}
+            <ErrorText text={message} />
           </p>
         )}
 

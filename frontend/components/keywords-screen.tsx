@@ -29,6 +29,7 @@ import {
   type KeywordStatus,
 } from "@/lib/content-sessions"
 import { statusMessageClass } from "@/lib/status-style"
+import { ErrorText } from "@/components/error-text"
 
 const ACTIVE_JOB_STORAGE = "speech2post_keywords_job"
 const MAX_SELECTED = 12
@@ -325,7 +326,7 @@ export function KeywordsScreen({
             </ol>
           )}
 
-          {message && <p role="status" className={`rounded-md px-3 py-2 text-sm ${statusMessageClass(operation, message)}`}>{message}</p>}
+          {message && <p role="status" className={`rounded-md px-3 py-2 text-sm ${statusMessageClass(operation, message)}`}><ErrorText text={message} /></p>}
 
           {proposal && hasProposal && (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">

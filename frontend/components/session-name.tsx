@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { ErrorText } from "@/components/error-text"
 
 export function SessionName({ name, sessionId, onSave }: {
   name?: string
@@ -38,7 +39,7 @@ export function SessionName({ name, sessionId, onSave }: {
             {saving ? "Saving…" : "Save"}
           </button>
           <button type="button" disabled={saving} onClick={() => setEditing(false)} className="ml-2">Cancel</button>
-          {error && <p role="alert" className="mt-1 text-red-300">{error}</p>}
+          {error && <p role="alert" className="mt-1 text-red-300"><ErrorText text={error} /></p>}
         </form>
       ) : (
         <button type="button" title={`Rename session · ${sessionId}`}

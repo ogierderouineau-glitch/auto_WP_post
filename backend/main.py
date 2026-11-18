@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from google.cloud import storage as gcs_storage
 
 from backend import config
-from backend.app.api.step_02_routes import create_router, v2_error_handler
+from backend.app.api.step_02_routes import create_router, unexpected_error_handler, v2_error_handler
 from backend.app.api.step_03_container import (
     client_knowledge_gcs_uri,
     configured_workbook_path,
@@ -57,6 +57,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_exception_handler(V2Error, v2_error_handler)
+app.add_exception_handler(Exception, unexpected_error_handler)
 app.add_middleware(V2RequestLoggingMiddleware)
 app.include_router(create_router(get_v2_service, verify_api_key, v2_readiness))
 

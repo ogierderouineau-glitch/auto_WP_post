@@ -23,6 +23,7 @@ import {
   type ContentSession,
 } from "@/lib/content-sessions"
 import { statusMessageClass } from "@/lib/status-style"
+import { ErrorText } from "@/components/error-text"
 
 type OperationState = "idle" | "loading" | "success" | "error"
 type PublishAction = "create" | "update"
@@ -351,7 +352,7 @@ export function WordPressScreen({
                   statusMessageClass(operation, message),
                 ].join(" ")}
               >
-                {message}
+                <ErrorText text={message} />
               </div>
             )}
 

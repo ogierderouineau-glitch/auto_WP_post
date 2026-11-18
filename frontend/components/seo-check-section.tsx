@@ -5,6 +5,7 @@ import { Check, Loader2, Search, X } from "lucide-react"
 import { CollapsibleSection } from "@/components/collapsible-section"
 import type { ApiClientOptions } from "@/lib/api"
 import { loadSeoCheck, type ContentSession, type SeoCheckReport, type SeoFinding } from "@/lib/content-sessions"
+import { ErrorText } from "@/components/error-text"
 
 const SEVERITY_CLASS: Record<SeoFinding["severity"], string> = {
   high: "bg-destructive/10 text-destructive",
@@ -74,7 +75,7 @@ export function SeoCheckSection({
         </>
       }
     >
-      {error && <p role="status" className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
+      {error && <p role="status" className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive"><ErrorText text={error} /></p>}
       {!report && !error && (
         <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
           Not run yet. Checks the focus keyphrase in title, slug, meta description and introduction, plus the limits set in your workbook.

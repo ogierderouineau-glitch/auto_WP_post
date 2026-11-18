@@ -55,8 +55,8 @@ class FileSessionRepository(SessionRepository):
         current = self.get(session.session_id)
         if current.version != expected_version:
             raise SessionVersionConflictError(
-                f"Session {session.session_id} changed from version "
-                f"{expected_version} to {current.version}."
+                "The session was changed since this screen loaded (for example in another browser tab).",
+                technical=f"session {session.session_id} changed from version {expected_version} to {current.version}",
             )
         updated = session.model_copy(update={"version": expected_version + 1})
         self._write(self._resolve_path(session.session_id), updated)

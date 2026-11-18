@@ -46,8 +46,8 @@ class GCSSessionRepository(SessionRepository):
         current = ContentSession.model_validate_json(blob.download_as_text())
         if current.version != expected_version:
             raise SessionVersionConflictError(
-                f"Session {session.session_id} changed from version "
-                f"{expected_version} to {current.version}."
+                "The session was changed since this screen loaded (for example in another browser tab).",
+                technical=f"session {session.session_id} changed from version {expected_version} to {current.version}",
             )
         updated = session.model_copy(update={"version": expected_version + 1})
         try:
@@ -58,7 +58,8 @@ class GCSSessionRepository(SessionRepository):
             )
         except PreconditionFailed as exc:
             raise SessionVersionConflictError(
-                f"Concurrent update detected for session {session.session_id}."
+                "The session was changed at the same moment by something else.",
+                technical=f"concurrent update detected for session {session.session_id}",
             ) from exc
         return updated
 

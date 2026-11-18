@@ -41,7 +41,7 @@ def test_rejects_non_http_and_private_hosts(monkeypatch, tmp_path, url, address)
 
 def test_rejects_html_page_and_oversize(monkeypatch, tmp_path):
     patch_network(monkeypatch, [FakeResponse(headers={"Content-Type": "text/html"})])
-    with pytest.raises(ValueError, match="directly"):
+    with pytest.raises(ValueError, match="web page, not a file"):
         uploads.download_media_url("https://example.com/share", tmp_path / "f", 100)
     patch_network(monkeypatch, [FakeResponse(headers={"Content-Type": "image/png"})])
     with pytest.raises(ValueError, match="limit"):

@@ -24,6 +24,7 @@ import {
   type WorkbookStatus,
 } from "@/lib/content-sessions"
 import { statusMessageClass } from "@/lib/status-style"
+import { ErrorText } from "@/components/error-text"
 
 type SectionId = "required" | "optional" | "ai"
 type OperationState = "idle" | "loading" | "success" | "error"
@@ -519,7 +520,7 @@ export function FactsScreen({
 
           {message && (
             <p className={`mt-3 rounded-md px-3 py-2 text-xs ${statusMessageClass(operation, message)}`}>
-              {message}
+              <ErrorText text={message} />
             </p>
           )}
         </div>

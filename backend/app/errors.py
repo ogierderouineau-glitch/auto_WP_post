@@ -1,7 +1,53 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
+
+# Helpers that build user-facing error text: a plain-language sentence first, the raw
+# technical error kept after it so it can still be used for debugging.
+RELOAD_HINT = "Reload the page (F5) to get the latest version."
+
+
+def explain(friendly: str, raw: object = "") -> str:
+    """Plain sentence + the raw technical error (shortened) for debugging."""
+    detail = " ".join(str(raw).split())
+    if len(detail) > 600:
+        detail = detail[:600] + "…"
+    return f"{friendly} (Technical details: {detail})" if detail else friendly
+
+
+def report_hint() -> str:
+    """Where to report a problem the user cannot fix. Set V2_SUPPORT_CONTACT (bug-tracker link or email) on Render."""
+    contact = os.getenv("V2_SUPPORT_CONTACT", "").strip()
+    if contact.startswith("http"):
+        return f"Please add it to the bug tracker ({contact}) and include this message."
+    return f"Please report this to {contact or 'the person who runs this app'} and include this message."
+
+
+def size_label(num_bytes: int) -> str:
+    return f"{num_bytes / (1024 * 1024):g} MB"
+
+
+def ai_failure_message(doing: str, exc: object) -> str:
+    """Translate an AI-provider error into what happened and what to do; keeps the raw text."""
+    raw = str(exc)
+    low = raw.lower()
+    status = getattr(exc, "status_code", None)
+    if status == 401 or "incorrect api key" in low:
+        reason = f"the AI service rejected our access key. {report_hint()}"
+    elif "insufficient_quota" in low or "exceeded your current quota" in low or "billing" in low:
+        reason = f"the AI account has no credit left. {report_hint()}"
+    elif status == 429 or "rate limit" in low:
+        reason = "the AI service is busy (too many requests). Wait a minute and try again."
+    elif (
+        "timed out" in low or "timeout" in low or "connection" in low
+        or "temporarily unavailable" in low or (isinstance(status, int) and status >= 500)
+    ):
+        reason = "the AI service did not answer in time. Wait a minute and try again."
+    else:
+        reason = f"the AI service reported an error. Try again once; if it repeats, {report_hint()}"
+    return explain(f"{doing} failed: {reason}", raw)
 
 
 @dataclass(frozen=True)
@@ -62,8 +108,13 @@ class SessionNotFoundError(V2Error):
 
 
 class SessionVersionConflictError(V2Error):
+    """The screen is older than the saved session (changed in another tab or by a background job)."""
+
     error_code = "session_version_conflict"
     http_status = 409
+
+    def __init__(self, what_happened: str, *, technical: object = "", **kwargs: Any) -> None:
+        super().__init__(explain(f"{what_happened} {RELOAD_HINT}", technical), **kwargs)
 
 
 class SessionBusyError(V2Error):
