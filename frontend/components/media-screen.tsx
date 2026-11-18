@@ -174,6 +174,32 @@ function metadataFieldTrace(
   return null
 }
 
+// Picture cache for the current session. Pictures are fetched with the API key, so the browser
+// cannot show them from <img src> and its HTTP cache is skipped whenever the session version in the
+// URL changes (every save). We keep one blob URL per picture instead, keyed by file + revision, and
+// share it between thumbnails and previews. Switching to another session clears the cache.
+const blobUrlCache = new Map<string, Promise<string>>()
+let blobUrlCacheSessionId = ""
+
+function loadCachedBlobUrl(apiKey: string, sessionId: string, url: string, revision: string) {
+  if (sessionId !== blobUrlCacheSessionId) {
+    blobUrlCache.forEach((cached) => void cached.then((objectUrl) => URL.revokeObjectURL(objectUrl), () => {}))
+    blobUrlCache.clear()
+    blobUrlCacheSessionId = sessionId
+  }
+  const key = `${url.split("?")[0]}|${revision}`
+  let cached = blobUrlCache.get(key)
+  if (!cached) {
+    cached = fetch(url, { headers: { "X-API-Key": apiKey } }).then(async (response) => {
+      if (!response.ok) throw new Error(`Image request failed: ${response.status}`)
+      return URL.createObjectURL(await response.blob())
+    })
+    cached.catch(() => blobUrlCache.delete(key)) // let a failed picture be retried
+    blobUrlCache.set(key, cached)
+  }
+  return cached
+}
+
 function ImagePreview({
   auth,
   session,
@@ -194,38 +220,19 @@ function ImagePreview({
 
   useEffect(() => {
     if (!auth || !session || !filename) return
-    const requestAuth = auth
-    const requestSession = session
     let active = true
-    let objectUrl = ""
-
-    async function load() {
-      setFailed(false)
-      const response = await fetch(imageUrl(requestSession, filename, original), {
-        headers: {
-          "X-API-Key": requestAuth.apiKey,
-        },
+    setFailed(false)
+    loadCachedBlobUrl(auth.apiKey, session.session_id, imageUrl(session, filename, original), revision)
+      .then((objectUrl) => { if (active) setUrl(objectUrl) })
+      .catch(() => {
+        if (active) {
+          setUrl("")
+          setFailed(true)
+        }
       })
-      if (!response.ok) throw new Error(`Image request failed: ${response.status}`)
-      const blob = await response.blob()
-      objectUrl = URL.createObjectURL(blob)
-      if (active) setUrl(objectUrl)
-      else URL.revokeObjectURL(objectUrl)
-    }
-
-    load().catch(() => {
-      if (active) {
-        setUrl("")
-        setFailed(true)
-      }
-    })
 
     return () => {
       active = false
-      // A session update can replace this preview immediately after React has
-      // mounted the <img>. Give the browser time to consume the old blob URL
-      // before releasing it, otherwise it can fail with ERR_FILE_NOT_FOUND.
-      if (objectUrl) window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
     }
   }, [auth?.apiKey, auth?.userId, filename, original, revision, session?.session_id])
 
@@ -274,37 +281,19 @@ function ImageThumbnail({
       return
     }
     if (!auth || !session || !filename) return
-    const requestAuth = auth
-    const requestSession = session
     let active = true
-    let objectUrl = ""
-
-    async function load() {
-      const response = await fetch(
-        mediaKind === "video"
-          ? videoUrl(requestSession, filename)
-          : imageUrl(requestSession, filename),
-        {
-        headers: {
-          "X-API-Key": requestAuth.apiKey,
-        },
-        },
-      )
-      if (!response.ok) throw new Error(`Image request failed: ${response.status}`)
-      const blob = await response.blob()
-      objectUrl = URL.createObjectURL(blob)
-      if (active) setUrl(objectUrl)
-      else URL.revokeObjectURL(objectUrl)
-    }
-
     setUrl("")
-    load().catch(() => {
-      if (active) setUrl("")
-    })
+    loadCachedBlobUrl(
+      auth.apiKey,
+      session.session_id,
+      mediaKind === "video" ? videoUrl(session, filename) : imageUrl(session, filename),
+      revision,
+    )
+      .then((objectUrl) => { if (active) setUrl(objectUrl) })
+      .catch(() => { if (active) setUrl("") })
 
     return () => {
       active = false
-      if (objectUrl) window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
     }
   }, [auth?.apiKey, auth?.userId, filename, localUrl, mediaKind, revision, session?.session_id])
 
