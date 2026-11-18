@@ -12,6 +12,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Crop,
   FileText,
   Image as ImageIcon,
@@ -476,6 +477,8 @@ export function MediaScreen({
     : !hasSavedTranscript(session) ? "Record or type a transcript and wait for it to save before extracting facts." : ""
   const [message, setMessage] = useState("")
   const [mobilePreviewOriginal, setMobilePreviewOriginal] = useState(false)
+  // Crop warnings the user dismissed, keyed by media id + warning text so a new warning shows again.
+  const [dismissedCropWarnings, setDismissedCropWarnings] = useState<string[]>([])
   const [mobileSection, setMobileSection] = useState<MobileSectionId>("transcript")
   const [editPromptOpen, setEditPromptOpen] = useState(false)
   const [editPrompt, setEditPrompt] = useState("")
@@ -1218,7 +1221,13 @@ export function MediaScreen({
               id="s2p-media-open-agent"
               type="button"
               title="Speak to the agent and/or write text in the Picture transcript directly. Everything you tell here is gathered as context for your facts and content."
-              onClick={() => { setTranscriptHighlight({ mediaId: selectedMediaId, text: pictureTranscript }); onOpenAgent() }}
+              onClick={() => {
+                setTranscriptHighlight({ mediaId: selectedMediaId, text: pictureTranscript })
+                setMobileSection("transcript")
+                // Wait for the section to render, then bring the carousel (and the transcript below it) into view on phones.
+                requestAnimationFrame(() => document.getElementById("s2p-media-section-nav")?.scrollIntoView({ behavior: "smooth", block: "start" }))
+                onOpenAgent()
+              }}
               className="flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-ai/50 bg-ai/10 px-3 py-3.5 text-center transition-colors hover:border-ai hover:bg-ai/15 sm:flex-row sm:justify-start sm:gap-3 sm:text-left"
             >
               <GatherContextIcon />
@@ -1517,8 +1526,16 @@ export function MediaScreen({
                   />)}
                 </div>
 
-                {cropSkipWarning(selectedImage) && (
-                  <div className="mt-4 flex flex-col gap-3 rounded-lg border border-warn/50 bg-warn/10 p-3 sm:flex-row sm:items-center">
+                {cropSkipWarning(selectedImage) && !dismissedCropWarnings.includes(`${selectedImage.media_id}|${cropSkipWarning(selectedImage)}`) && (
+                  <div className="relative mt-4 flex flex-col gap-3 rounded-lg border border-warn/50 bg-warn/10 p-3 pr-9 sm:flex-row sm:items-center">
+                    <button
+                      type="button"
+                      aria-label="Dismiss warning"
+                      onClick={() => setDismissedCropWarnings((current) => [...current, `${selectedImage.media_id}|${cropSkipWarning(selectedImage)}`])}
+                      className="absolute right-1.5 top-1.5 rounded-md p-1 text-muted-foreground hover:bg-warn/20"
+                    >
+                      <X className="size-4" aria-hidden="true" />
+                    </button>
                     <AlertTriangle className="size-5 shrink-0 text-warn-foreground" aria-hidden="true" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-foreground">
@@ -1552,7 +1569,7 @@ export function MediaScreen({
             )}
 
             {/* Mobile section carousel: previous / current / next section names */}
-            <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg border border-border bg-muted/30 px-1 py-1 lg:hidden" aria-label="Section navigation">
+            <div id="s2p-media-section-nav" className="mt-3 scroll-mt-28 grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg border border-border bg-muted/30 px-1 py-1 lg:hidden" aria-label="Section navigation">
               <button type="button" onClick={() => setMobileSection(sectionAt(-1).id)} className="flex min-w-0 items-center gap-0.5 rounded-md px-1.5 py-2 text-left text-xs text-muted-foreground">
                 <ChevronLeft className="size-4 shrink-0" aria-hidden="true" />
                 <span className="truncate">{sectionAt(-1).label}</span>
@@ -1622,8 +1639,9 @@ export function MediaScreen({
           </div>
         </section>
 
-        <section aria-label="Voice description and image metadata" className="min-w-0 lg:contents">
-          <div className="space-y-4 lg:col-start-3 lg:row-span-2 lg:row-start-1">
+        <section aria-label="Voice description and image metadata" className="flex min-w-0 flex-col max-lg:gap-4 lg:contents">
+          {/* On mobile this wrapper disappears so the Status panel can be ordered last, below the selected section. */}
+          <div className="space-y-4 max-lg:contents lg:col-start-3 lg:row-span-2 lg:row-start-1">
           <div className={`rounded-xl border border-border bg-card p-3 sm:p-4 ${hiddenOnMobile("transcript")}`}>
             <div className="mb-3 flex items-center gap-2">
               <span className="flex size-8 items-center justify-center rounded-md bg-gold/15 text-gold">
@@ -1658,9 +1676,12 @@ export function MediaScreen({
             </p>
           </div>
 
-          <aside aria-label="Processing status" className="rounded-xl border border-border bg-card p-4">
-            <h2 className="mb-3 text-sm font-semibold">Status</h2>
-            <ul className="space-y-2.5">
+          <details open aria-label="Processing status" className="group rounded-xl border border-border bg-card p-4 max-lg:order-last">
+            <summary className="flex cursor-pointer select-none items-center justify-between">
+              <h2 className="text-sm font-semibold">Status</h2>
+              <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden="true" />
+            </summary>
+            <ul className="mt-3 space-y-2.5">
               {statusItems.map((status) => (
                 <li key={status.label} className="flex items-center gap-2.5 text-sm">
                   {status.state === "done" ? (
@@ -1694,10 +1715,10 @@ export function MediaScreen({
               <UploadCloud className="size-4" aria-hidden="true" />
               Backend session version {session?.version ?? "-"}
             </div>
-          </aside>
+          </details>
           </div>
 
-          <div className={`mt-4 self-start rounded-xl border border-border bg-card p-4 lg:col-start-2 lg:row-start-2 lg:mt-0 ${hiddenOnMobile("metadata")}`}>
+          <div className={`self-start rounded-xl border border-border bg-card p-4 lg:col-start-2 lg:row-start-2 lg:mt-0 ${hiddenOnMobile("metadata")}`}>
             <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
               <FileText className="size-4 text-muted-foreground" aria-hidden="true" />
               {selectedVideo ? "Video metadata" : "Image metadata - Will be generated with the content draft"}
