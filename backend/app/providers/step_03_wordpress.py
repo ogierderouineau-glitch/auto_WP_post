@@ -575,9 +575,15 @@ class ExistingWordPressProvider(WordPressProvider):
                 continue
             term = match_registered_term(available_terms, value)
             if term is None:
+                # List the existing terms so the user can fix the value on the facts/content screen.
+                names = sorted(str(item.get("name", "")) for item in available_terms)
                 raise ValueError(
                     f"No safe registered WordPress term match for {value!r} "
-                    f"in taxonomy {taxonomy!r}; automatic term creation is disabled."
+                    f"in taxonomy {taxonomy!r}; automatic term creation is disabled. "
+                    f"Existing terms: {', '.join(names[:50]) or 'none'}"
+                    f"{' …' if len(names) > 50 else ''}. "
+                    "Correct the value on the facts or content screen to one of these, "
+                    "or add the term in WordPress."
                 )
             identifiers.append(int(term["id"]))
         return identifiers
