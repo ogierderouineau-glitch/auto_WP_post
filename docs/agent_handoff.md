@@ -123,6 +123,13 @@ step, no read-back check, the ACF field's own filters cannot be read (no ACF RES
 published posts only, at most 100 posts per lookup, a few WordPress requests per name on
 every publish. Needs a live WordPress test; only mocked tests exist.
 
+Media consistency: every payload rebuild, including the one at publish time, builds media with
+`_publication_media` so entries carry the same `binary_revision` (and `image_analysis`). Building
+them differently at publish made the stored published payload differ from any later rebuild and
+flagged unchanged pictures after every ACF edit. Sessions published before this fix are flagged
+once; the provider does not re-upload (paths equal). The provider also checks that a remembered
+WordPress media ID still exists (`wordpress_media_exists`) and uploads again if it was deleted.
+
 ## UX safeguards and session labels
 
 Session names are optional persisted labels; never replace or derive session IDs

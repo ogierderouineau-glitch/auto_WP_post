@@ -13,6 +13,7 @@ from backend.app.providers.step_01_interfaces import WordPressProvider
 from backend.config import CLIENTS, DEFAULT_CLIENT_ID, get_active_client_config, set_active_client
 from backend.wordpress_api import (
     find_linked_posts,
+    wordpress_media_exists,
     find_term,
     match_registered_term,
     registered_terms,
@@ -294,6 +295,8 @@ class ExistingWordPressProvider(WordPressProvider):
                     )
                     deleted_media_ids.append(media_id)
                 except Exception as exc:
+                    if "HTTP 404" in str(exc):  # already deleted in WordPress: nothing left to clean up
+                        continue
                     warnings.append(
                         f"Post updated, but previous WordPress media {media_id} "
                         f"could not be deleted: {exc}"
@@ -737,6 +740,9 @@ class ExistingWordPressProvider(WordPressProvider):
                 synchronized.extend(cls._upload_media([materialized]))
                 continue
             wordpress_id = int(result["media_id"])
+            if not wordpress_media_exists(wordpress_id):  # deleted in WordPress since the last publish
+                synchronized.extend(cls._upload_media([materialized]))
+                continue
             if cls._media_metadata(current) != cls._media_metadata(previous):
                 update_media_metadata(
                     wordpress_id,

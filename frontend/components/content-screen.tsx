@@ -64,6 +64,7 @@ type QualityCheck = {
   applied_finding_count: number
 }
 const ACTIVE_JOB_STORAGE = "speech2post_active_job"
+const OPEN_SECTION_STORAGE = "speech2post_open_content_section"
 
 type DraftField = {
   id: string
@@ -332,7 +333,11 @@ export function ContentScreen({
   const [autosave, setAutosave] = useState<OperationState>("idle")
   const [backgroundMetadata, setBackgroundMetadata] = useState(false)
   const [message, setMessage] = useState("")
-  const [openSection, setOpenSection] = useState<ContentSectionId | null>("wordpress")
+  const [openSection, setOpenSection] = useState<ContentSectionId | null>(() => {
+    // Remember the last open section (or "none" = all collapsed) across screen changes.
+    const saved = typeof window === "undefined" ? null : sessionStorage.getItem(OPEN_SECTION_STORAGE)
+    return saved === "none" ? null : saved === "acf" ? "acf" : "wordpress"
+  })
   const [openTrace, setOpenTrace] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [queuedLinks, setQueuedLinks] = useState<Record<string, string>>({})
@@ -451,7 +456,9 @@ export function ContentScreen({
   }
 
   function toggleContentSection(id: ContentSectionId) {
-    setOpenSection((current) => current === id ? null : id)
+    const next = openSection === id ? null : id
+    sessionStorage.setItem(OPEN_SECTION_STORAGE, next ?? "none")
+    setOpenSection(next)
   }
 
   useEffect(() => {

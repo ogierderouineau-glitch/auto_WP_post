@@ -4007,10 +4007,9 @@ class ContentSessionService:
             )
         self._milestone(refined, "publication metadata refinement finished")
         if shared_fields or acf_source_fields or refined.image_refs or refined.video_refs:
-            publication_media = [
-                *refined.image_metadata,
-                *self._video_publication_media(snapshot, refined),
-            ]
+            # Same builder as every other payload rebuild: the published copy must carry the same
+            # image fingerprints, or the next edit would flag unchanged pictures as changed.
+            publication_media = self._publication_media(snapshot, refined)
             payload = self.payload_builder.build(
                 snapshot,
                 post_type_key=refined.post_type_key,

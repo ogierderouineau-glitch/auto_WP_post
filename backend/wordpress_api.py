@@ -498,6 +498,17 @@ def find_linked_posts(spec: dict[str, str], name: str) -> tuple[list[dict[str, A
     return [], f"no post titled '{name}' in '{where}'"
 
 
+def wordpress_media_exists(media_id: int) -> bool:
+    """False when the attachment was deleted in WordPress (a remembered ID may be stale)."""
+    try:
+        request_json("GET", f"/wp-json/wp/v2/media/{int(media_id)}", params={"context": "edit"})
+    except RuntimeError as exc:
+        if "HTTP 404" in str(exc):
+            return False
+        raise
+    return True
+
+
 def find_media_by_url(url: str) -> dict[str, Any] | None:
     """Find the media-library item whose file URL is `url` (query string ignored)."""
     wanted = url.split("?")[0]

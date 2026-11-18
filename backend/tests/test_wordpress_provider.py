@@ -953,6 +953,7 @@ class WordPressProviderTests(unittest.TestCase):
         self.assertNotIn("DELETE", [call.args[0] for call in request_json.call_args_list])
         self.assertEqual(result["media"][0]["media_id"], 202)
 
+    @patch("backend.app.providers.step_03_wordpress.wordpress_media_exists", return_value=True)
     @patch("backend.app.providers.step_03_wordpress.update_media_metadata")
     @patch("backend.app.providers.step_03_wordpress.upload_media")
     @patch("backend.app.providers.step_03_wordpress.request_json")
@@ -961,6 +962,7 @@ class WordPressProviderTests(unittest.TestCase):
         request_json,
         upload_media_mock,
         update_metadata_mock,
+        media_exists,
     ) -> None:
         request_json.side_effect = [
             {"schema": {"properties": {"acf": {"properties": {}}, "meta": {"properties": {}}}}},
@@ -1021,6 +1023,49 @@ class WordPressProviderTests(unittest.TestCase):
         )
         self.assertEqual(result["media"][0]["media_id"], 101)
         self.assertEqual(result["deleted_media_ids"], [])
+
+    def test_previous_media_already_deleted_in_wordpress_is_not_a_warning(self) -> None:
+        calls = []
+
+        def respond(method, path, **kwargs):
+            calls.append((method, path))
+            if method == "DELETE":
+                raise RuntimeError("WordPress request failed (DELETE /wp-json/wp/v2/media/9, HTTP 404): Invalid post ID.")
+            if method == "OPTIONS":
+                return {"schema": {"properties": {"acf": {"properties": {}}, "meta": {"properties": {}}}}}
+            return {"id": 777, "status": "draft", "link": "https://example.test/post/"}
+
+        session = ContentSession(
+            session_id="session-1", user_id="user-1", post_type_key="event", wordpress_post_type="post",
+            state="publishing", workbook_hash="hash", language="de-DE", approval=Approval(approved=True),
+            wordpress_result={"post_id": 777, "media": [{"media_id": 9, "path": "/stored/old.webp"}]},
+        )
+        with patch("backend.app.providers.step_03_wordpress.request_json", side_effect=respond):
+            result = ExistingWordPressProvider().publish(
+                session=session,
+                payload=WordPressPayload(wordpress=WordPressFields(), media=[]),
+                idempotency_key="key-1",
+                target_post_id=777,
+            )
+        self.assertIn(("DELETE", "/wp-json/wp/v2/media/9"), calls)
+        self.assertEqual((result["warnings"], result["deleted_media_ids"]), ([], []))
+
+    @patch("backend.app.providers.step_03_wordpress.wordpress_media_exists", return_value=False)
+    @patch("backend.app.providers.step_03_wordpress.update_media_metadata")
+    @patch("backend.app.providers.step_03_wordpress.upload_media", return_value=(555, "https://example.test/new.webp"))
+    def test_media_deleted_in_wordpress_is_uploaded_again(self, upload_media_mock, update_metadata_mock, media_exists) -> None:
+        item = {"media_id": "image-1", "path": "/stored/image.webp", "image_usage": "gallery"}
+        session = ContentSession(
+            session_id="session-1", user_id="user-1", post_type_key="event", wordpress_post_type="post",
+            state="publishing", workbook_hash="hash", language="de-DE", approval=Approval(approved=True),
+            wordpress_payload={"wordpress": {}, "media": [item]},
+            published_wordpress_payload={"wordpress": {}, "media": [item]},
+            wordpress_result={"post_id": 1, "media": [{**item, "media_id": 28490, "source_url": "https://example.test/old.webp"}]},
+        )
+        synced = ExistingWordPressProvider._sync_media(session, [item])
+        media_exists.assert_called_once_with(28490)
+        upload_media_mock.assert_called_once_with("/stored/image.webp")
+        self.assertEqual(synced[0]["media_id"], 555)
 
     @patch("backend.app.providers.step_03_wordpress.update_media_metadata")
     @patch("backend.app.providers.step_03_wordpress.upload_media")
