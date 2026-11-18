@@ -657,7 +657,6 @@ export default function Page() {
             pictureTranscript={pictureTranscript}
             onPictureTranscriptChange={handlePictureTranscriptChange}
             onSelectedMediaChange={handleSelectedMediaChange}
-            onOpenAgent={() => setAgentOpen(true)}
             onExtractFacts={() => setAgentSubmitRequest((request) => request + 1)}
             extractFactsLoading={agentSubmitting}
             pictureTranscriptSavingImmediately={pictureTranscriptSavingImmediately}

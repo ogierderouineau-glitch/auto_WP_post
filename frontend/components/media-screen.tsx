@@ -437,7 +437,6 @@ export function MediaScreen({
   pictureTranscript,
   onPictureTranscriptChange,
   onSelectedMediaChange,
-  onOpenAgent,
   onExtractFacts,
   extractFactsLoading,
   pictureTranscriptSavingImmediately,
@@ -448,7 +447,6 @@ export function MediaScreen({
   pictureTranscript: string
   onPictureTranscriptChange: (value: string) => void
   onSelectedMediaChange: (media: SelectedMediaContext | null) => void
-  onOpenAgent: () => void
   onExtractFacts: () => void
   extractFactsLoading: boolean
   pictureTranscriptSavingImmediately: boolean
@@ -1220,13 +1218,12 @@ export function MediaScreen({
             <button
               id="s2p-media-open-agent"
               type="button"
-              title="Speak to the agent and/or write text in the Picture transcript directly. Everything you tell here is gathered as context for your facts and content."
+              title="Go to the Picture transcript to record with the mic or type notes. Everything you tell here is gathered as context for your facts and content."
               onClick={() => {
                 setTranscriptHighlight({ mediaId: selectedMediaId, text: pictureTranscript })
                 setMobileSection("transcript")
                 // Wait for the section to render, then bring the carousel (and the transcript below it) into view on phones.
                 requestAnimationFrame(() => document.getElementById("s2p-media-section-nav")?.scrollIntoView({ behavior: "smooth", block: "start" }))
-                onOpenAgent()
               }}
               className="flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-ai/50 bg-ai/10 px-3 py-3.5 text-center transition-colors hover:border-ai hover:bg-ai/15 sm:flex-row sm:justify-start sm:gap-3 sm:text-left"
             >
