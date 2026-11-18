@@ -447,6 +447,19 @@ export function OtherFunctionsDrawer({
             <h1 className="text-base font-semibold text-foreground">Other functions</h1>
             <p className="text-xs text-muted-foreground">Workspace status, recovery, config and session tools.</p>
           </div>
+          <div className="flex items-center gap-2">
+          {BUG_TRACKER_URL && (
+            <a
+              id="s2p-other-bug-tracker"
+              href={BUG_TRACKER_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-muted"
+            >
+              <Bug className="size-4" aria-hidden="true" />
+              Report a bug
+            </a>
+          )}
           <button
             id="s2p-other-close"
             type="button"
@@ -456,6 +469,7 @@ export function OtherFunctionsDrawer({
           >
             <X className="size-4" aria-hidden="true" />
           </button>
+          </div>
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
@@ -716,18 +730,6 @@ export function OtherFunctionsDrawer({
                 <FolderOpen className="size-4" />
                 Session menu
               </button>
-              {BUG_TRACKER_URL && (
-                <a
-                  id="s2p-other-bug-tracker"
-                  href={BUG_TRACKER_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground hover:bg-muted"
-                >
-                  <Bug className="size-4" />
-                  Report a bug
-                </a>
-              )}
             </div>
           </Section>
 
