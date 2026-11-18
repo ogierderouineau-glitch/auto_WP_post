@@ -712,7 +712,11 @@ def create_router(
             return {
                 "job_id": job_id,
                 "status": "not_found",
-                "error": "Job not found. It may belong to a previous server process.",
+                # Jobs live in server memory, so a restart (e.g. out of memory on Render) forgets them.
+                "error": explain(
+                    "Job not found. It may belong to a previous server process. Reload the page (F5) to continue.",
+                    f"job {job_id} not found in server memory",
+                ),
             }
         if job.get("client_id") != get_active_client_id():
             raise SessionOwnershipError(
