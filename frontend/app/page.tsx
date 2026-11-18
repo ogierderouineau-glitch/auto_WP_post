@@ -5,7 +5,7 @@ import {
   Check,
   FilePlus2,
   Mic,
-  Wifi,
+  ChevronDown,
   Image as ImageIcon,
   FileText,
   Newspaper,
@@ -95,6 +95,7 @@ export default function Page() {
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([])
   const [sessionModalOpen, setSessionModalOpen] = useState(false)
   const [otherFunctionsOpen, setOtherFunctionsOpen] = useState(false)
+  const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false)
   const [agentOpen, setAgentOpen] = useState(false)
   const [agentSubmitRequest, setAgentSubmitRequest] = useState(0)
   const [agentSubmitting, setAgentSubmitting] = useState(false)
@@ -539,7 +540,7 @@ export default function Page() {
       {/* ===================== TOP BAR ===================== */}
       <div className="sticky top-0 z-40">
         <header className="bg-topbar text-topbar-foreground">
-        <div className="mx-auto flex max-w-7xl items-center gap-3 px-3 py-2.5 sm:px-4">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 sm:px-4">
           <div className="flex items-center gap-2">
             <div className="flex size-7 items-center justify-center rounded-md bg-gold text-gold-foreground">
               <Mic className="size-4" aria-hidden="true" />
@@ -547,7 +548,8 @@ export default function Page() {
             <span className="text-sm font-semibold tracking-tight sm:text-base">SPEECH2POST</span>
           </div>
 
-          <div className="ml-1 hidden flex-wrap items-center gap-1.5 lg:flex">
+          {/* On mobile these chips sit on their own row and are toggled by the chevron button; on desktop they stay inline. */}
+          <div className={`${mobileDetailsOpen ? "flex" : "hidden"} order-last w-full flex-wrap items-center gap-1.5 lg:order-none lg:ml-1 lg:flex lg:w-auto`}>
             <MetaChip label="Client:" value={auth?.client.client_id || "-"} />
             {session ? <SessionName key={session.session_id} sessionId={session.session_id} name={session.name} onSave={async (name) => {
               if (!apiAuth) return
@@ -562,20 +564,15 @@ export default function Page() {
               <Check className="size-3.5 text-confirm" aria-hidden="true" />
               {loading ? "Loading" : statusText}
             </span>
-            <span
-              className="flex size-8 items-center justify-center rounded-md bg-white/5"
-              title={session ? "Session connected" : "No session"}
-            >
-              <Wifi className={`size-4 ${session ? "text-confirm" : "text-muted-foreground"}`} aria-hidden="true" />
-            </span>
             <button
               id="s2p-header-new-session"
               type="button"
               onClick={() => auth && setSessionModalOpen(true)}
-              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-white/5 px-2.5 text-xs font-semibold transition-colors hover:bg-white/10"
+              aria-label="New session"
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-white/5 px-2 text-xs font-semibold transition-colors hover:bg-white/10 sm:px-2.5"
             >
               <FilePlus2 className="size-4" aria-hidden="true" />
-              New session
+              <span className="hidden sm:inline">New session</span>
             </button>
             <button
               id="s2p-header-other-functions"
@@ -586,19 +583,19 @@ export default function Page() {
             >
               <SlidersHorizontal className="size-4" aria-hidden="true" />
             </button>
+            <button
+              id="s2p-header-session-details"
+              type="button"
+              onClick={() => setMobileDetailsOpen((open) => !open)}
+              className="flex size-8 items-center justify-center rounded-md bg-white/5 transition-colors hover:bg-white/10 lg:hidden"
+              aria-label="Show session details"
+              aria-expanded={mobileDetailsOpen}
+            >
+              <ChevronDown className={`size-4 transition-transform ${mobileDetailsOpen ? "rotate-180" : ""}`} aria-hidden="true" />
+            </button>
           </div>
         </div>
 
-        {/* meta chips on mobile */}
-        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2.5 lg:hidden">
-          <MetaChip label="Client:" value={auth?.client.client_id || "-"} />
-          {session ? <SessionName key={session.session_id} sessionId={session.session_id} name={session.name} onSave={async (name) => {
-              if (!apiAuth) return
-              const data = await saveSessionName(apiAuth, sessionRef.current || session, name)
-              handleSessionChange(data.session)
-            }} /> : <MetaChip label="Session:" value="-" />}
-          <MetaChip label="Post type:" value={selectedPostTypeLabel} />
-        </div>
         </header>
 
         {/* ===================== WORKFLOW STEPS ===================== */}
@@ -730,6 +727,7 @@ export default function Page() {
           voiceInstructions={selectedPostTypeVoiceInstructions}
           factDescriptions={selectedPostTypeFactDescriptions}
           onPictureTranscriptAppend={handlePictureTranscriptAppend}
+          pulseMic={screen === "media" && !!selectedMedia && !pictureTranscript.trim()}
         />
       )}
       <OtherFunctionsDrawer

@@ -420,6 +420,15 @@ function MetadataInput({
   )
 }
 
+// Mobile-only sections: on phones only one is shown at a time, chosen with the carousel below the image.
+const MOBILE_SECTIONS = [
+  { id: "transcript", label: "Transcript" },
+  { id: "options", label: "Picture options" },
+  { id: "metadata", label: "Metadata" },
+  { id: "facts", label: "Extract facts" },
+] as const
+type MobileSectionId = (typeof MOBILE_SECTIONS)[number]["id"]
+
 export function MediaScreen({
   auth,
   session,
@@ -467,6 +476,7 @@ export function MediaScreen({
     : !hasSavedTranscript(session) ? "Record or type a transcript and wait for it to save before extracting facts." : ""
   const [message, setMessage] = useState("")
   const [mobilePreviewOriginal, setMobilePreviewOriginal] = useState(false)
+  const [mobileSection, setMobileSection] = useState<MobileSectionId>("transcript")
   const [editPromptOpen, setEditPromptOpen] = useState(false)
   const [editPrompt, setEditPrompt] = useState("")
   const pendingTranscripts = useRef<Record<string, string>>({})
@@ -1073,6 +1083,31 @@ export function MediaScreen({
     },
   ] as const
 
+  // Picture options only exist for images; video/no selection has nothing to show there.
+  const mobileSections = MOBILE_SECTIONS.filter((section) => section.id !== "options" || !!selectedImage)
+  const currentSection = mobileSections.some((section) => section.id === mobileSection) ? mobileSection : "transcript"
+  const currentSectionIndex = mobileSections.findIndex((section) => section.id === currentSection)
+  const sectionAt = (offset: number) => mobileSections[(currentSectionIndex + offset + mobileSections.length) % mobileSections.length]
+  const hiddenOnMobile = (id: MobileSectionId) => (currentSection === id ? "" : "max-lg:hidden")
+  const metadataNotGenerated = selectedVideo
+    ? !videoMetadata.video_title.trim() && !videoMetadata.video_caption.trim() && !videoMetadata.video_description.trim()
+    : !!selectedImage && !metadata.image_alt.trim() && !metadata.image_title.trim() && !metadata.image_caption.trim() && !metadata.image_description.trim()
+  const extractFactsButton = (
+  <ActionHint reason={extractDisabledReason} className="w-full">
+          <button
+            id="s2p-media-extract-facts"
+            title={extractDisabledReason || "Facts will be used to create truthful content"}
+            type="button"
+            onClick={onExtractFacts}
+            disabled={!!extractDisabledReason}
+            className={`mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors hover:opacity-90 disabled:opacity-50 ${hasExtractedFacts(session) ? "bg-destructive text-white" : "bg-confirm text-confirm-foreground"}`}
+          >
+            {extractFactsLoading ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <FileText className="size-4" aria-hidden="true" />}
+            {extractFactsLoading ? "Extracting facts..." : "All set? Extract facts"}
+          </button>
+          </ActionHint>
+  )
+
   return (
     <>
       {warningDialog}
@@ -1190,19 +1225,7 @@ export function MediaScreen({
               <span className="text-base font-semibold leading-tight text-ai">Tell your story</span>
             </button>
           </div>
-          <ActionHint reason={extractDisabledReason} className="w-full">
-          <button
-            id="s2p-media-extract-facts"
-            title={extractDisabledReason || "Facts will be used to create truthful content"}
-            type="button"
-            onClick={onExtractFacts}
-            disabled={!!extractDisabledReason}
-            className={`mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors hover:opacity-90 disabled:opacity-50 ${hasExtractedFacts(session) ? "bg-destructive text-white" : "bg-confirm text-confirm-foreground"}`}
-          >
-            {extractFactsLoading ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <FileText className="size-4" aria-hidden="true" />}
-            {extractFactsLoading ? "Extracting facts..." : "All set? Extract facts"}
-          </button>
-          </ActionHint>
+          <div className="max-lg:hidden">{extractFactsButton}</div>
 
           <div className="mt-3 flex items-center gap-2">
             <button
@@ -1518,8 +1541,32 @@ export function MediaScreen({
                   </div>
                 )}
 
-                <details className="group mt-4 rounded-lg border border-border bg-muted/30 p-3">
-                  <summary className="flex cursor-pointer select-none items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              </>
+            ) : (
+              <div className="flex aspect-[4/3] w-full items-center justify-center rounded-lg border border-dashed border-border bg-muted">
+                <div className="flex flex-col items-center gap-1.5 text-muted-foreground">
+                  <ImageIcon className="size-7" aria-hidden="true" />
+                  <span className="text-xs font-medium">Upload a picture or MP4 video to begin</span>
+                </div>
+              </div>
+            )}
+
+            {/* Mobile section carousel: previous / current / next section names */}
+            <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg border border-border bg-muted/30 px-1 py-1 lg:hidden" aria-label="Section navigation">
+              <button type="button" onClick={() => setMobileSection(sectionAt(-1).id)} className="flex min-w-0 items-center gap-0.5 rounded-md px-1.5 py-2 text-left text-xs text-muted-foreground">
+                <ChevronLeft className="size-4 shrink-0" aria-hidden="true" />
+                <span className="truncate">{sectionAt(-1).label}</span>
+              </button>
+              <h3 className="text-center text-base font-semibold text-foreground">{sectionAt(0).label}</h3>
+              <button type="button" onClick={() => setMobileSection(sectionAt(1).id)} className="flex min-w-0 items-center justify-end gap-0.5 rounded-md px-1.5 py-2 text-right text-xs text-muted-foreground">
+                <span className="truncate">{sectionAt(1).label}</span>
+                <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
+              </button>
+            </div>
+            {currentSection === "facts" && <div className="mt-3 lg:hidden">{extractFactsButton}</div>}
+            {selectedImage && session && (
+                <details open={currentSection === "options" || undefined} className={`group mt-4 rounded-lg border border-border bg-muted/30 p-3 ${hiddenOnMobile("options")}`}>
+                  <summary className="max-lg:hidden flex cursor-pointer select-none items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     <ChevronRight className="size-4 transition-transform group-open:rotate-90" aria-hidden="true" />
                     Picture options
                   </summary>
@@ -1571,21 +1618,13 @@ export function MediaScreen({
                     </div>
                   </div>
                 </details>
-              </>
-            ) : (
-              <div className="flex aspect-[4/3] w-full items-center justify-center rounded-lg border border-dashed border-border bg-muted">
-                <div className="flex flex-col items-center gap-1.5 text-muted-foreground">
-                  <ImageIcon className="size-7" aria-hidden="true" />
-                  <span className="text-xs font-medium">Upload a picture or MP4 video to begin</span>
-                </div>
-              </div>
             )}
           </div>
         </section>
 
         <section aria-label="Voice description and image metadata" className="min-w-0 lg:contents">
           <div className="space-y-4 lg:col-start-3 lg:row-span-2 lg:row-start-1">
-          <div className="rounded-xl border border-border bg-card p-3 sm:p-4">
+          <div className={`rounded-xl border border-border bg-card p-3 sm:p-4 ${hiddenOnMobile("transcript")}`}>
             <div className="mb-3 flex items-center gap-2">
               <span className="flex size-8 items-center justify-center rounded-md bg-gold/15 text-gold">
                 <FileText className="size-4" aria-hidden="true" />
@@ -1612,7 +1651,10 @@ export function MediaScreen({
               className={`w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none focus:ring-2 focus:ring-gold/40 disabled:text-muted-foreground ${highlightTranscript ? "ring-2 ring-ai bg-ai/10" : ""}`}
             />
             <p className="mt-2 text-xs text-muted-foreground">
-              The floating mic saves these notes per media item for fact extraction.
+              {pictureTranscript.trim()
+                ? "New voice messages are appended underneath this text."
+                : "Tap the pulsing mic to record, or type your notes."}{" "}
+              Tip: check the post type requirements and facts first, so you know what to mention.
             </p>
           </div>
 
@@ -1655,11 +1697,16 @@ export function MediaScreen({
           </aside>
           </div>
 
-          <div className="mt-4 self-start rounded-xl border border-border bg-card p-4 lg:col-start-2 lg:row-start-2 lg:mt-0">
+          <div className={`mt-4 self-start rounded-xl border border-border bg-card p-4 lg:col-start-2 lg:row-start-2 lg:mt-0 ${hiddenOnMobile("metadata")}`}>
             <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
               <FileText className="size-4 text-muted-foreground" aria-hidden="true" />
               {selectedVideo ? "Video metadata" : "Image metadata - Will be generated with the content draft"}
             </h2>
+            {metadataNotGenerated && (
+              <p className="mb-3 rounded-lg border border-warn/50 bg-warn/20 px-3 py-2 text-sm font-semibold text-warn-foreground">
+                Not generated yet - nothing to review here until the content draft is generated.
+              </p>
+            )}
             {selectedVideo ? (
               <div className="grid gap-3 sm:grid-cols-2">
                 <MetadataInput

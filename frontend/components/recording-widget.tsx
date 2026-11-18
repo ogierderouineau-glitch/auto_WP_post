@@ -125,6 +125,7 @@ export function RecordingWidget({
   voiceInstructions,
   factDescriptions,
   onPictureTranscriptAppend,
+  pulseMic,
 }: {
   auth: ApiClientOptions | null
   session: ContentSession | null
@@ -146,6 +147,7 @@ export function RecordingWidget({
   voiceInstructions: string
   factDescriptions: string[]
   onPictureTranscriptAppend: (text: string) => Promise<void>
+  pulseMic: boolean
 }) {
   const [recording, setRecording] = useState(false)
   const [items, setItems] = useState<RecordingItem[]>([])
@@ -606,7 +608,7 @@ export function RecordingWidget({
         <button
           id="s2p-recording-agent-record"
           type="button"
-          onClick={() => { onOpenChange(true); if (recording) stopRecording(); else void startRecording() }}
+          onClick={() => { if (recording) stopRecording(); else void startRecording() }}
           disabled={!session}
           aria-label={recording ? "Stop recording" : "Start recording"}
           aria-pressed={recording}
@@ -626,7 +628,7 @@ export function RecordingWidget({
               <span>Stop</span>
             </>
           ) : (
-            <Mic className="size-5 text-destructive" aria-hidden="true" />
+            <Mic className={`size-5 text-destructive ${pulseMic ? "animate-pulse" : ""}`} aria-hidden="true" />
           )}
         </button>
         <button
