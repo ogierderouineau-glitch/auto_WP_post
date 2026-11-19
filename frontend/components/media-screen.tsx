@@ -16,6 +16,7 @@ import {
   Crop,
   FileText,
   Image as ImageIcon,
+  Info,
   Loader2,
   RotateCcw,
   Sparkles,
@@ -33,6 +34,7 @@ import {
   loadContentSession,
   optimizeSessionImage,
   recropSessionImageWithAi,
+  removeSessionDocument,
   removeSessionImage,
   removeSessionVideo,
   restoreSessionImageOriginal,
@@ -46,6 +48,7 @@ import {
   fetchMediaFromUrl,
   registerWordPressVideo,
   replaceSessionVideoCover,
+  uploadSessionDocument,
   uploadSessionImage,
   uploadSessionVideo,
   videoUrl,
@@ -456,6 +459,8 @@ export function MediaScreen({
   const [uploadAspectRatio, setUploadAspectRatio] = useState("4:5")
   const [mediaLink, setMediaLink] = useState("")
   const [linkBusy, setLinkBusy] = useState(false)
+  const [documentBusy, setDocumentBusy] = useState(false)
+  const [documentInfoOpen, setDocumentInfoOpen] = useState(false)
   const [useMetadataVision, setUseMetadataVision] = useState(false)
   const [operation, setOperation] = useState<OperationState>("idle")
   const [transcriptSaving, setTranscriptSaving] = useState(false)
@@ -746,6 +751,23 @@ export function MediaScreen({
       setMessage(error instanceof Error ? error.message : "The link could not be downloaded.")
     } finally {
       setLinkBusy(false)
+    }
+  }
+
+  // PDF documents (e.g. a CV) add text context for the facts; only their text is kept.
+  async function changeDocument(action: (current: ContentSession) => ReturnType<typeof uploadSessionDocument>, busyMessage: string) {
+    if (!auth || !session) return
+    setDocumentBusy(true)
+    setMessage(busyMessage)
+    try {
+      const data = await action(sessionRef.current || session)
+      sessionRef.current = data.session
+      onSessionChange(data.session)
+      setMessage("")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The document could not be updated.")
+    } finally {
+      setDocumentBusy(false)
     }
   }
 
@@ -1180,6 +1202,53 @@ export function MediaScreen({
                   <option value="1:1">Square 1:1</option>
                   <option value="16:9">Widescreen 16:9</option>
                 </select>
+              </div>
+              <div className="border-t border-gold/20 px-3 py-2.5 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                <label className={`flex cursor-pointer items-center gap-2 font-semibold text-gold ${documentBusy ? "opacity-60" : ""}`}>
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    disabled={documentBusy || !session}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      event.target.value = ""
+                      if (file) void changeDocument((current) => uploadSessionDocument(auth!, current, file), "Reading the document...")
+                    }}
+                    className="sr-only"
+                  />
+                  {documentBusy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <FileText className="size-4" aria-hidden="true" />}
+                  Add a PDF document (e.g. a CV)
+                </label>
+                <button
+                  type="button"
+                  aria-label="About PDF documents and personal data"
+                  aria-expanded={documentInfoOpen}
+                  onClick={() => setDocumentInfoOpen((open) => !open)}
+                  className="cursor-pointer text-gold hover:text-gold/80"
+                >
+                  <Info className="size-4" aria-hidden="true" />
+                </button>
+                </div>
+                {documentInfoOpen && (
+                  <p className="mt-1.5 text-muted-foreground">
+                    Only the text of the PDF is read; the file is not kept. Emails, phone numbers, links and bank numbers are removed automatically; addresses and names are not. The rest is sent to the AI provider to find facts. Avoid documents with private data the post does not need.
+                  </p>
+                )}
+                {Object.keys(session?.document_texts || {}).map((name) => (
+                  <div key={name} className="mt-1.5 flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate" title={name}>{name}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${name}`}
+                      disabled={documentBusy}
+                      onClick={() => void changeDocument((current) => removeSessionDocument(auth!, current, name), "Removing the document...")}
+                      className="cursor-pointer text-muted-foreground hover:text-destructive disabled:opacity-50"
+                    >
+                      <Trash2 className="size-3.5" aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
               </div>
               <form
                 className="flex gap-1.5 border-t border-gold/20 px-3 py-2.5"

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 FactSource = Literal[
     "manual_text",
     "transcript",
+    "document",
     "user_correction",
     "image_analysis",
     "configured",
@@ -74,6 +75,8 @@ class ContentSession(BaseModel):
     image_refs: list[MediaReference] = Field(default_factory=list)
     video_refs: list[MediaReference] = Field(default_factory=list)
     transcript: str = ""
+    # PDF text by file name; the PDF itself is not kept, only its text.
+    document_texts: dict[str, str] = Field(default_factory=dict)
     extracted_facts: dict[str, FactValue] = Field(default_factory=dict)
     confirmed_facts: dict[str, FactValue] = Field(default_factory=dict)
     clarification_questions: list[str] = Field(default_factory=list)

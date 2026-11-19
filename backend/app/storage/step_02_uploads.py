@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse
 
 import requests
+from pypdf import PdfReader
 from PIL import Image
 
 from backend.app.errors import explain, size_label
@@ -77,6 +78,64 @@ def validate_upload(
     else:
         raise ValueError(f"Unsupported upload kind: {kind}")
     return detected
+
+
+MAX_DOCUMENT_PAGES = 30
+MAX_DOCUMENT_CHARS = 30_000
+
+
+# Contact details with a recognisable shape. Street addresses and names have none, so they stay.
+# Phone numbers must start with +, 00, ( or 0, so year ranges like "2015 - 2020" are kept.
+_PERSONAL_DATA_PATTERNS = [re.compile(pattern, re.IGNORECASE) for pattern in (
+    r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+",  # email
+    r"(?:https?://|www\.)\S+|(?:linkedin|xing|instagram|facebook)\.com/\S+",  # web and profile links
+    r"(?<![\w.])@\w[\w.]{2,}",  # social handle such as @name
+    r"\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){3,7}(?:\s?[A-Z0-9]{1,4})?\b",  # IBAN
+    # labelled birth date, month + year or year alone (the year would reveal the age too)
+    r"\b(?:born|geboren(?: am)?|geburtsdatum|geburtsjahr|date of birth|dob|(?-i:n[éÉ]e?)(?: le| en)?|nacido(?: el| en)?)"
+    r"\W{0,3}(?:\d{1,2}(?:st|nd|rd|th)?[./\s-]\s?)?(?:\d{1,2}[./-]|[a-zäéû]{3,9}\.?\s)?\d{4}\b|"
+    r"\b(?:born|geboren(?: am)?|date of birth|dob)\W{0,3}\d{1,2}[./-]\d{1,2}[./-]\d{2}\b",
+    r"\b(?:age|alter)\W{0,3}\d{2}\b|\b\d{2}\s*(?:years old|jahre alt|ans\b|años)",  # stated age
+    r"(?<![\w])(?:\+|00|\(|0)\d[\d\s().\-/]{6,}\d",  # phone number
+)]
+
+
+def remove_personal_data(text: str) -> str:
+    """Replace emails, links, IBANs, labelled birth dates and phone numbers with [removed]."""
+    for pattern in _PERSONAL_DATA_PATTERNS:
+        text = pattern.sub("[removed]", text)
+    return text
+
+
+def extract_pdf_text(path: Path) -> str:
+    """Read the text of a PDF (max 30 pages, 30 000 characters) so the AI can use it as context.
+
+    Contact details are removed here, before the text is stored or sent to any AI.
+
+    Only text PDFs work: scanned pages have no text layer and are reported as empty.
+    """
+    try:
+        reader = PdfReader(path)
+        if reader.is_encrypted:
+            raise ValueError("This PDF is password-protected. Remove the password and upload it again.")
+        if len(reader.pages) > MAX_DOCUMENT_PAGES:
+            raise ValueError(
+                f"This PDF has {len(reader.pages)} pages; the limit is {MAX_DOCUMENT_PAGES}. "
+                "Upload only the pages that matter."
+            )
+        text = "\n\n".join((page.extract_text() or "").strip() for page in reader.pages).strip()
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(
+            explain("This PDF could not be read. Check that it opens normally and upload it again.", exc)
+        ) from exc
+    if not text:
+        raise ValueError(
+            "No text was found in this PDF. It is probably a scan or a picture of a document; "
+            "only PDFs with selectable text are supported."
+        )
+    return remove_personal_data(text)[:MAX_DOCUMENT_CHARS]
 
 
 def _require_public_host(url: str) -> None:

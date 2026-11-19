@@ -192,6 +192,7 @@ class GenerationContextBuilder:
             source_text={
                 "manual_text": session.manual_text,
                 "transcript": session.transcript,
+                **{f"document: {name}": text for name, text in session.document_texts.items()},
             },
             confirmed_facts={
                 key: value.value

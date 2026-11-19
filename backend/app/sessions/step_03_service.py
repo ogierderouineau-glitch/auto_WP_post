@@ -249,7 +249,7 @@ class ContentSessionService:
         if not (
             session.extracted_facts or session.confirmed_facts
             or session.shared_fields or session.acf_source_fields
-            or (session.facts_extracted and (session.manual_text or session.transcript))
+            or (session.facts_extracted and (session.manual_text or session.transcript or session.document_texts))
         ):
             return session
         # Naming is optional: a provider failure must never block the workflow.
@@ -271,7 +271,7 @@ class ContentSessionService:
                     )}],
                     context={
                         "language": session.language,
-                        "source_text": session.manual_text or session.transcript,
+                        "source_text": session.manual_text or session.transcript or "\n\n".join(session.document_texts.values()),
                         "facts": {key: fact.value for key, fact in {**session.extracted_facts, **session.confirmed_facts}.items()},
                         "shared_fields": session.shared_fields,
                         "acf_source_fields": session.acf_source_fields,
@@ -970,6 +970,17 @@ class ContentSessionService:
             ).transition(updated, "uploading")
         return self.repository.save(updated, expected_version=expected_version)
 
+    def add_document(self, session_id: str, *, filename: str, text: str, expected_version: int) -> ContentSession:
+        """Keep the text of an uploaded document as extra source text for fact extraction."""
+        session = self.repository.get(session_id)
+        updated = session.model_copy(update={
+            "document_texts": {**session.document_texts, filename: text},
+            "updated_at": datetime.now(timezone.utc),
+        })
+        if updated.state == "created":
+            updated = SessionStateMachine(self.knowledge.by_hash(updated.workbook_hash)).transition(updated, "uploading")
+        return self.repository.save(updated, expected_version=expected_version)
+
     def add_inputs(
         self,
         session_id: str,
@@ -1057,7 +1068,7 @@ class ContentSessionService:
                     session = self._record_provider_usage(session, self.speech_to_text)
                 self._milestone(session, f"transcription finished filename={reference.filename}")
             session = session.model_copy(update={"transcript": "\n\n".join(transcripts)})
-        if self.language_model is not None and (session.manual_text or session.transcript):
+        if self.language_model is not None and (session.manual_text or session.transcript or session.document_texts):
             self._milestone(session, "fact extraction started")
             input_rows = [
                 row
@@ -1092,6 +1103,7 @@ class ContentSessionService:
                 context={
                     "manual_text": session.manual_text,
                     "transcript": session.transcript,
+                    "documents": session.document_texts,
                     "fact_schema": [
                         {
                             **row.model_dump(exclude={"sheet_row"}),
@@ -1111,7 +1123,7 @@ class ContentSessionService:
             session = self._record_provider_usage(session, analysis_provider)
             extracted = dict(session.extracted_facts)
             confirmed = dict(session.confirmed_facts)
-            source = "manual_text" if session.manual_text else "transcript"
+            source = "manual_text" if session.manual_text else "transcript" if session.transcript else "document"
             parsed_values = self._normalize_fact_values(
                 snapshot,
                 session.post_type_key,
@@ -1512,6 +1524,10 @@ class ContentSessionService:
             ]
             if not updates["audio_refs"]:
                 updates["transcript"] = ""
+        elif kind == "documents":
+            if filename not in session.document_texts:
+                raise SessionVersionConflictError(f"Document '{filename}' is no longer in this session (the screen is out of date).")
+            updates["document_texts"] = {k: v for k, v in session.document_texts.items() if k != filename}
         elif kind == "videos":
             reference = next((ref for ref in session.video_refs if ref.filename == filename), None)
             if reference is None:

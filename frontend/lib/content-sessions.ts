@@ -149,6 +149,7 @@ export type ContentSession = {
   image_refs: MediaReference[]
   video_refs: MediaReference[]
   transcript: string
+  document_texts?: Record<string, string>
   extracted_facts: Record<string, FactValue>
   confirmed_facts: Record<string, FactValue>
   clarification_questions: string[]
@@ -439,6 +440,22 @@ export async function saveSessionVideoMetadata(
     method: "PUT",
     body: { expected_version: session.version, filename, metadata, transcript },
   })
+}
+
+/** Uploads a PDF; the backend keeps its text (not the file) as extra context for the facts. */
+export function uploadSessionDocument(auth: ApiClientOptions, session: ContentSession, file: File) {
+  const form = new FormData()
+  form.append("expected_version", String(session.version))
+  form.append("upload", file)
+  return apiRequest<SessionResponse>(`/api/content-sessions/${session.session_id}/documents`, auth, { method: "POST", body: form })
+}
+
+export function removeSessionDocument(auth: ApiClientOptions, session: ContentSession, filename: string) {
+  return apiRequest<SessionResponse>(
+    `/api/content-sessions/${session.session_id}/media/documents/${encodeURIComponent(filename)}`,
+    auth,
+    { method: "DELETE", body: { expected_version: session.version } },
+  )
 }
 
 export async function removeSessionVideo(
@@ -970,6 +987,7 @@ export function saveSessionName(auth: ApiClientOptions, session: ContentSession,
 export function hasSavedTranscript(session: ContentSession | null) {
   return !!session && [
     session.manual_text, session.transcript,
+    ...Object.values(session.document_texts || {}),
     ...Object.values(session.image_context_transcripts || {}),
     ...Object.values(session.video_context_transcripts || {}),
   ].some((text) => !!text?.trim())

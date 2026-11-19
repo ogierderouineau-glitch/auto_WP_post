@@ -55,6 +55,18 @@ transport/adapters and inspect route/request models instead of copying a static
 endpoint inventory into new code. The backend owns generation, validation,
 media processing and WordPress publication.
 
+## PDF documents as context (e.g. a CV)
+
+The Media screen has "Add a PDF document" under the picture format selector.
+`POST /{session_id}/documents` reads the PDF's text with `pypdf` (`extract_pdf_text` in
+`backend/app/storage/step_02_uploads.py`: max 30 pages, 30 000 characters, `V2_MAX_DOCUMENT_BYTES`
+default 10 MB, text PDFs only, scans are refused with a clear message) and stores it in
+`session.document_texts` (file name -> text). The PDF file itself is not kept. Fact extraction receives it as
+`documents`, facts get `source="document"` when it is the only text, and the generation context lists it
+under `source_text`. Removal uses `DELETE /media/documents/{filename}`. The UI warns that the text is sent
+to the AI provider. `remove_personal_data` first replaces emails, links, IBANs, labelled birth dates and phone numbers with `[removed]` (regex only: addresses and names are NOT removed; the UI says so). Session-wide only (not per picture); DOCX is not supported. Tests: `test_document_upload.py`.
+Not checked in a real browser or with a real multi-column CV yet.
+
 ## Media upload from a link
 
 The Media screen has a "paste a link" field under the picture format selector.

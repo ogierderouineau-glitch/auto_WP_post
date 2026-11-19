@@ -57,7 +57,7 @@ from backend.app.errors import (
     size_label,
 )
 from backend.app.sessions.step_03_service import ContentSessionService
-from backend.app.storage.step_02_uploads import download_media_url, safe_upload_name, validate_upload
+from backend.app.storage.step_02_uploads import download_media_url, extract_pdf_text, safe_upload_name, validate_upload
 
 
 _SESSION_JOBS: dict[str, dict[str, Any]] = {}
@@ -376,6 +376,39 @@ def create_router(
             await upload.close()
             if os.path.exists(temporary_name):
                 os.unlink(temporary_name)
+
+    @router.post("/{session_id}/documents", response_model=SessionResponse)
+    async def upload_document(
+        session_id: str,
+        expected_version: int = Form(...),
+        upload: UploadFile = File(...),
+    ) -> SessionResponse:
+        """Read a PDF's text and keep it as extra context for the facts; the PDF file is not stored."""
+        service = service_provider()
+        service.require_owner(session_id, get_active_client_id())
+        max_bytes = int(os.getenv("V2_MAX_DOCUMENT_BYTES", str(10 * 1024 * 1024)))
+        name = Path(upload.filename or "").name or "document.pdf"
+        fd, temporary_name = tempfile.mkstemp(prefix="v2-document-", suffix=".pdf")
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                data = await upload.read(max_bytes + 1)
+                handle.write(data)
+            if len(data) > max_bytes:
+                raise InvalidUploadError(
+                    f"This document is larger than the {size_label(max_bytes)} limit. Use a smaller file."
+                )
+            if not data.startswith(b"%PDF"):
+                raise InvalidUploadError("Only PDF documents are supported. Save the document as PDF and upload that file.")
+            try:
+                text = extract_pdf_text(Path(temporary_name))
+            except ValueError as exc:
+                raise InvalidUploadError(f"{name}: {exc}") from exc
+            return SessionResponse(
+                session=service.add_document(session_id, filename=name, text=text, expected_version=expected_version)
+            )
+        finally:
+            await upload.close()
+            os.unlink(temporary_name)
 
     @router.put("/{session_id}/media/videos/{filename}/cover", response_model=SessionResponse)
     async def replace_video_cover(
