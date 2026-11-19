@@ -1216,53 +1216,6 @@ export function MediaScreen({
                   <option value="16:9">Widescreen 16:9</option>
                 </select>
               </div>
-              <div className="border-t border-gold/20 px-3 py-2.5 text-xs">
-                <div className="flex items-center justify-between gap-2">
-                <label className={`flex cursor-pointer items-center gap-2 font-semibold text-gold ${documentBusy ? "opacity-60" : ""}`}>
-                  <input
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    disabled={documentBusy || !session}
-                    onChange={(event) => {
-                      const file = event.target.files?.[0]
-                      event.target.value = ""
-                      if (file) void changeDocument((current) => uploadSessionDocument(auth!, current, file), "Reading the document...")
-                    }}
-                    className="sr-only"
-                  />
-                  {documentBusy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <FileText className="size-4" aria-hidden="true" />}
-                  Add a PDF document (e.g. a CV)
-                </label>
-                <button
-                  type="button"
-                  aria-label="About PDF documents and personal data"
-                  aria-expanded={documentInfoOpen}
-                  onClick={() => setDocumentInfoOpen((open) => !open)}
-                  className="cursor-pointer text-gold hover:text-gold/80"
-                >
-                  <Info className="size-4" aria-hidden="true" />
-                </button>
-                </div>
-                {documentInfoOpen && (
-                  <p className="mt-1.5 text-muted-foreground">
-                    Only the text of the PDF is read; the file is not kept. Emails, phone numbers, links and bank numbers are removed automatically; addresses and names are not. The rest is sent to the AI provider to find facts. Avoid documents with private data the post does not need.
-                  </p>
-                )}
-                {Object.keys(session?.document_texts || {}).map((name) => (
-                  <div key={name} className="mt-1.5 flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate" title={name}>{name}</span>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${name}`}
-                      disabled={documentBusy}
-                      onClick={() => void changeDocument((current) => removeSessionDocument(auth!, current, name), "Removing the document...")}
-                      className="cursor-pointer text-muted-foreground hover:text-destructive disabled:opacity-50"
-                    >
-                      <Trash2 className="size-3.5" aria-hidden="true" />
-                    </button>
-                  </div>
-                ))}
-              </div>
               <form
                 className="flex gap-1.5 border-t border-gold/20 px-3 py-2.5"
                 onSubmit={(event) => { event.preventDefault(); void uploadFromLink() }}
@@ -1287,6 +1240,7 @@ export function MediaScreen({
                 </button>
               </form>
             </div>
+            <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-dashed border-ai/50 bg-ai/10 text-foreground transition-colors hover:border-ai hover:bg-ai/15">
             <button
               id="s2p-media-open-agent"
               type="button"
@@ -1297,11 +1251,59 @@ export function MediaScreen({
                 // Wait for the section to render, then bring the carousel (and the transcript below it) into view on phones.
                 requestAnimationFrame(() => document.getElementById("s2p-media-section-nav")?.scrollIntoView({ behavior: "smooth", block: "start" }))
               }}
-              className="flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-ai/50 bg-ai/10 px-3 py-3.5 text-center transition-colors hover:border-ai hover:bg-ai/15 sm:flex-row sm:justify-start sm:gap-3 sm:text-left"
+              className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 px-3 py-3.5 text-center sm:flex-row sm:justify-start sm:gap-3 sm:text-left"
             >
               <GatherContextIcon />
               <span className="text-base font-semibold leading-tight text-ai">Tell your story</span>
             </button>
+              <div className="border-t border-ai/30 px-3 py-2.5 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                <label className={`flex cursor-pointer items-center gap-2 font-semibold text-ai ${documentBusy ? "opacity-60" : ""}`}>
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    disabled={documentBusy || !session}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      event.target.value = ""
+                      if (file) void changeDocument((current) => uploadSessionDocument(auth!, current, file), "Reading the document...")
+                    }}
+                    className="sr-only"
+                  />
+                  {documentBusy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <FileText className="size-4" aria-hidden="true" />}
+                  Add a PDF document (e.g. a CV)
+                </label>
+                <button
+                  type="button"
+                  aria-label="About PDF documents and personal data"
+                  aria-expanded={documentInfoOpen}
+                  onClick={() => setDocumentInfoOpen((open) => !open)}
+                  className="cursor-pointer text-ai hover:text-ai/80"
+                >
+                  <Info className="size-4" aria-hidden="true" />
+                </button>
+                </div>
+                {documentInfoOpen && (
+                  <p className="mt-1.5 text-muted-foreground">
+                    Only the text of the PDF is read; the file is not kept. Emails, phone numbers, links and bank numbers are removed automatically; addresses and names are not. The rest is sent to the AI provider to find facts. Avoid documents with private data the post does not need.
+                  </p>
+                )}
+                {Object.keys(session?.document_texts || {}).map((name) => (
+                  <div key={name} className="mt-1.5 flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate" title={name}>{name}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${name}`}
+                      disabled={documentBusy}
+                      onClick={() => void changeDocument((current) => removeSessionDocument(auth!, current, name), "Removing the document...")}
+                      className="cursor-pointer text-muted-foreground hover:text-destructive disabled:opacity-50"
+                    >
+                      <Trash2 className="size-3.5" aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
           <div className="max-lg:hidden">{extractFactsButton}</div>
 
