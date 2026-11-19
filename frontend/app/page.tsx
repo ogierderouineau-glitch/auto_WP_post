@@ -89,6 +89,7 @@ function factHasValue(value: unknown) {
 export default function Page() {
   const [screen, setScreen] = useState<Screen>("media")
   const [screenReady, setScreenReady] = useState(false)
+  const [jumpToMetadata, setJumpToMetadata] = useState(false)
   const [authReady, setAuthReady] = useState(false)
   const [auth, setAuth] = useState<AuthResult | null>(null)
   const [workbook, setWorkbook] = useState<WorkbookStatus | null>(null)
@@ -665,6 +666,8 @@ export default function Page() {
             onExtractFacts={() => setAgentSubmitRequest((request) => request + 1)}
             extractFactsLoading={agentSubmitting}
             pictureTranscriptSavingImmediately={pictureTranscriptSavingImmediately}
+            jumpToMetadata={jumpToMetadata}
+            onJumpHandled={() => setJumpToMetadata(false)}
           />
         ) : screen === "facts" ? (
           <FactsScreen
@@ -705,6 +708,7 @@ export default function Page() {
             onSeoRevisionInstructionChange={setSeoRevisionInstruction}
             onSelectedLinksChange={setContentSelectedLinks}
             onBackToKeywords={() => setScreen("keywords")}
+            onOpenMetadata={() => { setJumpToMetadata(true); setScreen("media") }}
             onContinueToWordPress={() => setScreen("wordpress")}
           />
         )}

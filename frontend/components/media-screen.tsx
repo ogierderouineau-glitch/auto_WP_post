@@ -433,6 +433,8 @@ export function MediaScreen({
   onExtractFacts,
   extractFactsLoading,
   pictureTranscriptSavingImmediately,
+  jumpToMetadata,
+  onJumpHandled,
 }: {
   auth: ApiClientOptions | null
   session: ContentSession | null
@@ -443,6 +445,8 @@ export function MediaScreen({
   onExtractFacts: () => void
   extractFactsLoading: boolean
   pictureTranscriptSavingImmediately: boolean
+  jumpToMetadata?: boolean
+  onJumpHandled?: () => void
 }) {
   const { confirm, warningDialog } = useActionWarning()
   const images = useMemo(() => (session ? sessionImages(session) : []), [session])
@@ -709,6 +713,15 @@ export function MediaScreen({
   }
 
   const [transcriptHighlight, setTranscriptHighlight] = useState<{ mediaId: string | null; text: string } | null>(null)
+  // Arriving from the Content screen's Metadata pill: show the Metadata section (mobile) and scroll to it
+  // once the card exists (it needs a selected picture, which is chosen automatically after load).
+  useEffect(() => {
+    const card = document.getElementById("s2p-media-metadata-card")
+    if (!jumpToMetadata || !card) return
+    setMobileSection("metadata")
+    requestAnimationFrame(() => document.getElementById("s2p-media-metadata-card")?.scrollIntoView({ behavior: "smooth", block: "start" }))
+    onJumpHandled?.()
+  }, [jumpToMetadata, selectedMediaId, onJumpHandled])
   const highlightTranscript = !!transcriptHighlight && transcriptHighlight.mediaId === selectedMediaId && pictureTranscript.length <= transcriptHighlight.text.length
   useEffect(() => {
     if (transcriptHighlight && (transcriptHighlight.mediaId !== selectedMediaId || pictureTranscript.length > transcriptHighlight.text.length)) setTranscriptHighlight(null)
@@ -1774,7 +1787,7 @@ export function MediaScreen({
           </details>
           </div>
 
-          <div className={`self-start rounded-xl border border-border bg-card p-4 lg:col-start-2 lg:row-start-2 lg:mt-0 ${hiddenOnMobile("metadata")}`}>
+          <div id="s2p-media-metadata-card" className={`scroll-mt-28 self-start rounded-xl border border-border bg-card p-4 lg:col-start-2 lg:row-start-2 lg:mt-0 ${hiddenOnMobile("metadata")}`}>
             <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
               <FileText className="size-4 text-muted-foreground" aria-hidden="true" />
               {selectedVideo ? "Video metadata" : "Image metadata - Will be generated with the content draft"}

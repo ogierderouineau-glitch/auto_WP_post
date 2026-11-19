@@ -311,6 +311,7 @@ export function ContentScreen({
   onRevisionFieldIdsChange,
   onSelectedLinksChange,
   onBackToKeywords,
+  onOpenMetadata,
   onContinueToWordPress,
   onOpenAgent,
   onSeoRevisionInstructionChange,
@@ -322,6 +323,7 @@ export function ContentScreen({
   onRevisionFieldIdsChange: (fieldIds: string[]) => void
   onSelectedLinksChange: (links: Record<string, string>[]) => void
   onBackToKeywords: () => void
+  onOpenMetadata: () => void
   onContinueToWordPress: () => void
   onOpenAgent: () => void
   onSeoRevisionInstructionChange: (instruction: string) => void
@@ -923,10 +925,22 @@ export function ContentScreen({
                   <button
                     id="s2p-content-filter-internal-links"
                     type="button"
-                    onClick={() => document.getElementById("s2p-content-internal-links")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    onClick={() => {
+                      const panel = document.getElementById("s2p-content-internal-links") as HTMLDetailsElement | null
+                      if (panel) panel.open = true
+                      panel?.scrollIntoView({ behavior: "smooth", block: "start" })
+                    }}
                     className="rounded-full border border-confirm/40 bg-confirm/10 px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-confirm/20"
                   >
                     Internal links ({linkCandidates.length})
+                  </button>
+                  <button
+                    id="s2p-content-filter-metadata"
+                    type="button"
+                    onClick={onOpenMetadata}
+                    className="rounded-full border border-pink-500/40 bg-pink-500/10 px-3 py-1.5 text-xs font-semibold text-pink-700 transition-colors hover:bg-pink-500/20 dark:text-pink-300"
+                  >
+                    Media metadata ({(session?.image_refs.length ?? 0) + (session?.video_refs?.length ?? 0)})
                   </button>
                   <button
                     id="s2p-content-toggle-all-revision-fields"
