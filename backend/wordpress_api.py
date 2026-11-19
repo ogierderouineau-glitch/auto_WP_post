@@ -482,6 +482,7 @@ def find_linked_posts(spec: dict[str, str], name: str) -> tuple[list[dict[str, A
     spec: taxonomy means the target post carries `name` as a term of that taxonomy, and the post
     types searched are the ones WordPress lists for that taxonomy (attachments excluded) unless
     rest_base is given; category (name) limits the posts and exclude_category leaves some out.
+    When several posts carry the term, those titled with the name (as below) are preferred.
     Without taxonomy the post title is matched (accents/case ignored; "Markus" also matches
     "Markus Müller", an exact title wins).
     """
@@ -519,10 +520,15 @@ def find_linked_posts(spec: dict[str, str], name: str) -> tuple[list[dict[str, A
             {"id": int(post["id"]), "title": html.unescape(str((post.get("title") or {}).get("rendered") or ""))}
             for post in posts
         ]
+    wanted = normalized_term_key(name)
+    exact = [post for post in found if normalized_term_key(post["title"]) == wanted]
+    by_title = exact or [post for post in found if normalized_term_key(post["title"]).startswith(wanted + " ")]
     if not spec.get("taxonomy"):
-        wanted = normalized_term_key(name)
-        exact = [post for post in found if normalized_term_key(post["title"]) == wanted]
-        found = exact or [post for post in found if normalized_term_key(post["title"]).startswith(wanted + " ")]
+        found = by_title
+    elif len(found) > 1 and by_title:
+        # Several posts carry the term (e.g. the person's profile and an event they worked): the one
+        # titled with the name is the target. Without a title match we keep all and the user chooses.
+        found = by_title
     if found:
         return found, ""
     where = ", ".join(collections)

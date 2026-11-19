@@ -123,7 +123,7 @@ field (text split on `;` and `,`, or a list) into IDs with `find_linked_posts`
 `lookup:taxonomy=highlight` on `video_highlights`). The name is matched to a term of that
 taxonomy (existing `match_registered_term`, so accents/case and close spellings work as for
 taxonomy assignment); the published posts carrying the term are the candidates, optionally
-limited to `category`. The post types searched are the ones WordPress lists for the taxonomy
+limited to `category`. When several posts carry the term, the ones titled with the name (exact, or starting with it plus a space) are preferred, so a profile is picked over an event post tagged with the same person; without such a title match all stay and the user chooses. The post types searched are the ones WordPress lists for the taxonomy
 (`/wp/v2/taxonomies`, attachments excluded; `type=` in the rule overrides this), so taxonomies of
 custom post types work without configuration. A "not found" warning says which step failed
 (term missing, or term found but no published post carries it). Posts of the kind being published (the current post type's

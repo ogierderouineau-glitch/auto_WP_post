@@ -50,6 +50,16 @@ class FindLinkedPostsTests(unittest.TestCase):
         self.assertEqual((params["categories"], params["barkeeper"]), (7, 44))
         self.assertNotIn("search", params)
 
+    def test_several_posts_with_the_term_narrow_to_the_one_titled_with_the_name(self) -> None:
+        both = {"posts": [post(1, "Ana Silva"), post(2, "Garden party in Lyon")]}
+        (posts, _), _ = self.lookup({"taxonomy": "barkeeper"}, "Ana", both, terms=[{"id": 5, "name": "Ana", "slug": "ana"}])
+        self.assertEqual([m["id"] for m in posts], [1])
+
+    def test_several_posts_without_a_title_match_are_all_kept(self) -> None:
+        both = {"posts": [post(1, "Roof party in Rome"), post(2, "Garden party in Lyon")]}
+        (posts, _), _ = self.lookup({"taxonomy": "barkeeper"}, "Ana", both, terms=[{"id": 5, "name": "Ana", "slug": "ana"}])
+        self.assertEqual([m["id"] for m in posts], [1, 2])
+
     def test_posts_of_the_published_kind_are_excluded(self) -> None:
         spec = {"taxonomy": "barkeeper", "exclude_category": "auto video post"}
         (posts, _), request_json = self.lookup(spec, "João", {"posts": [post(8, "Dampf-Highlight")]}, category={"id": 3})
