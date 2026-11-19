@@ -1,0 +1,778 @@
+"use client"
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Check,
+  FilePlus2,
+  Mic,
+  ChevronDown,
+  Image as ImageIcon,
+  FileText,
+  Newspaper,
+  Wrench,
+  SlidersHorizontal,
+  Tags,
+} from "lucide-react"
+import { SessionName } from "@/components/session-name"
+import { MediaScreen } from "@/components/media-screen"
+import { FactsScreen } from "@/components/facts-screen"
+import { ContentScreen } from "@/components/content-screen"
+import { KeywordsScreen } from "@/components/keywords-screen"
+import { WordPressScreen } from "@/components/wordpress-screen"
+import { ApiError } from "@/lib/api"
+import { AuthModal, type AuthResult } from "@/components/auth-modal"
+import { SessionModal } from "@/components/session-modal"
+import { RecordingWidget } from "@/components/recording-widget"
+import { OtherFunctionsDrawer, type OperationLogEntry } from "@/components/other-functions-drawer"
+import {
+  saveSessionName,
+  createContentSession,
+  deleteContentSession,
+  loadContentSession,
+  loadRecentContentSessions,
+  loadWorkbook,
+  saveSessionImageContextTranscript,
+  saveSessionVideoMetadata,
+  uploadKnowledgeWorkbook,
+  downloadKnowledgeWorkbook,
+  validateImportKey,
+  type ContentSession,
+  type RecentSession,
+  type SelectedMediaContext,
+  type WorkbookStatus,
+} from "@/lib/content-sessions"
+
+type Screen = "media" | "facts" | "keywords" | "content" | "wordpress"
+
+const STORAGE_API_KEY = "speech2post_import_key"
+const STORAGE_SESSION_ID = "speech2post_session_id"
+const STORAGE_SCREEN = "speech2post_active_screen"
+
+const STEPS = [
+  { id: "media" as const, label: "Media", icon: ImageIcon },
+  { id: "facts" as const, label: "Facts", icon: FileText },
+  { id: "keywords" as const, label: "Keywords", icon: Tags },
+  { id: "content" as const, label: "Content", icon: Newspaper },
+  { id: "wordpress" as const, label: "WordPress", icon: Wrench },
+]
+
+const ORDER: Screen[] = ["media", "facts", "keywords", "content", "wordpress"]
+
+function isScreen(value: string | null): value is Screen {
+  return !!value && ORDER.includes(value as Screen)
+}
+
+function appendText(current: string, next: string) {
+  const cleanCurrent = current.trim()
+  const cleanNext = next.trim()
+  if (!cleanCurrent) return cleanNext
+  if (!cleanNext) return cleanCurrent
+  return `${cleanCurrent}\n\n${cleanNext}`
+}
+
+function MetaChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-1.5 rounded-md bg-white/5 px-2.5 py-1 text-xs">
+      <span className="text-topbar-foreground/55">{label}</span>
+      <span className="font-medium text-topbar-foreground">{value}</span>
+    </div>
+  )
+}
+
+function factHasValue(value: unknown) {
+  if (value == null) return false
+  if (typeof value === "string") return value.trim() !== ""
+  if (Array.isArray(value)) return value.length > 0
+  return true
+}
+
+export default function Page() {
+  const [screen, setScreen] = useState<Screen>("media")
+  const [screenReady, setScreenReady] = useState(false)
+  const [jumpToMetadata, setJumpToMetadata] = useState(false)
+  const [authReady, setAuthReady] = useState(false)
+  const [auth, setAuth] = useState<AuthResult | null>(null)
+  const [workbook, setWorkbook] = useState<WorkbookStatus | null>(null)
+  const [session, setSession] = useState<ContentSession | null>(null)
+  const [recentSessions, setRecentSessions] = useState<RecentSession[]>([])
+  const [sessionModalOpen, setSessionModalOpen] = useState(false)
+  const [otherFunctionsOpen, setOtherFunctionsOpen] = useState(false)
+  const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false)
+  const [agentOpen, setAgentOpen] = useState(false)
+  const [agentSubmitRequest, setAgentSubmitRequest] = useState(0)
+  const [agentSubmitting, setAgentSubmitting] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [statusText, setStatusText] = useState("Starting")
+  const [error, setError] = useState("")
+  const [operationLog, setOperationLog] = useState<OperationLogEntry[]>([])
+  const [selectedMedia, setSelectedMedia] = useState<SelectedMediaContext | null>(null)
+  const [pictureTranscript, setPictureTranscript] = useState("")
+  const [pictureTranscriptDrafts, setPictureTranscriptDrafts] = useState<Record<string, string>>({})
+  const [pictureTranscriptSavingImmediately, setPictureTranscriptSavingImmediately] = useState(false)
+  const [selectedFactKeys, setSelectedFactKeys] = useState<string[] | null>(null)
+  const [contentRevisionFieldIds, setContentRevisionFieldIds] = useState<string[]>([])
+  const [seoRevisionInstruction, setSeoRevisionInstruction] = useState("")
+  const [contentSelectedLinks, setContentSelectedLinks] = useState<Record<string, string>[]>([])
+  const sessionRef = useRef<ContentSession | null>(null)
+  const pictureTranscriptRef = useRef("")
+  const pictureSaveQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const immediatePictureSaves = useRef(0)
+
+  const apiAuth = useMemo(
+    () => (auth ? { apiKey: auth.apiKey, userId: auth.userId } : null),
+    [auth],
+  )
+
+  const selectedPostType = session?.post_type_key || workbook?.selected_post_type_key || workbook?.post_types[0]?.post_type_key || ""
+  const selectedPostTypeLabel =
+    workbook?.post_types.find((item) => item.post_type_key === selectedPostType)?.display_name_de ||
+    selectedPostType ||
+    "-"
+  const selectedPostTypeVoiceInstructions =
+    workbook?.post_types.find((item) => item.post_type_key === selectedPostType)?.voice_instructions || ""
+  const contentQualityRevisionInstruction = useMemo(() => {
+    const report = session?.generation_trace?.quality_check
+    if (!report || typeof report !== "object" || Array.isArray(report)) return ""
+    const findings = Array.isArray((report as Record<string, unknown>).findings)
+      ? (report as Record<string, unknown>).findings as Record<string, unknown>[]
+      : []
+    const selected = findings.filter((finding) =>
+      contentRevisionFieldIds.includes(String(finding.field_id || "")),
+    )
+    if (!selected.length) return ""
+    return [
+      "Improve the selected fields using the saved quality-check findings below. "
+        + "Address only these findings, preserve confirmed facts, HTML structure, links, field constraints, and the intended meaning.",
+      ...selected.map((finding) =>
+        `${String(finding.field_id || "field")}: ${String(finding.explanation || "")} Suggested direction: ${String(finding.suggestion || "")}`,
+      ),
+    ].join("\n")
+  }, [contentRevisionFieldIds, session?.generation_trace])
+  const selectedPostTypeFactDescriptions = (workbook?.fact_schema || [])
+    .map((field) => field.description_de || field.label)
+    .filter(Boolean)
+  const availableFactKeys = (workbook?.fact_schema || []).map((field) => field.field_key)
+  const emptyFactKeys = availableFactKeys.filter((key) => {
+    const fact = session?.confirmed_facts?.[key] || session?.extracted_facts?.[key]
+    return !factHasValue(fact?.value)
+  })
+  const factsSelectedForReview = selectedFactKeys ?? emptyFactKeys
+
+  useEffect(() => {
+    setSelectedFactKeys(null)
+  }, [session?.session_id, workbook?.selected_post_type_key])
+
+  // The SEO revision text belongs to one draft version; clear it once the draft changes.
+  useEffect(() => {
+    setSeoRevisionInstruction("")
+  }, [session?.session_id, session?.version])
+
+  useEffect(() => {
+    if (!session) return
+
+    const guardStateKey = "speech2post_navigation_guard"
+    const allowNavigation = { current: false }
+    const currentState = window.history.state as Record<string, unknown> | null
+    if (currentState?.[guardStateKey] !== true) {
+      window.history.pushState(
+        { ...(currentState || {}), [guardStateKey]: true },
+        "",
+        window.location.href,
+      )
+    }
+
+    const confirmLeaving = () => window.confirm(
+      "Leave SPEECH2POST? Make sure the current operation has finished before navigating away.",
+    )
+
+    const handlePopState = () => {
+      if (allowNavigation.current) return
+      if (confirmLeaving()) {
+        allowNavigation.current = true
+        window.history.back()
+        return
+      }
+      window.history.pushState(
+        { ...(window.history.state || {}), [guardStateKey]: true },
+        "",
+        window.location.href,
+      )
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (allowNavigation.current) return
+      event.preventDefault()
+      event.returnValue = ""
+    }
+
+    window.addEventListener("popstate", handlePopState)
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => {
+      window.removeEventListener("popstate", handlePopState)
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+    }
+  }, [session?.session_id])
+
+  const completedSteps = useMemo(
+    () => ({
+      media: (session?.image_refs?.length || 0) > 0,
+      facts: !!session && ["ready_to_generate", "needs_review", "ready_to_publish", "published"].includes(session.state),
+      keywords: (session?.selected_keywords?.length || 0) > 0,
+      content: !!session?.approval.approved,
+      wordpress: false,
+    }),
+    [session],
+  )
+
+  const stepStatus = (id: Screen): "completed" | "active" | "inactive" => {
+    if (id === screen) return "active"
+    return completedSteps[id] ? "completed" : "inactive"
+  }
+
+  const navigable = (id: Screen) => !!session && ORDER.includes(id)
+
+  function addOperation(label: string, detail: string, status: OperationLogEntry["status"] = "info") {
+    setOperationLog((current) => [
+      {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        label,
+        detail,
+        status,
+        at: new Date().toISOString(),
+      },
+      ...current,
+    ].slice(0, 30))
+  }
+
+  const handleSessionChange = useCallback((nextSession: ContentSession) => {
+    sessionRef.current = nextSession
+    setSession(nextSession)
+    setRecentSessions((current) => current.map((item) => item.session_id === nextSession.session_id ? { ...item, name: nextSession.name } : item))
+    sessionStorage.setItem(STORAGE_SESSION_ID, nextSession.session_id)
+    setStatusText(`Session ${nextSession.state}`)
+  }, [])
+
+  async function refreshRecent(nextAuth = apiAuth) {
+    if (!nextAuth) return
+    const data = await loadRecentContentSessions(nextAuth)
+    setRecentSessions(data.sessions || [])
+  }
+
+  async function bootstrap(result: AuthResult) {
+    const nextAuth = { apiKey: result.apiKey, userId: result.userId }
+    setLoading(true)
+    setError("")
+    try {
+      const nextWorkbook = await loadWorkbook(nextAuth)
+      setWorkbook(nextWorkbook)
+      await refreshRecent(nextAuth)
+
+      const storedSessionId = sessionStorage.getItem(STORAGE_SESSION_ID)
+      if (storedSessionId) {
+        try {
+          const data = await loadContentSession(nextAuth, storedSessionId)
+          handleSessionChange(data.session)
+          setSessionModalOpen(false)
+          setStatusText("Session restored")
+          return
+        } catch {
+          sessionStorage.removeItem(STORAGE_SESSION_ID)
+        }
+      }
+      setSessionModalOpen(true)
+      setStatusText("Connected")
+      addOperation("Workspace connected", result.userId, "success")
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not load workspace.")
+      setSessionModalOpen(true)
+      setStatusText("Connection issue")
+      addOperation("Connection issue", error instanceof Error ? error.message : "Could not load workspace.", "error")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    const storedScreen = sessionStorage.getItem(STORAGE_SCREEN)
+    if (isScreen(storedScreen)) setScreen(storedScreen)
+    setScreenReady(true)
+  }, [])
+
+  useEffect(() => {
+    if (screenReady) sessionStorage.setItem(STORAGE_SCREEN, screen)
+  }, [screen, screenReady])
+
+  useEffect(() => {
+    let active = true
+
+    async function restoreAuth() {
+      const apiKey = sessionStorage.getItem(STORAGE_API_KEY) || ""
+      if (!apiKey) {
+        if (active) {
+          setAuthReady(true)
+          setStatusText("No access key")
+        }
+        return
+      }
+      try {
+        const data = await validateImportKey({ apiKey, userId: "" })
+        const client = data.clients[0]
+        if (!client) throw new Error("No configured client was returned.")
+        const result = { apiKey, userId: client.client_id, client }
+        if (!active) return
+        setAuth(result)
+        setAuthReady(true)
+        await bootstrap(result)
+      } catch (error) {
+        // Only a rejected key means "log in again"; a server hiccup must not throw the key away.
+        const keyRejected = error instanceof ApiError && error.status === 401
+        if (keyRejected) {
+          sessionStorage.removeItem(STORAGE_API_KEY)
+          sessionStorage.removeItem(STORAGE_SESSION_ID)
+        }
+        if (active) {
+          setAuthReady(true)
+          setStatusText(keyRejected ? "Login required" : "Server unavailable, reload in a minute")
+        }
+      }
+    }
+
+    void restoreAuth()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!apiAuth || !session?.post_type_key) return
+    const nextAuth = apiAuth
+    const postTypeKey = session.post_type_key
+    let active = true
+
+    async function refreshWorkbookForSession() {
+      try {
+        const nextWorkbook = await loadWorkbook(nextAuth, postTypeKey)
+        if (active) setWorkbook(nextWorkbook)
+      } catch (error) {
+        if (active) setError(error instanceof Error ? error.message : "Could not load post type schema.")
+      }
+    }
+
+    void refreshWorkbookForSession()
+    return () => {
+      active = false
+    }
+  }, [apiAuth, session?.post_type_key, session?.workbook_hash])
+
+  useEffect(() => {
+    setSelectedMedia(null)
+    pictureTranscriptRef.current = ""
+    setPictureTranscript("")
+    setPictureTranscriptDrafts({})
+  }, [session?.session_id])
+
+  async function handleAuthenticated(result: AuthResult) {
+    sessionStorage.setItem(STORAGE_API_KEY, result.apiKey)
+    setAuth(result)
+    await bootstrap(result)
+  }
+
+  async function handleCreateSession(postTypeKey: string) {
+    if (!apiAuth) return
+    setLoading(true)
+    setError("")
+    try {
+      const data = await createContentSession(apiAuth, postTypeKey)
+      handleSessionChange(data.session)
+      sessionStorage.setItem(STORAGE_SESSION_ID, data.session.session_id)
+      setSessionModalOpen(false)
+      setScreen("media")
+      setStatusText("Session created")
+      addOperation("Session created", `${data.session.session_id.slice(0, 8)} · ${postTypeKey}`, "success")
+      await refreshRecent(apiAuth)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not create session.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleLoadSession(sessionId: string) {
+    if (!apiAuth) return
+    setLoading(true)
+    setError("")
+    try {
+      const data = await loadContentSession(apiAuth, sessionId)
+      handleSessionChange(data.session)
+      sessionStorage.setItem(STORAGE_SESSION_ID, data.session.session_id)
+      setSessionModalOpen(false)
+      setScreen("media")
+      setStatusText("Session loaded")
+      addOperation("Session loaded", sessionId.slice(0, 8), "success")
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not load session.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleDeleteSession(sessionId: string) {
+    if (!apiAuth) return
+    setLoading(true)
+    setError("")
+    try {
+      const result = await deleteContentSession(apiAuth, sessionId)
+      if (!result.deleted_ids.includes(sessionId)) {
+        throw new Error(result.errors[sessionId] || "The session could not be deleted.")
+      }
+      if (session?.session_id === sessionId) {
+        sessionRef.current = null
+        setSession(null)
+        sessionStorage.removeItem(STORAGE_SESSION_ID)
+        setStatusText("Session deleted")
+      }
+      await refreshRecent(apiAuth)
+      addOperation("Session deleted", sessionId.slice(0, 8), "success")
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not delete session.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleReloadSession() {
+    if (!apiAuth || !session) return
+    setLoading(true)
+    setError("")
+    try {
+      const data = await loadContentSession(apiAuth, session.session_id)
+      handleSessionChange(data.session)
+      addOperation("Session reloaded", data.session.session_id.slice(0, 8), "success")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not reload session."
+      setError(message)
+      addOperation("Session reload failed", message, "error")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handlePictureTranscriptChange = useCallback((value: string) => {
+    pictureTranscriptRef.current = value
+    setPictureTranscript(value)
+    setPictureTranscriptDrafts((current) => {
+      if (!selectedMedia?.mediaId) return current
+      return { ...current, [selectedMedia.mediaId]: value }
+    })
+  }, [selectedMedia?.mediaId])
+
+  const handlePictureTranscriptAppend = useCallback((text: string) => {
+    if (!apiAuth || !selectedMedia?.mediaId) {
+      return Promise.reject(new Error("Select a picture or video before recording."))
+    }
+
+    const media = selectedMedia
+    const next = appendText(pictureTranscriptRef.current, text)
+    pictureTranscriptRef.current = next
+    setPictureTranscript(next)
+    setPictureTranscriptDrafts((drafts) => ({ ...drafts, [media.mediaId]: next }))
+
+    // Pending pictures already have a local record. MediaScreen carries this
+    // transcript into the real session image as soon as its upload completes.
+    if (media.mediaId.startsWith("pending-")) return Promise.resolve()
+
+    immediatePictureSaves.current += 1
+    setPictureTranscriptSavingImmediately(true)
+
+    const save = pictureSaveQueue.current.then(async () => {
+      const currentSession = sessionRef.current
+      if (!currentSession) throw new Error("The active session is no longer available.")
+      const data = media.kind === "video"
+        ? await saveSessionVideoMetadata(
+            apiAuth,
+            currentSession,
+            media.filename,
+            currentSession.video_metadata.find((item) => String(item.media_id || "") === media.mediaId) || {},
+            next,
+          )
+        : await saveSessionImageContextTranscript(apiAuth, currentSession, media.filename, next)
+      handleSessionChange(data.session)
+    })
+    pictureSaveQueue.current = save.catch(() => undefined)
+
+    return save.finally(() => {
+      immediatePictureSaves.current -= 1
+      if (!immediatePictureSaves.current) setPictureTranscriptSavingImmediately(false)
+    })
+  }, [apiAuth, selectedMedia])
+
+  function handleSelectedMediaChange(media: SelectedMediaContext | null) {
+    setSelectedMedia(media)
+    if (!media || !session) {
+      pictureTranscriptRef.current = ""
+      setPictureTranscript("")
+      return
+    }
+    const nextTranscript =
+      Object.prototype.hasOwnProperty.call(pictureTranscriptDrafts, media.mediaId)
+        ? pictureTranscriptDrafts[media.mediaId]
+        : String((
+            media.kind === "video"
+              ? session.video_context_transcripts
+              : session.image_context_transcripts
+          )?.[media.mediaId] || "")
+    pictureTranscriptRef.current = nextTranscript
+    setPictureTranscript(nextTranscript)
+  }
+
+  return (
+    <div className="min-h-dvh w-full overflow-x-clip bg-background text-foreground">
+      {authReady && !auth && <AuthModal onAuthenticated={handleAuthenticated} />}
+      {auth && sessionModalOpen && (
+        <SessionModal
+          postTypes={workbook?.post_types || []}
+          selectedPostType={selectedPostType}
+          activeSessionId={session?.session_id}
+          recentSessions={recentSessions}
+          loading={loading}
+          error={error}
+          onCreate={handleCreateSession}
+          onLoad={handleLoadSession}
+          onDelete={handleDeleteSession}
+          onRefresh={() => void refreshRecent()}
+          onClose={() => setSessionModalOpen(false)}
+        />
+      )}
+      {/* ===================== TOP BAR ===================== */}
+      <div className="sticky top-0 z-40">
+        <header className="bg-topbar text-topbar-foreground">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 sm:px-4">
+          <div className="flex items-center gap-2">
+            <div className="flex size-7 items-center justify-center rounded-md bg-gold text-gold-foreground">
+              <Mic className="size-4" aria-hidden="true" />
+            </div>
+            <span className="text-sm font-semibold tracking-tight sm:text-base">SPEECH2POST</span>
+          </div>
+
+          {/* On mobile these chips sit on their own row and are toggled by the chevron button; on desktop they stay inline. */}
+          <div className={`${mobileDetailsOpen ? "flex" : "hidden"} order-last w-full flex-wrap items-center gap-1.5 lg:order-none lg:ml-1 lg:flex lg:w-auto`}>
+            <MetaChip label="Client:" value={auth?.client.client_id || "-"} />
+            {session ? <SessionName key={session.session_id} sessionId={session.session_id} name={session.name} onSave={async (name) => {
+              if (!apiAuth) return
+              const data = await saveSessionName(apiAuth, sessionRef.current || session, name)
+              handleSessionChange(data.session)
+            }} /> : <MetaChip label="Session:" value="-" />}
+            <MetaChip label="Post type:" value={selectedPostTypeLabel} />
+          </div>
+
+          <div className="ml-auto flex items-center gap-2">
+            <span className="hidden items-center gap-1.5 rounded-md bg-confirm/15 px-2 py-1 text-xs font-medium text-topbar-foreground sm:inline-flex">
+              <Check className="size-3.5 text-confirm" aria-hidden="true" />
+              {loading ? "Loading" : statusText}
+            </span>
+            <button
+              id="s2p-header-new-session"
+              type="button"
+              onClick={() => auth && setSessionModalOpen(true)}
+              aria-label="New session"
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-white/5 px-2 text-xs font-semibold transition-colors hover:bg-white/10 sm:px-2.5"
+            >
+              <FilePlus2 className="size-4" aria-hidden="true" />
+              <span className="hidden sm:inline">New session</span>
+            </button>
+            <button
+              id="s2p-header-other-functions"
+              type="button"
+              onClick={() => setOtherFunctionsOpen(true)}
+              className="flex size-8 items-center justify-center rounded-md bg-white/5 transition-colors hover:bg-white/10"
+              aria-label="Open other functions"
+            >
+              <SlidersHorizontal className="size-4" aria-hidden="true" />
+            </button>
+            <button
+              id="s2p-header-session-details"
+              type="button"
+              onClick={() => setMobileDetailsOpen((open) => !open)}
+              className="flex size-8 items-center justify-center rounded-md bg-white/5 transition-colors hover:bg-white/10 lg:hidden"
+              aria-label="Show session details"
+              aria-expanded={mobileDetailsOpen}
+            >
+              <ChevronDown className={`size-4 transition-transform ${mobileDetailsOpen ? "rotate-180" : ""}`} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+
+        </header>
+
+        {/* ===================== WORKFLOW STEPS ===================== */}
+        <nav aria-label="Workflow steps" className="border-b border-border bg-panel">
+        <div className="mx-auto flex max-w-7xl items-center gap-2 overflow-x-auto px-3 py-2.5 sm:px-4">
+          {STEPS.map((step, i) => {
+            const status = stepStatus(step.id)
+            const canNavigate = navigable(step.id)
+            return (
+              <div key={step.id} className="flex items-center gap-2">
+                <button
+                  id={`s2p-workflow-step-${step.id}`}
+                  type="button"
+                  onClick={() => canNavigate && setScreen(step.id)}
+                  disabled={!canNavigate}
+                  aria-current={status === "active" ? "step" : undefined}
+                  className={[
+                    "flex items-center gap-2 rounded-md px-3 py-2 text-sm whitespace-nowrap transition-colors",
+                    status === "active"
+                      ? "bg-gold/15 font-semibold text-foreground ring-1 ring-gold/40"
+                      : status === "completed"
+                        ? "text-foreground hover:bg-muted"
+                        : "text-muted-foreground",
+                    !canNavigate ? "cursor-not-allowed" : "cursor-pointer",
+                  ].join(" ")}
+                >
+                  <span
+                    className={[
+                      "flex size-5 items-center justify-center rounded-full text-[11px] font-semibold",
+                      status === "active"
+                        ? "bg-gold text-gold-foreground"
+                        : status === "completed"
+                          ? "bg-confirm text-confirm-foreground"
+                          : "bg-muted text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    {status === "completed" ? <Check className="size-3" aria-hidden="true" /> : i + 1}
+                  </span>
+                  <step.icon className="size-4" aria-hidden="true" />
+                  {step.label}
+                </button>
+                {i < STEPS.length - 1 && <span className="h-px w-4 shrink-0 bg-border" aria-hidden="true" />}
+              </div>
+            )
+          })}
+        </div>
+        </nav>
+      </div>
+
+      {/* ===================== MAIN WORKSPACE ===================== */}
+      <main className="mx-auto max-w-7xl px-3 py-4 sm:px-4">
+        {!authReady ? (
+          <div className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">Loading workspace…</div>
+        ) : screen === "media" ? (
+          <MediaScreen
+            auth={apiAuth}
+            session={session}
+            onSessionChange={handleSessionChange}
+            pictureTranscript={pictureTranscript}
+            onPictureTranscriptChange={handlePictureTranscriptChange}
+            onSelectedMediaChange={handleSelectedMediaChange}
+            onExtractFacts={() => setAgentSubmitRequest((request) => request + 1)}
+            extractFactsLoading={agentSubmitting}
+            pictureTranscriptSavingImmediately={pictureTranscriptSavingImmediately}
+            jumpToMetadata={jumpToMetadata}
+            onJumpHandled={() => setJumpToMetadata(false)}
+          />
+        ) : screen === "facts" ? (
+          <FactsScreen
+            auth={apiAuth}
+            session={session}
+            workbook={workbook}
+            onSessionChange={handleSessionChange}
+            onBackToMedia={() => setScreen("media")}
+            onContinueToContent={() => setScreen("keywords")}
+            selectedFactKeys={factsSelectedForReview}
+            onSelectedFactKeysChange={setSelectedFactKeys}
+          />
+        ) : screen === "keywords" ? (
+          <KeywordsScreen
+            key={session?.session_id}
+            auth={apiAuth}
+            session={session}
+            onSessionChange={handleSessionChange}
+            onBackToFacts={() => setScreen("facts")}
+            onContinueToContent={() => setScreen("content")}
+          />
+        ) : screen === "wordpress" ? (
+          <WordPressScreen
+            auth={apiAuth}
+            session={session}
+            onSessionChange={handleSessionChange}
+            onBackToContent={() => setScreen("content")}
+            templateUrl={workbook?.post_types.find((item) => item.post_type_key === selectedPostType)?.single_template_url}
+          />
+        ) : (
+          <ContentScreen
+            auth={apiAuth}
+            session={session}
+            workbook={workbook}
+            onSessionChange={handleSessionChange}
+            onOpenAgent={() => setAgentOpen(true)}
+            onRevisionFieldIdsChange={setContentRevisionFieldIds}
+            onSeoRevisionInstructionChange={setSeoRevisionInstruction}
+            onSelectedLinksChange={setContentSelectedLinks}
+            onBackToKeywords={() => setScreen("keywords")}
+            onOpenMetadata={() => { setJumpToMetadata(true); setScreen("media") }}
+            onContinueToWordPress={() => setScreen("wordpress")}
+          />
+        )}
+      </main>
+      {auth && screen !== "wordpress" && screen !== "keywords" && (
+        <RecordingWidget
+          auth={apiAuth}
+          session={session}
+          activeScreen={screen}
+          open={agentOpen}
+          submitRequest={agentSubmitRequest}
+          onSubmittingChange={setAgentSubmitting}
+          onOpenChange={setAgentOpen}
+          onSessionChange={handleSessionChange}
+          onNavigateFacts={() => setScreen("facts")}
+          selectedFactKeys={factsSelectedForReview}
+          availableFactKeys={availableFactKeys}
+          onSelectedFactKeysChange={setSelectedFactKeys}
+          selectedPictureId={selectedMedia?.mediaId}
+          selectedContentFieldIds={contentRevisionFieldIds}
+          automaticContentRevisionInstruction={[contentQualityRevisionInstruction, seoRevisionInstruction].filter(Boolean).join("\n\n")}
+          selectedContentLinks={contentSelectedLinks}
+          postTypeLabel={selectedPostTypeLabel}
+          voiceInstructions={selectedPostTypeVoiceInstructions}
+          factDescriptions={selectedPostTypeFactDescriptions}
+          onPictureTranscriptAppend={handlePictureTranscriptAppend}
+          pulseMic={screen === "media" && !!selectedMedia && !pictureTranscript.trim()}
+        />
+      )}
+      <OtherFunctionsDrawer
+        open={otherFunctionsOpen}
+        auth={auth}
+        workbook={workbook}
+        session={session}
+        recentSessions={recentSessions}
+        loading={loading}
+        statusText={statusText}
+        error={error}
+        operationLog={operationLog}
+        onClose={() => setOtherFunctionsOpen(false)}
+        onRefreshRecent={() => void refreshRecent()}
+        onReloadSession={() => void handleReloadSession()}
+        onOpenSessionMenu={() => {
+          setOtherFunctionsOpen(false)
+          setSessionModalOpen(true)
+        }}
+        onLoadSession={(sessionId) => {
+          setOtherFunctionsOpen(false)
+          void handleLoadSession(sessionId)
+        }}
+        onDeleteSession={(sessionId) => void handleDeleteSession(sessionId)}
+        onSessionChange={handleSessionChange}
+        onUploadWorkbook={async (file) => {
+          if (!apiAuth) return
+          await uploadKnowledgeWorkbook(apiAuth, file, selectedPostType)
+          setWorkbook(await loadWorkbook(apiAuth, selectedPostType))
+          addOperation("Workbook updated", file.name, "success")
+        }}
+        onDownloadWorkbook={async () => {
+          if (!apiAuth) return
+          await downloadKnowledgeWorkbook(apiAuth)
+          addOperation("Workbook downloaded", workbook?.filename || "database-datei.xlsm", "success")
+        }}
+      />
+    </div>
+  )
+}

@@ -1,0 +1,60 @@
+services:
+  - type: web
+    name: speech2post-backend
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 120
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GOOGLE_CLOUD_PROJECT
+        value: auto-wordpress-post-499518
+      - key: GCS_DATA_BUCKET
+        value: auto-wordpress-post-499518-speech2post-data
+      - key: GCS_KNOWLEDGE_BUCKET
+        value: auto-wordpress-post-499518-speech2post-knowledge
+      - key: V2_LANGUAGE_MODEL
+        value: gpt-5.6
+      - key: V2_TEXT_REASONING_EFFORT
+        value: low
+      - key: V2_METADATA_MODEL
+        value: gpt-5-mini
+      - key: V2_REVISION_MODEL
+        value: gpt-5-mini
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        value: /etc/secrets/gcp-service-account.json
+      - key: V2_MAX_IMAGE_BYTES
+        value: "20971520"
+      - key: V2_MAX_AUDIO_BYTES
+        value: "26214400"
+      # Where error messages tell users to report bugs (clients-only Google Sheet).
+      - key: V2_SUPPORT_CONTACT
+        value: https://docs.google.com/spreadsheets/d/1dCOs0J_EMqTiLKkvK8cOJzJNCKpnbCDnqHouuSTQAo4/edit?usp=sharing
+
+  - type: web
+    name: speech2post-frontend
+    runtime: node
+    plan: free
+    region: frankfurt
+    rootDir: frontend
+    buildCommand: npm install --global pnpm@10.34.3 && pnpm install --frozen-lockfile && pnpm run typecheck && pnpm run build
+    startCommand: pnpm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 20.19.5
+      - key: NODE_ENV
+        value: production
+      - key: CI
+        value: "true"
+      # Same bug-tracker link as the backend's V2_SUPPORT_CONTACT; used by the "Bug tracker" button.
+      - key: NEXT_PUBLIC_BUG_TRACKER_URL
+        value: https://docs.google.com/spreadsheets/d/1dCOs0J_EMqTiLKkvK8cOJzJNCKpnbCDnqHouuSTQAo4/edit?usp=sharing
+      - key: SPEECH2POST_BACKEND_URL
+        fromService:
+          type: web
+          name: speech2post-backend
+          property: hostport

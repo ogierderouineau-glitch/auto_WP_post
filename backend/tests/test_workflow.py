@@ -1,0 +1,435 @@
+from __future__ import annotations
+
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from typing import Any
+
+from backend.app.knowledge_base.step_04_service import KnowledgeBaseService
+from backend.app.models.step_01_session import ContentSession
+from backend.app.models.step_02_payload import WordPressPayload
+from backend.app.providers.step_01_interfaces import WordPressProvider
+from backend.app.sessions.step_01_repository import FileSessionRepository
+from backend.app.sessions.step_03_service import ContentSessionService
+
+WORKBOOK = Path(
+    os.getenv(
+        "V2_TEST_WORKBOOK",
+        "data/knowledge/test-client.xlsm",
+    )
+)
+
+
+class FakeWordPressProvider(WordPressProvider):
+    def __init__(self) -> None:
+        self.calls = 0
+        self.payloads: list[WordPressPayload] = []
+        self.partial_update_fields: list[dict[str, set[str]] | None] = []
+
+    def publish(
+        self,
+        *,
+        session: ContentSession,
+        payload: WordPressPayload,
+        idempotency_key: str,
+        target_post_id: int | None = None,
+        force_create_new: bool = False,
+        partial_update_fields: dict[str, set[str]] | None = None,
+    ) -> dict[str, Any]:
+        del target_post_id, force_create_new
+        self.calls += 1
+        self.payloads.append(payload)
+        self.partial_update_fields.append(partial_update_fields)
+        return {
+            "post_id": 123,
+            "status": payload.wordpress.status,
+            "view_url": "https://staging.example/posts/123",
+            "edit_url": "https://staging.example/wp-admin/post.php?post=123&action=edit",
+            "idempotency_key": idempotency_key,
+        }
+
+
+@unittest.skipUnless(WORKBOOK.is_file(), f"V2 test workbook not found: {WORKBOOK}")
+class WorkflowTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.wordpress = FakeWordPressProvider()
+        self.knowledge = KnowledgeBaseService(WORKBOOK)
+        self.service = ContentSessionService(
+            knowledge=self.knowledge,
+            repository=FileSessionRepository(self.temporary.name),
+            wordpress=self.wordpress,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def test_complete_image_free_lifecycle_requires_approval(self) -> None:
+        session = self.service.create(user_id="user-1", post_type_key="event")
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        facts = {
+            row.field_key: self._value(row.value_type, row.min_words)
+            for row in snapshot.acf_fields
+            if row.enabled
+            and row.post_type_key == "event"
+            and row.field_role == "input_fact"
+            and row.required_for_analysis
+        }
+        session = self.service.add_inputs(
+            session.session_id,
+            manual_text="Confirmed event details.",
+            confirmed_facts=facts,
+            expected_version=session.version,
+        )
+        session = self.service.analyze(
+            session.session_id,
+            expected_version=session.version,
+        )
+        self.assertEqual(session.state, "ready_to_generate")
+
+        shared = {
+            row.field_key: self._value(
+                row.value_type,
+                row.min_words,
+                row.min_characters,
+            )
+            for row in snapshot.shared_fields
+            if row.enabled
+            and row.include_in_ai_schema
+        }
+        acf = {
+            row.field_key: self._value(row.value_type, row.min_words)
+            for row in snapshot.acf_fields
+            if row.enabled
+            and row.post_type_key == "event"
+            and row.field_role != "input_fact"
+            and row.required_for_output
+        }
+        eligible = self.service.internal_links.eligible(
+            snapshot,
+            post_type_key="event",
+            language="de-DE",
+            current_url=None,
+        )
+        selected = [
+            {"link_id": row.link_id, "anchor_text": row.anchor_text}
+            for row in eligible.candidates[:2]
+        ]
+        session = self.service.generate(
+            session.session_id,
+            shared_fields=shared,
+            acf_source_fields=acf,
+            selected_links=selected,
+            current_url=None,
+            expected_version=session.version,
+        )
+        self.assertEqual(session.state, "needs_review")
+        self.assertFalse(session.image_refs)
+        self.assertFalse(session.processed_images)
+        self.assertEqual(session.wordpress_payload["acf"]["hero_h1"], acf["hero_h1"])
+        self.assertEqual(session.wordpress_payload["acf"]["verlauf_h2"], acf["verlauf_h2"])
+
+        session = self.service.approve(
+            session.session_id,
+            user_id="user-1",
+            expected_version=session.version,
+        )
+        self.assertEqual(session.state, "ready_to_publish")
+        session = self.service.publish(
+            session.session_id,
+            idempotency_key="publish-1",
+            expected_version=session.version,
+        )
+        self.assertEqual(session.state, "published")
+        self.assertEqual(session.wordpress_result["post_id"], 123)
+        self.assertEqual(self.wordpress.calls, 1)
+
+        repeated = self.service.publish(
+            session.session_id,
+            idempotency_key="publish-1",
+            expected_version=session.version,
+        )
+        self.assertEqual(repeated.version, session.version)
+        self.assertEqual(self.wordpress.calls, 1)
+
+        regenerated = self.service.generate(
+            session.session_id,
+            shared_fields=session.shared_fields,
+            acf_source_fields=session.acf_source_fields,
+            selected_links=session.selected_links,
+            current_url=None,
+            expected_version=session.version,
+        )
+        self.assertEqual(regenerated.state, "needs_review")
+        self.assertFalse(regenerated.approval.approved)
+        self.assertIsNone(regenerated.publication_idempotency_key)
+
+        republished = self.service.approve(
+            regenerated.session_id,
+            user_id="user-1",
+            expected_version=regenerated.version,
+        )
+        republished = self.service.publish(
+            republished.session_id,
+            idempotency_key="publish-2",
+            expected_version=republished.version,
+        )
+
+        revised = self.service.generate(
+            republished.session_id,
+            shared_fields=republished.shared_fields,
+            acf_source_fields=republished.acf_source_fields,
+            selected_links=republished.selected_links,
+            current_url=None,
+            revision_instruction="Bitte den Entwurf aktualisieren.",
+            expected_version=republished.version,
+        )
+        self.assertEqual(revised.state, "needs_review")
+        self.assertFalse(revised.approval.approved)
+        self.assertIsNone(revised.publication_idempotency_key)
+
+    def test_partial_update_rebuilds_text_payload_without_previous_publish_snapshot(self) -> None:
+        session = self.service.create(user_id="user-1", post_type_key="event")
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        shared = {
+            row.field_key: self._value(
+                row.value_type,
+                row.min_words,
+                row.min_characters,
+            )
+            for row in snapshot.shared_fields
+            if row.enabled and row.include_in_ai_schema
+        }
+        acf = {
+            row.field_key: self._value(row.value_type, row.min_words)
+            for row in snapshot.acf_fields
+            if row.enabled
+            and row.post_type_key == "event"
+            and row.field_role != "input_fact"
+            and row.required_for_output
+        }
+        session = session.model_copy(
+            update={
+                "state": "ready_to_publish",
+                "approval": session.approval.model_copy(update={"approved": True}),
+                "shared_fields": shared,
+                "acf_source_fields": acf,
+                "wordpress_payload": self.service.payload_builder.build(
+                    snapshot,
+                    post_type_key=session.post_type_key,
+                    shared_values=shared,
+                    acf_source_values=acf,
+                ).model_dump(),
+                "wordpress_result": {"post_id": 123},
+                "published_wordpress_payload": {},
+            }
+        )
+        session = self.service.repository.save(session, expected_version=session.version)
+        updated_title = "Updated WordPress title"
+
+        published = self.service.publish(
+            session.session_id,
+            idempotency_key="partial-update-no-baseline",
+            expected_version=session.version,
+            target_post_id=123,
+            partial_update=True,
+            shared_fields={"post_title": updated_title},
+            acf_source_fields={},
+        )
+
+        self.assertEqual(published.state, "published")
+        self.assertEqual(self.wordpress.payloads[-1].wordpress.title, updated_title)
+        self.assertIn("title", self.wordpress.partial_update_fields[-1]["wordpress"])
+
+    def test_generation_caps_selected_internal_links_to_workbook_maximum(self) -> None:
+        session = self.service.create(user_id="user-1", post_type_key="event")
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        facts = {
+            row.field_key: self._value(row.value_type, row.min_words)
+            for row in snapshot.acf_fields
+            if row.enabled
+            and row.post_type_key == "event"
+            and row.field_role == "input_fact"
+            and row.required_for_analysis
+        }
+        session = self.service.add_inputs(
+            session.session_id,
+            manual_text="Confirmed event details.",
+            confirmed_facts=facts,
+            expected_version=session.version,
+        )
+        session = self.service.analyze(
+            session.session_id,
+            expected_version=session.version,
+        )
+        shared = {
+            row.field_key: self._value(
+                row.value_type,
+                row.min_words,
+                row.min_characters,
+            )
+            for row in snapshot.shared_fields
+            if row.enabled
+            and row.include_in_ai_schema
+        }
+        acf = {
+            row.field_key: self._value(row.value_type, row.min_words)
+            for row in snapshot.acf_fields
+            if row.enabled
+            and row.post_type_key == "event"
+            and row.field_role != "input_fact"
+            and row.required_for_output
+        }
+        eligible = self.service.internal_links.eligible(
+            snapshot,
+            post_type_key="event",
+            language="de-DE",
+            current_url=None,
+        )
+        _, maximum_links = self.service._internal_link_range(snapshot)
+        self.assertIsNotNone(maximum_links)
+        selected: list[dict[str, str]] = []
+        seen_urls: set[str] = set()
+        seen_anchors: set[str] = set()
+        for row in eligible.candidates:
+            if row.target_url in seen_urls or row.anchor_text.casefold() in seen_anchors:
+                continue
+            selected.append({"link_id": row.link_id, "anchor_text": row.anchor_text})
+            seen_urls.add(row.target_url)
+            seen_anchors.add(row.anchor_text.casefold())
+            if len(selected) > maximum_links:
+                break
+        self.assertGreater(len(selected), maximum_links)
+
+        generated = self.service.generate(
+            session.session_id,
+            shared_fields=shared,
+            acf_source_fields=acf,
+            selected_links=selected,
+            current_url=None,
+            expected_version=session.version,
+        )
+
+        self.assertLessEqual(len(generated.selected_links), maximum_links)
+        self.assertEqual(generated.selected_links, selected[:maximum_links])
+
+    def test_generation_does_not_force_extra_internal_links(self) -> None:
+        session = self.service.create(user_id="user-1", post_type_key="event")
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        facts = {
+            row.field_key: self._value(row.value_type, row.min_words)
+            for row in snapshot.acf_fields
+            if row.enabled
+            and row.post_type_key == "event"
+            and row.field_role == "input_fact"
+            and row.required_for_analysis
+        }
+        session = self.service.add_inputs(
+            session.session_id,
+            manual_text="Confirmed event details.",
+            confirmed_facts=facts,
+            expected_version=session.version,
+        )
+        session = self.service.analyze(
+            session.session_id,
+            expected_version=session.version,
+        )
+        shared = {
+            row.field_key: self._value(
+                row.value_type,
+                row.min_words,
+                row.min_characters,
+            )
+            for row in snapshot.shared_fields
+            if row.enabled
+            and row.include_in_ai_schema
+        }
+        acf = {
+            row.field_key: self._value(row.value_type, row.min_words)
+            for row in snapshot.acf_fields
+            if row.enabled
+            and row.post_type_key == "event"
+            and row.field_role != "input_fact"
+            and row.required_for_output
+        }
+        eligible = self.service.internal_links.eligible(
+            snapshot,
+            post_type_key="event",
+            language="de-DE",
+            current_url=None,
+        )
+        minimum_links, _ = self.service._internal_link_range(snapshot)
+        self.assertGreaterEqual(len(eligible.candidates), minimum_links)
+        selected = [
+            {
+                "link_id": eligible.candidates[0].link_id,
+                "anchor_text": eligible.candidates[0].anchor_text,
+            }
+        ]
+
+        generated = self.service.generate(
+            session.session_id,
+            shared_fields=shared,
+            acf_source_fields=acf,
+            selected_links=selected,
+            current_url=None,
+            expected_version=session.version,
+        )
+
+        self.assertEqual(generated.selected_links, selected)
+        self.assertEqual(generated.selected_links[0], selected[0])
+
+    def test_answer_confirms_facts_and_returns_to_ready_to_generate(self) -> None:
+        session = self.service.create(user_id="user-1", post_type_key="event")
+        snapshot = self.knowledge.by_hash(session.workbook_hash)
+        corrections = {
+            row.field_key: self._value(row.value_type, row.min_words)
+            for row in snapshot.acf_fields
+            if row.enabled
+            and row.post_type_key == "event"
+            and row.field_role == "input_fact"
+            and row.required_for_analysis
+        }
+        session = session.model_copy(
+            update={
+                "state": "needs_input",
+                "clarification_questions": ["Bitte ergänzen oder bestätigen Sie: test."],
+            }
+        )
+        session = self.service.repository.save(session, expected_version=session.version)
+
+        answered = self.service.answer(
+            session.session_id,
+            corrections=corrections,
+            expected_version=session.version,
+        )
+
+        self.assertEqual(answered.state, "ready_to_generate")
+        self.assertFalse(answered.clarification_questions)
+        self.assertTrue(answered.confirmed_facts)
+        self.assertTrue(all(fact.confirmed for fact in answered.confirmed_facts.values()))
+
+    @staticmethod
+    def _value(
+        value_type: str,
+        min_words: int | None = None,
+        min_characters: int | None = None,
+    ) -> Any:
+        if value_type == "integer":
+            return 2026
+        if value_type == "float":
+            return 1.0
+        if value_type == "boolean":
+            return True
+        if value_type == "list":
+            return ["Berlin"]
+        if value_type == "date":
+            return "2026-06-24"
+        if value_type == "enum":
+            return "company"
+        word_count = max(min_words or 1, 1)
+        value = " ".join(["Wort"] * word_count)
+        if min_characters and len(value) < min_characters:
+            value += " x" * min_characters
+        return value

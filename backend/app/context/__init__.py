@@ -1,0 +1,1 @@
+"""Field-addressable generation context."""

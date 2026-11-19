@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+import json
+from typing import Any
+
+
+def structured_task_input(
+    *,
+    task: str,
+    instructions: list[dict[str, Any]],
+    context: dict[str, Any],
+    validation_feedback: list[dict[str, Any]] | None = None,
+) -> list[dict[str, str]]:
+    """Create neutral transport text from workbook-filtered context.
+
+    Business rules and writing instructions come from the workbook context.
+    The code adds only task framing and structured-output boundaries.
+    """
+
+    post_type = context.get("post_type")
+    enrichment_policy = (
+        post_type.get("knowledge_enrichment", "forbidden")
+        if isinstance(post_type, dict)
+        else "forbidden"
+    )
+    generated_content_task = (
+        task in {
+            "content_generation",
+            "shared_field_generation",
+            "acf_field_generation",
+        }
+        or task.startswith("acf_field_generation:")
+    )
+    knowledge_enrichment_allowed = (
+        generated_content_task and enrichment_policy == "allowed"
+    )
+    factual_constraint = (
+        "You may supplement generated content fields with established general knowledge. "
+        "Never use that knowledge to create input facts or confirmed facts. Do not invent "
+        "session-specific details, identities, quotes, URLs, brands, dates, measurements, "
+        "or other exact claims. Present uncertain or disputed information cautiously."
+        if knowledge_enrichment_allowed
+        else "Do not invent facts, URLs, identities, destinations, or field keys."
+    )
+    system = {
+        "task": task,
+        "rules": [row.get("instruction_de") for row in instructions],
+        "constraints": [
+            "Return only values allowed by the supplied response schema.",
+            factual_constraint,
+        ],
+        "knowledge_enrichment": (
+            "allowed" if knowledge_enrichment_allowed else "forbidden"
+        ),
+    }
+    if generated_content_task and context.get("examples"):
+        system["constraints"].append(
+            "Use examples only as references for tone, specificity and writing quality, "
+            "following learning_for_gpt. Example content labels are references, not an output schema. "
+            "The current field schema, blueprint and instructions take precedence. "
+            "Never copy example facts, names, dates, claims or URLs unless independently "
+            "supported by the current input. Examples do not establish facts about the current post."
+        )
+    if task in {"image_metadata", "image_metadata_batch"}:
+        system["constraints"].extend(
+            [
+                "Treat image_context_transcript as the primary description of the selected picture.",
+                "Use only transcript statements that describe the picture; ignore surrounding event, article, or logistical context unless a supplied workbook rule explicitly requires it.",
+                "Use image_analysis only when it is present and do not invent visible details.",
+                "Use approved_context_facts only when they are relevant to what image_context_transcript says this selected picture shows.",
+                "If context.must_use_when_natural contains matching rules with confirmed_source_facts, apply those workbook rules in the target fields whenever the wording remains natural.",
+                "When image_analysis is absent, apply a transcript_match_rule only if image_context_transcript clearly establishes the subject or action described by that rule; then use its confirmed_source_facts naturally in its target fields.",
+                "For German human-readable metadata, use standard German Unicode orthography, including ä, ö, ü, Ä, Ö, Ü, and ß where linguistically correct; do not transliterate umlauts as ae, oe, or ue, or ß as ss. Technical filename/slug fields are exempt.",
+            ]
+        )
+    user = {
+        "context": context,
+        "validation_feedback": validation_feedback or [],
+    }
+    return [
+        {"role": "system", "content": json.dumps(system, ensure_ascii=False)},
+        {"role": "user", "content": json.dumps(user, ensure_ascii=False, default=str)},
+    ]

@@ -12,9 +12,22 @@ __pycache__
 *.pyc
 .pytest_cache
 .vscode
+frontend
+backend/tests
+docs
+integrations
+tools
+scripts
+dist
 output
 temp
 data
-snippets
-help.txt
 *.json
+
+# Keep runtime knowledge assets in the image for Cloud Run startup.
+!data/
+!data/knowledge/
+!data/knowledge/*.xlsm
+!data/knowledge/*.xlsx
+!data/knowledge/*.html
+!data/openai_image_pricing.json

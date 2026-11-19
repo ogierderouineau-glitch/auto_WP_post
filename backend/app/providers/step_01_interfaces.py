@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import Any
+
+from backend.app.models.step_01_session import ContentSession
+from backend.app.models.step_02_payload import WordPressPayload
+
+
+class SpeechToTextProvider(ABC):
+    @abstractmethod
+    def transcribe(self, audio_path: Path) -> str: ...
+
+
+class LanguageModelProvider(ABC):
+    @abstractmethod
+    def structured(self, *, task: str, context: dict[str, Any], schema: type[Any]) -> Any: ...
+
+
+class VisionProvider(ABC):
+    @abstractmethod
+    def analyze(
+        self,
+        image_path: Path,
+        schema: type[Any],
+        context: dict[str, Any],
+    ) -> Any: ...
+
+
+class ImageEditingProvider(ABC):
+    @abstractmethod
+    def edit(self, source: Path, destination: Path, instructions: dict[str, Any]) -> Path: ...
+
+
+class ObjectStorageProvider(ABC):
+    @abstractmethod
+    def put(self, source: Path, key: str) -> str: ...
+
+    @abstractmethod
+    def get(self, uri: str, destination: Path) -> Path: ...
+
+
+class WordPressProvider(ABC):
+    def registered_taxonomy_candidates(
+        self,
+        taxonomies: dict[str, list[str]],
+    ) -> dict[str, list[str]]:
+        return taxonomies
+
+    def taxonomy_term_names(self, taxonomy: str) -> list[str]:
+        """Every existing term name of a WordPress taxonomy (empty when unknown)."""
+        return []
+
+    def find_media(self, url: str) -> dict[str, Any] | None:
+        """Look up an item of the site's media library by its file URL."""
+        return None
+
+    @abstractmethod
+    def publish(
+        self,
+        *,
+        session: ContentSession,
+        payload: WordPressPayload,
+        idempotency_key: str,
+        target_post_id: int | None = None,
+        force_create_new: bool = False,
+        partial_update_fields: dict[str, set[str]] | None = None,
+    ) -> dict[str, Any]: ...

@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, field_validator
+
+from backend.model_settings import (
+    LanguageModel, ReasoningEffort, resolve_model, resolve_reasoning_effort,
+)
+
+from backend.app.models.step_01_session import ContentSession
+
+
+class CreateSessionRequest(BaseModel):
+    user_id: str
+    post_type_key: str
+
+
+class InputsRequest(BaseModel):
+    expected_version: int
+    manual_text: str | None = None
+    confirmed_facts: dict[str, Any] = Field(default_factory=dict)
+
+
+class VersionedRequest(BaseModel):
+    expected_version: int
+
+
+class KeywordSelectionRequest(VersionedRequest):
+    keywords: list[str] = Field(default_factory=list, max_length=12)
+
+
+class SessionNameRequest(VersionedRequest):
+    name: str | None = Field(default=None, max_length=80)
+
+
+class GenerationSettingsRequest(VersionedRequest):
+    _resolve_model = field_validator("language_model", mode="before")(resolve_model)
+    _resolve_effort = field_validator("reasoning_effort", mode="before")(resolve_reasoning_effort)
+
+    language_model: LanguageModel
+    reasoning_effort: ReasoningEffort
+    generation_mode: Literal["batched", "single"] = "single"
+
+
+class AnalyzeRequest(VersionedRequest):
+    review_fact_keys: list[str] | None = None
+
+
+class AnswersRequest(VersionedRequest):
+    corrections: dict[str, Any]
+
+
+class GenerateRequest(VersionedRequest):
+    shared_fields: dict[str, Any] = Field(default_factory=dict)
+    acf_source_fields: dict[str, Any] = Field(default_factory=dict)
+    selected_links: list[dict[str, str]] = Field(default_factory=list)
+    current_url: str | None = None
+    use_vision_for_image_metadata: bool = True
+    ai_assisted_link_placement: bool = False
+    link_placement_only: bool = False
+    revision_instruction: str | None = None
+
+
+class DraftChatRequest(GenerateRequest):
+    message: str
+    revision_field_ids: list[str] | None = None
+
+
+class DraftFieldsUpdateRequest(VersionedRequest):
+    shared_fields: dict[str, Any] = Field(default_factory=dict)
+    acf_source_fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class LinkCandidatesRequest(VersionedRequest):
+    action: Literal["add", "remove", "refresh"]
+    link_id: str | None = None
+
+
+class InsertLinkRequest(VersionedRequest):
+    field_key: str
+    url: str = Field(min_length=1, max_length=4096)
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    selected_text: str = Field(min_length=1)
+
+
+class ApproveRequest(VersionedRequest):
+    user_id: str
+
+
+class PublishRequest(VersionedRequest):
+    idempotency_key: str
+    target_post_id: int | None = None
+    force_create_new: bool = False
+    partial_update: bool = False
+    shared_fields: dict[str, Any] = Field(default_factory=dict)
+    acf_source_fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class ImageMetadataUpdateRequest(VersionedRequest):
+    filename: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    use_vision_for_metadata: bool | None = None
+
+
+class ImageContextTranscriptUpdateRequest(VersionedRequest):
+    filename: str
+    transcript: str = ""
+
+
+class VideoMetadataUpdateRequest(VersionedRequest):
+    filename: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    transcript: str = ""
+
+
+class FeaturedImageRequest(VersionedRequest):
+    filename: str
+
+
+class ImageOptimizationRequest(VersionedRequest):
+    filename: str
+    prompt: str
+
+
+class SessionsDeleteRequest(BaseModel):
+    session_ids: list[str] = Field(default_factory=list)
+
+
+class SessionResponse(BaseModel):
+    session: ContentSession
