@@ -21,14 +21,15 @@ function withLinks(text: string) {
 export function ErrorText({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
   const match = DETAILS.exec(text)
-  if (!match) return <>{withLinks(text)}</>
+  // pre-line: messages may hold a list, one problem per line
+  if (!match) return <span className="whitespace-pre-line">{withLinks(text)}</span>
   return (
-    <>
+    <span className="whitespace-pre-line">
       {withLinks(match[1])}{" "}
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="whitespace-nowrap underline opacity-80">
         {open ? "Hide technical details" : "Show technical details"}
       </button>
       {open && <span className="mt-1 block select-all break-words font-mono text-[0.85em] opacity-80">{match[2]}</span>}
-    </>
+    </span>
   )
 }

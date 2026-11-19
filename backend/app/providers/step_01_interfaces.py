@@ -48,6 +48,10 @@ class WordPressProvider(ABC):
     ) -> dict[str, list[str]]:
         return taxonomies
 
+    def taxonomy_term_names(self, taxonomy: str) -> list[str]:
+        """Every existing term name of a WordPress taxonomy (empty when unknown)."""
+        return []
+
     def find_media(self, url: str) -> dict[str, Any] | None:
         """Look up an item of the site's media library by its file URL."""
         return None

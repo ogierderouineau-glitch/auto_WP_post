@@ -43,6 +43,11 @@ class ExistingWordPressProvider(WordPressProvider):
     }
 
     @staticmethod
+    def taxonomy_term_names(taxonomy: str) -> list[str]:
+        terms = registered_terms(taxonomy_terms_endpoint(taxonomy))
+        return [name for term in terms if (name := str(term.get("name") or "").strip())]
+
+    @staticmethod
     def registered_taxonomy_candidates(
         taxonomies: dict[str, list[str]],
     ) -> dict[str, list[str]]:

@@ -18,7 +18,7 @@ from backend.app.api.step_03_container import (
     reload_v2_knowledge_if_initialized,
     v2_readiness,
 )
-from backend.app.errors import V2Error
+from backend.app.errors import V2Error, workbook_upload_message
 from backend.app.knowledge_base.step_02_loader import WorkbookLoader
 from backend.app.knowledge_base.step_03_validator import WorkbookValidator
 from backend.app.observability import V2RequestLoggingMiddleware
@@ -133,7 +133,7 @@ async def upload_knowledge_workbook(
         reload_v2_knowledge_if_initialized()
         return {"success": True, "message": "Database Datei aktualisiert."}
     except V2Error as exc:
-        raise HTTPException(status_code=400, detail=exc.as_dict()) from exc
+        raise HTTPException(status_code=400, detail=workbook_upload_message(exc)) from exc
     finally:
         temporary.unlink(missing_ok=True)
 

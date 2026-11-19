@@ -684,7 +684,8 @@ export function OtherFunctionsDrawer({
                 Aktuelle Database Datei herunterladen
               </button>
             </div>
-            {workbookMessage && <p role={workbookSuccess ? "status" : "alert"} className={`mt-3 rounded-lg border p-3 text-sm font-semibold ${workbookSuccess ? "border-confirm/40 bg-confirm/10 text-foreground" : "border-destructive/40 bg-destructive/10 text-foreground"}`}>{workbookSuccess && <Check className="mr-2 inline size-4 text-confirm" />}{workbookMessage}</p>}
+            {workbook?.workbook_error && !workbookMessage && <p role="alert" className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm font-semibold text-foreground"><ErrorText text={workbook.workbook_error} /></p>}
+            {workbookMessage && <p role={workbookSuccess ? "status" : "alert"} className={`mt-3 rounded-lg border p-3 text-sm font-semibold ${workbookSuccess ? "border-confirm/40 bg-confirm/10 text-foreground" : "border-destructive/40 bg-destructive/10 text-foreground"}`}>{workbookSuccess && <Check className="mr-2 inline size-4 text-confirm" />}<ErrorText text={workbookMessage} /></p>}
           </Section>
 
           <Section title="Credentials" icon={<KeyRound className="size-4 text-gold" aria-hidden="true" />}>

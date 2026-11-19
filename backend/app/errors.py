@@ -87,9 +87,33 @@ class V2Error(Exception):
         }
 
 
+def problem_lines(exc: V2Error, max_lines: int = 30) -> list[str]:
+    """One line per detail (sheet, row, column, message) so the user can find each problem."""
+    lines = [
+        f"• {d.sheet or 'workbook'}" + (f", row {d.row}" if d.row else "") + (f", column {d.column}" if d.column else "")
+        + f": {d.message} ({d.error_code})"
+        for d in exc.details[:max_lines]
+    ]
+    if len(exc.details) > max_lines:
+        lines.append(f"… and {len(exc.details) - max_lines} more.")
+    return lines
+
+
 class InvalidWorkbookError(V2Error):
     error_code = "invalid_workbook"
     http_status = 500
+
+    def as_dict(self) -> dict[str, Any]:
+        # Screens show only "message", so the list of problems must be part of it.
+        data = super().as_dict()
+        data["message"] = "\n".join([self.message, "Fix these rows in the workbook file and upload it again:", *problem_lines(self)])
+        return data
+
+
+def workbook_upload_message(exc: V2Error) -> str:
+    """Rejected workbook upload: what to do, then one line per problem."""
+    intro = "The workbook was not loaded because it contains errors. The previous workbook is still active. Fix the rows below in the Excel file and upload it again."
+    return "\n".join([intro, *problem_lines(exc)]) if exc.details else f"{intro} {exc.message}"
 
 
 class UnknownPostTypeError(V2Error):

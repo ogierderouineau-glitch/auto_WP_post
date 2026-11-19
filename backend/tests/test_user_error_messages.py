@@ -55,3 +55,46 @@ def test_unexpected_error_returns_reference_and_raw_error():
     message = response.json()["message"]
     assert response.status_code == 500
     assert "reference" in message and "RuntimeError: provider not configured" in message
+
+
+def test_workbook_upload_message_lists_every_problem_with_sheet_and_row() -> None:
+    from backend.app.errors import ErrorDetail, InvalidWorkbookError, workbook_upload_message
+
+    errors = [
+        ErrorDetail("sheet_a", 14, "col_x", "bad_value", "Value does not resolve."),
+        ErrorDetail("sheet_b", None, None, "missing", "Sheet is required."),
+    ]
+    text = workbook_upload_message(InvalidWorkbookError("Workbook validation failed with 2 error(s).", details=errors))
+
+    assert text.startswith("The workbook was not loaded")
+    assert "• sheet_a, row 14, column col_x: Value does not resolve. (bad_value)" in text
+    assert "• sheet_b: Sheet is required. (missing)" in text
+
+
+def test_invalid_workbook_error_carries_its_problem_list_in_the_message() -> None:
+    from backend.app.errors import ErrorDetail, InvalidWorkbookError
+
+    exc = InvalidWorkbookError(
+        "Workbook validation failed with 1 error(s).",
+        details=[ErrorDetail("sheet_a", 3, "col_x", "bad_value", "Value does not resolve.")],
+    )
+    assert "• sheet_a, row 3, column col_x: Value does not resolve." in exc.as_dict()["message"]
+
+
+def test_workbook_status_reports_an_invalid_workbook_instead_of_failing() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from backend.app.api.step_02_routes import create_router
+    from backend.app.errors import ErrorDetail, InvalidWorkbookError
+
+    def broken():
+        raise InvalidWorkbookError("bad", details=[ErrorDetail("s", 1, "c", "x", "Problem.")])
+
+    service = SimpleNamespace(knowledge=SimpleNamespace(current=broken))
+    router = create_router(lambda *a, **k: service, lambda: None, lambda: {})
+    status = next(r.endpoint for r in router.routes if getattr(r, "path", "").endswith("/_workbook") and "GET" in r.methods)
+
+    result = asyncio.run(status(post_type_key=None))
+
+    assert result["post_types"] == [] and "• s, row 1, column c: Problem." in result["workbook_error"]

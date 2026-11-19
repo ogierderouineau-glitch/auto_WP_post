@@ -183,6 +183,31 @@ class ContentSessionService:
             for key, value in values.items()
         }
 
+    def _fact_term_choices(
+        self, snapshot: Any, session: ContentSession, input_rows: list[Any]
+    ) -> dict[str, tuple[str, ...]]:
+        """Existing WordPress terms for facts that feed a taxonomy (taxonomies tab, source acf:<fact>).
+
+        The model must pick from these. If WordPress cannot be reached we return nothing, so
+        extraction falls back to free text taken from the transcript instead of failing.
+        """
+        if self.wordpress is None:
+            return {}
+        fact_keys = {row.field_key for row in input_rows if row.value_type in ("list", "string")}
+        choices: dict[str, tuple[str, ...]] = {}
+        for config in snapshot.taxonomies:
+            kind, _, key = config.taxonomy_term_source.partition(":")
+            if config.post_type_key not in ("*", session.post_type_key) or kind != "acf" or key not in fact_keys:
+                continue
+            try:
+                terms = tuple(dict.fromkeys(self.wordpress.taxonomy_term_names(config.wp_taxonomy)))
+            except Exception as exc:  # a failed lookup must not block extraction
+                self._milestone(session, f"taxonomy terms unavailable taxonomy={config.wp_taxonomy} error={exc}")
+                continue
+            if terms:
+                choices[key] = terms
+        return choices
+
     def create(self, *, user_id: str, post_type_key: str) -> ContentSession:
         snapshot = self.knowledge.current()
         post_type = snapshot.post_type(post_type_key)
@@ -1047,9 +1072,11 @@ class ContentSessionService:
                 family: tuple(snapshot.validation_family(family))
                 for family in {row.format_or_enum for row in input_rows if row.format_or_enum}
             }
+            term_choices = self._fact_term_choices(snapshot, session, input_rows)
             response_model = build_fact_extraction_model(
                 input_rows,
                 enum_families=enum_families,
+                term_choices=term_choices,
             )
             instructions = [
                 row.model_dump(exclude={"sheet_row"})
@@ -1066,7 +1093,10 @@ class ContentSessionService:
                     "manual_text": session.manual_text,
                     "transcript": session.transcript,
                     "fact_schema": [
-                        row.model_dump(exclude={"sheet_row"})
+                        {
+                            **row.model_dump(exclude={"sheet_row"}),
+                            **({"allowed_terms": term_choices[row.field_key]} if row.field_key in term_choices else {}),
+                        }
                         for row in input_rows
                     ],
                 },
@@ -1095,7 +1125,10 @@ class ContentSessionService:
                     confirmed=False,
                 )
                 extracted[key] = fact
-                if review_fact_keys is not None:
+                # Re-extraction replaces values the app confirmed itself; only a value the user
+                # typed (user_correction) survives, unless that fact was explicitly selected for review.
+                previous = confirmed.get(key)
+                if review_fact_keys is not None or (previous and previous.source != "user_correction"):
                     confirmed.pop(key, None)
             session = session.model_copy(
                 update={"extracted_facts": extracted, "confirmed_facts": confirmed}

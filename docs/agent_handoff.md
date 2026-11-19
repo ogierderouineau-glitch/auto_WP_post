@@ -101,6 +101,19 @@ Video ACF destinations are the post type's enabled `direct_acf` rows whose name 
 with `video_url` / `video_poster` (a hard-coded exact name used to drop videos silently
 for post types such as `event_video_url`).
 
+Invalid workbook: an upload is validated before it replaces the live file, so a rejected upload changes
+nothing. If the live file itself is invalid (edited by hand), `GET /_workbook` answers normally with
+no post types and `workbook_error` (one line per problem); the Other functions drawer shows it next to
+the upload button. Other routes that need the workbook still fail with the same message.
+
+Taxonomy-backed facts: an `input_fact` row whose key is the `acf:<fact>` source of a `taxonomies`
+row (value_type `list` or `string`) is limited during fact extraction to the existing WordPress
+terms of that taxonomy (`_fact_term_choices` in step_03_service.py, `term_choices` in
+`build_fact_extraction_model`; the terms are also sent to the model as `allowed_terms`). The model
+matches the transcript to a term by meaning, so the row's `guidance_de` should say so. If
+WordPress cannot be reached the fact falls back to free text and a milestone line is logged. Needs
+a live test; only mocked tests exist. Limit: one enum per fact, the longest list today is 75 terms.
+
 Relationship / post-object ACF fields (the WordPress schema lists `items: integer`) only
 accept lists of post IDs. At publish time `_prepare_acf_payload` turns the names in such a
 field (text split on `;` and `,`, or a list) into IDs with `find_linked_posts`

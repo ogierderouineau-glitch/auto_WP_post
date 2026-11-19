@@ -48,6 +48,7 @@ from backend.app.api.step_03_container import client_knowledge_gcs_uri
 from backend.app.errors import (
     DraftValidationError,
     InvalidUploadError,
+    InvalidWorkbookError,
     SessionBusyError,
     SessionOwnershipError,
     V2Error,
@@ -87,7 +88,12 @@ def create_router(
         post_type_key: str | None = Query(default=None),
     ) -> dict[str, Any]:
         service = service_provider()
-        snapshot = service.knowledge.current()
+        try:
+            snapshot = service.knowledge.current()
+        except InvalidWorkbookError as exc:
+            # Not a screen error: the app still opens and the workbook section of "Other functions"
+            # shows the problems, so the user can upload a corrected file.
+            return {"workbook_error": exc.as_dict()["message"], "post_types": [], "fact_schema": []}
         selectable_post_types = [
             row
             for row in snapshot.post_types

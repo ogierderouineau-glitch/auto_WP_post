@@ -102,8 +102,11 @@ def build_fact_extraction_model(
     *,
     name: str = "FactExtractionResponse",
     enum_families: dict[str, tuple[Any, ...]] | None = None,
+    term_choices: dict[str, tuple[str, ...]] | None = None,
 ) -> type[BaseModel]:
+    """term_choices: fact key -> existing taxonomy terms; the model may only return those."""
     enum_families = enum_families or {}
+    term_choices = term_choices or {}
     fields = {
         row.field_key: _field_definition(
             row,
@@ -113,6 +116,14 @@ def build_fact_extraction_model(
         for row in rows
         if row.enabled and row.field_role == "input_fact"
     }
+    for key, terms in term_choices.items():
+        if key in fields:
+            term = Literal.__getitem__(terms)
+            row = next(r for r in rows if r.field_key == key)
+            fields[key] = (
+                (list[term] if row.value_type == "list" else term) | None,
+                fields[key][1],
+            )
     return create_model(
         name,
         __config__=ConfigDict(extra="forbid"),

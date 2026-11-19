@@ -34,6 +34,7 @@ export type FactSchemaField = {
 }
 
 export type WorkbookStatus = {
+  workbook_error?: string // set when the current workbook file is invalid
   filename?: string
   sha256?: string
   storage_mode?: string

@@ -127,3 +127,46 @@ async def check_rename_api(tmp_path):
             assert stale.status_code == 409
     finally:
         set_active_client(DEFAULT_CLIENT_ID)
+
+
+class FactProvider:
+    """Returns the next queued list of dishes for every fact_extraction call."""
+
+    def __init__(self, *answers):
+        self.answers = list(answers)
+
+    def structured(self, *, task, context, schema):
+        return schema(dish_types=self.answers.pop(0)) if task == "fact_extraction" else schema(name="Name")
+
+
+def test_reextraction_replaces_app_confirmed_facts_but_keeps_user_corrections(tmp_path):
+    row = SimpleNamespace(
+        field_key="dish_types", field_role="input_fact", enabled=True, post_type_key="battery_case_27",
+        value_type="list", description_de="", format_or_enum=None, min_words=None, max_words=None,
+        required_for_analysis=False, required_for_output=False, source_mode="", source_fact_keys=[], model_dump=lambda **_: {"field_key": "dish_types"},
+    )
+    snapshot = SimpleNamespace(acf_fields=[row], agent_instructions=[], application_states=[], taxonomies=[])
+    repository = FileSessionRepository(tmp_path)
+    session = repository.create(ContentSession(
+        session_id="s", user_id="u", post_type_key="battery_case_27", state="ready_to_generate",
+        workbook_hash="hash", language="en", manual_text="first text", name="n", name_generation_attempted=True,
+    ))
+    service = ContentSessionService(
+        knowledge=SimpleNamespace(by_hash=lambda _: snapshot), repository=repository,
+        language_model=FactProvider(["Risotto"], ["Tiramisu"], ["Pizza"]),
+    )
+
+    first = service.analyze("s", expected_version=session.version)
+    assert first.confirmed_facts["dish_types"].value == ["Risotto"]
+
+    second = service.analyze("s", expected_version=first.version)  # new transcript pieces, new answer
+    assert second.confirmed_facts["dish_types"].value == ["Tiramisu"]
+
+    # A value the user typed is kept on the next full extraction.
+    corrected = second.model_copy(update={"confirmed_facts": {
+        "dish_types": second.confirmed_facts["dish_types"].model_copy(update={"source": "user_correction", "value": ["Soup"]}),
+    }})
+    saved = repository.save(corrected, expected_version=second.version)
+    third = service.analyze("s", expected_version=saved.version)
+    assert third.confirmed_facts["dish_types"].value == ["Soup"]
+    assert third.extracted_facts["dish_types"].value == ["Pizza"]
